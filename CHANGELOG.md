@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- **Smart passes.** The add panel now offers **Smart Pass** (a sports team, or a
+  smart filter) and **Programme or Series**.
+- A smart filter is a nested tree of conditions. A group matches all, any or
+  none of what it holds, and groups nest to any depth. It can ask about title,
+  series, description, genre, content rating, year, kind, first shown, length,
+  channel, network, high definition and live.
+- Content rating and running time are now stored, so a filter can ask about
+  them. Both fill in on the next guide sync.
+- Every condition carries **or blank**, because the guide rates only part of
+  itself and a missing value silently defeats a negative condition otherwise.
+- The panel counts what a filter would record, and shows the first matches,
+  before anything is created. A loose or large filter has to be confirmed a
+  second time, with the number on the button.
+
 ### Tests
 
 - A test suite, 195 checks, in `tests/`. It runs against a fake Plex server

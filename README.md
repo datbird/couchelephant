@@ -35,6 +35,9 @@ It also does two things Plex cannot say at all:
 - **Limit a rule to several networks or channels.** A Plex rule takes one
   channel, or none. "Only ABC, CBS and FOX" cannot be expressed to Plex, so
   CouchElephant keeps that rule itself and books each airing as it comes.
+- **Record by conditions rather than by name.** A smart filter is a nested tree:
+  "comedy or sci-fi, not rated TV-MA, first shown after 2015, in HD". Plex rules
+  follow one programme or one team and cannot be given conditions at all.
 - **Always take the live broadcast**, for every game a team plays, without you
   looking at the guide.
 
@@ -144,10 +147,11 @@ Full instructions are in [docs/INSTALL.md](docs/INSTALL.md).
 ./scripts/test.sh
 ```
 
-195 checks: the airing choice, the pin, the Plex client against a fake server
-that reproduces the real one's quirks, every endpoint, and a browser suite that
-drives the guide, the record panel, the recordings page, settings, the phone
-layout and first run. It refuses to start unless every path it would write to
+259 checks: the airing choice, the pin, the smart filter compiler, the Plex
+client against a fake server that reproduces the real one's quirks, every
+endpoint, and a browser suite that drives the guide, the record panel, the
+recordings page, the smart filter builder, settings, the phone layout and
+first run. It refuses to start unless every path it would write to
 is scratch. See [docs/DEVELOPING.md](docs/DEVELOPING.md).
 
 ## Documentation

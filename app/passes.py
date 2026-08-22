@@ -17,7 +17,7 @@ Selection order for a game:
 """
 import time
 
-from . import db
+from . import db, smartfilter
 from .plex import Plex, PlexError
 
 # Give a game this much slack before treating it as too late to schedule.
@@ -66,8 +66,32 @@ def series_airings(series_guid, horizon_days=30):
     return out
 
 
+def smart_airings(tree, horizon_days=30):
+    """Future airings matching a smart filter.
+
+    Compiled to SQL and asked of the database, rather than pulled into Python
+    and sifted. A loose filter can match thousands of rows, and the whole point
+    of the count in the panel is that it comes back before the user has given up.
+    """
+    frag, args = smartfilter.build(tree)
+    cutoff = _now() - LEAD_SECONDS
+    limit = _now() + horizon_days * 86400
+    return db.query(
+        f"""SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary,
+                   c.network AS channel_network
+            FROM airings a
+            JOIN programs p ON p.guid = a.program_guid
+            LEFT JOIN channels c ON c.vcn = a.channel_vcn
+            WHERE a.begins_at BETWEEN ? AND ? AND {frag}
+            ORDER BY a.begins_at""",
+        (cutoff, limit, *args),
+    )
+
+
 def rule_airings(rule, horizon_days=30):
     """Everything a rule could record, before the source limit is applied."""
+    if rule["kind"] == "smart":
+        return smart_airings(db.unjs(rule["filter"], {}) or {}, horizon_days)
     if rule["kind"] == "series":
         return series_airings(rule["series_guid"] or rule["series_title"], horizon_days)
     return candidate_airings(rule["team_id"], horizon_days)
@@ -245,6 +269,12 @@ def forget(airing_id):
 
 
 def rule_label(rule):
+    keys = rule.keys()
+    if rule["kind"] == "smart":
+        named = rule["label"] if "label" in keys else None
+        if named:
+            return named
+        return smartfilter.describe(db.unjs(rule["filter"], {}) or {})
     return rule["team_name"] or rule["series_title"] or "rule"
 
 
@@ -263,7 +293,14 @@ def run_passes(force_dry_run=None):
     for p in rows:
         label = rule_label(p)
         networks, channels = allowed_sources(p)
-        games = group_by_game(rule_airings(p))
+        try:
+            games = group_by_game(rule_airings(p))
+        except smartfilter.FilterError as e:
+            # One unusable filter must not stop every other pass running.
+            _log(p["id"], None, "failed", f"the filter cannot be read: {e}", dry)
+            results.append({"pass": label, "game": "", "action": "failed",
+                            "reason": f"the filter cannot be read: {e}"})
+            continue
         for guid, airings in games.items():
             # The source limit is applied before the choice, not after, so the
             # rule picks the best airing among the ones it is allowed to use

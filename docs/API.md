@@ -34,8 +34,10 @@ JSON body rather than a redirect.
 | --- | --- |
 | `GET /api/rules` | Every rule, ours and Plex's own, with what it follows and where it may record from |
 | `GET /api/rules/options` | Plex's own choices for a rule. `kind` (`team`/`series`), `team_id` or `series` |
-| `POST /api/rules` | Create one. With no source limit this books a plain Plex rule instead |
-| `POST /api/rules/{id}` | Change a pass: `networks`, `channels`, `enabled` |
+| `POST /api/rules` | Create one. `kind` is `team`, `series` or `smart`. With no source limit a team or series rule becomes a plain Plex rule instead; a smart one is always ours |
+| `POST /api/rules/{id}` | Change a pass: `networks`, `channels`, `enabled`, `settings`, and for a smart pass `filter` and `name` |
+| `GET /api/filter/fields` | What a smart filter can ask about: fields, the comparisons each kind accepts, the values in your guide, and how much of it carries a content rating |
+| `POST /api/filter/preview` | Count what a filter would record before creating it. `filter` (JSON tree), `networks`, `channels`. Returns the count, a sample, and a warning when it is loose |
 | `GET /api/rules/{id}/upcoming` | What that pass will record next, and why it chose each broadcast |
 | `POST /api/plexrule/{key}/delete` | Remove one of Plex's own rules |
 | `POST /passes/{id}/toggle` | Pause or resume a pass |

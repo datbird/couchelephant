@@ -343,11 +343,23 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   var ovl = document.getElementById('ovl'), box = document.getElementById('ovlbox');
   if (!opener || !ovl || !box) return;
 
-  var st = {kind: 'team', team: null, series: null, nets: [], chans: [],
-            tpl: null, pick: 0, editing: null, q: ''};
+  // `mode` is the choice the user makes first; `kind` is what the server is
+  // told. A Smart Pass is either a sports team or a filter, and those are two
+  // different kinds underneath, so the two are kept apart rather than one
+  // being derived from the other at the last moment.
+  var st = {mode: 'smart', sub: 'team', kind: 'team',
+            team: null, series: null, nets: [], chans: [],
+            tpl: null, pick: 0, editing: null, q: '',
+            tree: null, name: '', preview: null, confirmed: false};
   // One picker, kept across panel rebuilds so its fetched list is not
   // re-requested every time the panel redraws.
   st.picker = new CE.SourcePicker(st, paint);
+  st.filter = new CE.SmartFilter(st, onFilterEdit);
+
+  function syncKind() {
+    st.kind = st.mode === 'series' ? 'series'
+            : st.sub === 'filter' ? 'smart' : 'team';
+  }
 
   function shut() { ovl.classList.remove('show'); box.innerHTML = ''; }
   ovl.addEventListener('click', function (e) { if (e.target === ovl) shut(); });
@@ -355,11 +367,17 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     if (e.key === 'Escape' && ovl.classList.contains('show')) shut();
   });
 
-  function chosen() { return st.kind === 'team' ? st.team : st.series; }
+  function chosen() {
+    if (st.kind === 'smart') return st.filter.usable();
+    return st.kind === 'team' ? st.team : st.series;
+  }
   function chosenName() { return st.kind === 'team' ? (st.team && st.team.name) : st.series; }
 
-  // Who ends up owning it, said before the button is pressed.
+  // Who ends up owning it, said before the button is pressed. A smart filter
+  // has no Plex form at all: Plex rules follow one programme or one team, and
+  // a condition tree is not something they can be told.
   function verdict() {
+    if (st.kind === 'smart') return 'ce';
     return (st.nets.length || st.chans.length) ? 'ce' : 'plex';
   }
 
@@ -371,17 +389,31 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     }
     st.picker.paint();
     var go = document.getElementById('rgo');
-    if (go) go.disabled = !st.editing && !chosen();
+    if (go) {
+      go.disabled = !st.editing && !chosen();
+      if (st.kind === 'smart' && !st.editing) {
+        var big = st.preview && (st.preview.over || st.preview.loose);
+        go.textContent = big && !st.confirmed
+          ? 'Create ' + st.preview.count + ' recordings'
+          : 'Create schedule';
+        go.classList.toggle('danger', !!(big && !st.confirmed));
+      }
+    }
     var bar = document.getElementById('optbar');
     if (bar) {
       var v = verdict();
       bar.className = 'optbar ' + v;
-      bar.innerHTML = '<i class="own ' + v + '"></i><span>' + (v === 'ce'
+      var why = st.kind === 'smart'
+        ? '<b>CouchElephant schedule.</b> A Plex rule follows one programme or ' +
+          'one team. It cannot be given conditions, so CouchElephant keeps this ' +
+          'rule and books each airing itself.'
+        : v === 'ce'
         ? '<b>CouchElephant schedule.</b> It watches the guide and books each ' +
           'airing itself, because a Plex rule takes one channel and you have ' +
           'named more than one source.'
         : '<b>Plex schedule.</b> This becomes an ordinary Plex rule, and Plex ' +
-          'takes it from here.') + '</span>';
+          'takes it from here.';
+      bar.innerHTML = '<i class="own ' + v + '"></i><span>' + why + '</span>';
     }
   }
 
@@ -424,6 +456,99 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
                'Plex takes one channel. This takes as many as you like.', 'wide');
   }
 
+  // ---- the smart filter -------------------------------------------------
+  //
+  // The tree, a name for it, and the count. The count is not decoration: a
+  // filter reads like one thing and books hundreds, so the number of
+  // recordings this would make is on screen before the button will work.
+
+  function smartSection() {
+    var h = '<div class="ovlsec"><h3>Conditions</h3>';
+    var meta = CE.smartMeta();
+    if (meta && meta.coverage && meta.coverage.programs) {
+      var c = meta.coverage;
+      if (c.rated < c.programs) {
+        h += '<div class="note" style="margin-bottom:8px">The guide gives a ' +
+             'content rating for ' + c.rated + ' of ' + c.programs + ' programmes. ' +
+             'Tick <b>or blank</b> on a condition to include the ones it does not ' +
+             'rate.</div>';
+      }
+    }
+    h += st.filter.html();
+    h += '<div class="field" style="margin-top:12px"><label for="sfname">Name</label>' +
+         '<input id="sfname" value="' + esc(st.name) + '" ' +
+         'placeholder="Optional. Left blank, it is named after its conditions."></div>';
+    h += '<div id="sfcount" class="sfcount">Counting what this would record...</div>';
+    h += '<div id="sfsample" class="sfsample" hidden></div>';
+    return h + '</div>';
+  }
+
+  var previewTimer = null;
+
+  function onFilterEdit() {
+    // A changed filter is a different question, so a previous yes to a large
+    // one does not carry over to it.
+    st.confirmed = false;
+    paint();
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(preview, 350);
+  }
+
+  function preview() {
+    var box2 = document.getElementById('sfcount');
+    if (!box2) return;
+    if (!st.filter.usable()) {
+      box2.className = 'sfcount';
+      box2.textContent = 'Add a condition, and this says how much it would record.';
+      var s0 = document.getElementById('sfsample');
+      if (s0) s0.hidden = true;
+      st.preview = null;
+      paint();
+      return;
+    }
+    box2.className = 'sfcount';
+    box2.textContent = 'Counting what this would record...';
+    fetch('/api/filter/preview', {method: 'POST', body: new URLSearchParams({
+      filter: JSON.stringify(st.tree),
+      networks: JSON.stringify(st.nets),
+      channels: JSON.stringify(st.chans)
+    })}).then(CE.readJson).then(function (d) {
+      var el = document.getElementById('sfcount');
+      if (!el) return;
+      st.preview = d.ok ? d : null;
+      if (!d.ok) {
+        el.className = 'sfcount bad';
+        el.textContent = d.error || 'That filter cannot be read.';
+        paint();
+        return;
+      }
+      el.className = 'sfcount' + (d.over ? ' bad' : d.loose || !d.count ? ' warn' : '');
+      el.innerHTML = '<b>' + d.count + '</b><span>' +
+        (d.count === 1 ? 'programme matches' : 'programmes match') +
+        ' in the next 30 days' + (d.count ? ', and every one would be recorded' : '') +
+        '.</span>' + (d.warning ? '<span>' + esc(d.warning) + '</span>' : '');
+      var sam = document.getElementById('sfsample');
+      if (sam) {
+        if (!d.sample.length) { sam.hidden = true; sam.innerHTML = ''; }
+        else {
+          var t = '<table>';
+          d.sample.forEach(function (u) {
+            t += '<tr><td>' + (u.parent ? '<span class="dim tiny">' + esc(u.parent) +
+                 '</span><br>' : '') + '<b>' + esc(u.title) + '</b></td>' +
+                 '<td class="dim" style="white-space:nowrap">' + CE.fmtWhen(u.b) +
+                 '<br>' + esc(u.vcn + ' ' + u.call_sign) + '</td></tr>';
+          });
+          sam.innerHTML = t + '</table>';
+          sam.hidden = false;
+        }
+      }
+      paint();
+    }).catch(function () {
+      var el = document.getElementById('sfcount');
+      if (el) { el.className = 'sfcount bad'; el.textContent = 'Could not reach CouchElephant.'; }
+    });
+  }
+
   function render() {
     var h = '';
     h += '<div class="ovlhead"><div class="ovlmeta">' +
@@ -435,22 +560,43 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
     if (!st.editing) {
       h += '<div class="ovlsec"><h3>What to follow</h3>';
-      [['team', 'A team', 'every game it plays'],
-       ['series', 'A programme', 'every episode the guide carries']].forEach(function (k) {
-        h += '<label class="pickrow' + (st.kind === k[0] ? ' on' : '') + '">' +
-             '<input type="radio" name="rkind" value="' + k[0] + '"' +
-             (st.kind === k[0] ? ' checked' : '') + '>' +
+      [['smart', 'Smart Pass', 'sports teams, or a smart filter'],
+       ['series', 'Programme or Series', 'every episode the guide carries']
+      ].forEach(function (k) {
+        h += '<label class="pickrow' + (st.mode === k[0] ? ' on' : '') + '">' +
+             '<input type="radio" name="rmode" value="' + k[0] + '"' +
+             (st.mode === k[0] ? ' checked' : '') + '>' +
              '<span>' + k[1] + '</span><span class="note">' + k[2] + '</span></label>';
       });
       h += '</div>';
 
-      h += '<div class="ovlsec"><h3>' +
-           (st.kind === 'team' ? 'Which team' : 'Which programme') + '</h3>' +
-           '<div class="rpicked">Following: <b id="rpick">nothing yet</b></div>' +
-           '<input class="fsearch rq" id="rq" autocomplete="off" value="' + esc(st.q) +
-           '" placeholder="' +
-           (st.kind === 'team' ? 'Search teams...' : 'Search programmes in the guide...') +
-           '"><div class="rlist" id="rlist"></div></div>';
+      if (st.mode === 'smart') {
+        h += '<div class="ovlsec"><h3>Which kind of smart pass</h3>';
+        [['team', 'Sports team', 'every game it plays, from the live broadcast'],
+         ['filter', 'Smart filter', 'anything in the guide matching your conditions']
+        ].forEach(function (k) {
+          h += '<label class="pickrow' + (st.sub === k[0] ? ' on' : '') + '">' +
+               '<input type="radio" name="rsub" value="' + k[0] + '"' +
+               (st.sub === k[0] ? ' checked' : '') + '>' +
+               '<span>' + k[1] + '</span><span class="note">' + k[2] + '</span></label>';
+        });
+        h += '</div>';
+      }
+
+      if (st.kind === 'smart') {
+        h += smartSection();
+      } else {
+        h += '<div class="ovlsec"><h3>' +
+             (st.kind === 'team' ? 'Which team' : 'Which programme') + '</h3>' +
+             '<div class="rpicked">Following: <b id="rpick">nothing yet</b></div>' +
+             '<input class="fsearch rq" id="rq" autocomplete="off" value="' + esc(st.q) +
+             '" placeholder="' +
+             (st.kind === 'team' ? 'Search teams...'
+                                 : 'Search programmes in the guide...') +
+             '"><div class="rlist" id="rlist"></div></div>';
+      }
+    } else if (st.kind === 'smart') {
+      h += smartSection();
     }
 
     // Plex's own choices, once there is something to ask Plex about.
@@ -488,13 +634,20 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
     document.getElementById('rx').addEventListener('click', shut);
     document.getElementById('rcancel').addEventListener('click', shut);
-    box.querySelectorAll('input[name=rkind]').forEach(function (r) {
+    box.querySelectorAll('input[name=rmode]').forEach(function (r) {
       r.addEventListener('change', function () {
-        st.kind = r.value; st.team = null; st.series = null; st.tpl = null;
-        st.pick = 0; st.q = '';
-        render();
+        st.mode = r.value; resetChoice(); render();
       });
     });
+    box.querySelectorAll('input[name=rsub]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        st.sub = r.value; resetChoice(); render();
+      });
+    });
+    var nameEl = document.getElementById('sfname');
+    if (nameEl) {
+      nameEl.addEventListener('input', function () { st.name = nameEl.value; });
+    }
     box.querySelectorAll('input[name=rtpl]').forEach(function (r) {
       r.addEventListener('change', function () { st.pick = +r.value; render(); });
     });
@@ -504,8 +657,15 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       search(st.q);
     }
     st.picker.wire();
+    if (st.kind === 'smart') { st.filter.wire(); preview(); }
     document.getElementById('rgo').addEventListener('click', create);
     paint();
+  }
+
+  function resetChoice() {
+    syncKind();
+    st.team = null; st.series = null; st.tpl = null; st.pick = 0; st.q = '';
+    st.preview = null; st.confirmed = false;
   }
 
   // Once something is chosen, ask Plex what it can do with it.
@@ -589,27 +749,47 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       vals[el.dataset.set] = el.dataset.bool ? (el.checked ? 'true' : 'false') : el.value;
     });
     var url = st.editing ? '/api/rules/' + st.editing.id : '/api/rules';
-    var body = st.editing
-      ? new URLSearchParams({networks: JSON.stringify(st.nets),
-                             channels: JSON.stringify(st.chans),
-                             settings: JSON.stringify(vals),
-                             enabled: st.editing.enabled ? '1' : '0'})
-      : new URLSearchParams({
-          kind: st.kind,
-          team_id: st.team ? st.team.id : '',
-          series: st.series || '',
-          networks: JSON.stringify(st.nets),
-          channels: JSON.stringify(st.chans),
-          template: st.pick,
-          settings: JSON.stringify(vals)
-        });
+    var fields = st.editing
+      ? {networks: JSON.stringify(st.nets),
+         channels: JSON.stringify(st.chans),
+         settings: JSON.stringify(vals),
+         enabled: st.editing.enabled ? '1' : '0'}
+      : {kind: st.kind,
+         team_id: st.team ? st.team.id : '',
+         series: st.series || '',
+         networks: JSON.stringify(st.nets),
+         channels: JSON.stringify(st.chans),
+         template: st.pick,
+         settings: JSON.stringify(vals)};
+    if (st.kind === 'smart') {
+      fields.filter = JSON.stringify(st.tree);
+      fields.name = st.name || '';
+      // The server asks again when a filter is loose or large. The second
+      // press is the answer, and it is the user's, not the panel's.
+      if (st.confirmed) fields.confirm = '1';
+    }
+    var body = new URLSearchParams(fields);
     fetch(url, {method: 'POST', body: body})
       .then(CE.readJson)
       .then(function (j) {
-        msg.className = 'note said ' + (j.ok ? 'ok' : 'bad');
+        msg.className = 'note said ' + (j.ok ? 'ok' : j.needs_confirm ? 'warn' : 'bad');
         msg.textContent = j.message || j.error || '';
-        if (j.ok) { btn.textContent = 'Done'; setTimeout(function () { location.reload(); }, 1100); }
-        else { btn.disabled = false; btn.textContent = back; }
+        if (j.ok) {
+          btn.textContent = 'Done';
+          setTimeout(function () { location.reload(); }, 1100);
+          return;
+        }
+        btn.disabled = false;
+        if (j.needs_confirm) {
+          // Say yes for real. The count is in the message and on the button,
+          // so the second press is made knowing the number.
+          st.confirmed = true;
+          paint();
+          btn.textContent = 'Yes, create ' + j.count + ' recordings';
+          btn.classList.add('danger');
+          return;
+        }
+        btn.textContent = back;
       })
       .catch(function (err) {
         msg.className = 'note said bad';
@@ -619,10 +799,15 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   }
 
   opener.addEventListener('click', function () {
-    st.kind = 'team'; st.team = null; st.series = null; st.editing = null;
+    st.mode = 'smart'; st.sub = 'team'; syncKind();
+    st.team = null; st.series = null; st.editing = null;
     st.tpl = null; st.pick = 0; st.q = '';
+    st.tree = null; st.name = ''; st.preview = null; st.confirmed = false;
     st.nets.length = 0; st.chans.length = 0;
-    ovl.classList.add('show'); render();
+    ovl.classList.add('show');
+    // The field list has to be in hand before the builder can draw itself, and
+    // it is fetched once per page rather than once per panel.
+    st.filter.ready().then(render);
   });
 
   // Editing a pass opens the same panel. What it follows is fixed by then, so
@@ -631,14 +816,26 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     fetch('/api/rules').then(function (r) { return r.json(); }).then(function (d) {
       var r = (d.rules || []).filter(function (x) { return String(x.id) === String(id); })[0];
       if (!r) return;
-      st.kind = r.kind === 'team' ? 'team' : 'series';
+      st.kind = r.kind;
+      st.mode = r.kind === 'series' ? 'series' : 'smart';
+      st.sub = r.kind === 'smart' ? 'filter' : 'team';
       st.team = r.kind === 'team' ? {id: r.team_id, name: r.title} : null;
-      st.series = r.kind === 'team' ? null : r.title;
+      st.series = r.kind === 'series' ? r.title : null;
+      st.tree = r.filter || null;
+      st.name = r.kind === 'smart' ? (r.title || '') : '';
       st.tpl = null; st.pick = 0; st.editing = r; st.q = '';
+      st.preview = null; st.confirmed = false;
       st.nets.length = 0; st.chans.length = 0;
       r.networks.forEach(function (n) { st.nets.push(n); });
       r.channels.forEach(function (c) { st.chans.push(c); });
-      ovl.classList.add('show'); render();
+      ovl.classList.add('show');
+      if (r.kind === 'smart') {
+        // A smart pass has no Plex template to ask about. Its conditions are
+        // the whole rule, so the builder is all that opens.
+        st.filter.ready().then(render);
+        return;
+      }
+      render();
       // Plex's own settings are editable after creation too, so the panel
       // fetches them and fills in what the pass already carries.
       loadTemplates();

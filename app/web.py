@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, cf_access, db, filters, passes, sync
+from . import auth, cf_access, db, filters, passes, smartfilter, sync
 from .plex import Plex, PlexError
 
 BASE = os.path.dirname(__file__)
@@ -455,17 +455,21 @@ def api_facets():
     return JSONResponse(filters.facets())
 
 
+# One icon per kind of pass, named in one place so the guide panel, the
+# schedule and the pass list cannot drift apart.
+_PASS_ICON = {"team": "sports", "series": "series", "smart": "smart"}
+
+
 def _why_for(airing):
     """Why this broadcast is set to record, in words, or nothing."""
     r = db.one(
-        """SELECT o.source, o.pass_id, p.kind, p.team_name, p.series_title
+        """SELECT o.source, o.pass_id, p.kind, p.team_name, p.series_title, p.label
            FROM our_grabs o LEFT JOIN passes p ON p.id = o.pass_id
            WHERE o.airing_id = ?""", (airing["id"],))
     if r:
-        if r["pass_id"] and (r["team_name"] or r["series_title"]):
-            name = r["team_name"] or r["series_title"]
-            return {"who": "ce",
-                    "kind": "sports" if r["kind"] == "team" else "series",
+        name = r["team_name"] or r["series_title"] or r["label"]
+        if r["pass_id"] and name:
+            return {"who": "ce", "kind": _PASS_ICON.get(r["kind"], "series"),
                     "text": f"CouchElephant booked this for the {name} pass.",
                     "pass_id": r["pass_id"]}
         return {"who": "ce", "kind": "one",
@@ -645,7 +649,7 @@ def _pass_prefs(prefs):
 
 
 def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,
-               update=True):
+               update=True, smart=None, name=""):
     """Create or update one CouchElephant pass.
 
     The only place a pass is written. There were three, and they had already
@@ -655,7 +659,14 @@ def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,
     Returns (pass_id, label, created).
     """
     nets, chans, prefs = nets or [], chans or [], _pass_prefs(prefs)
-    if kind == "team":
+    if kind == "smart":
+        # Two smart passes with the same conditions are the same pass. Compared
+        # on the stored JSON, so a reordered tree counts as a different one,
+        # which is the honest answer: it may well match different things.
+        existing = db.one("SELECT id FROM passes WHERE kind='smart' AND filter = ?",
+                          (db.js(smart),))
+        label = (name or "").strip() or smartfilter.describe(smart)
+    elif kind == "team":
         existing = db.one("SELECT id FROM passes WHERE kind='team' AND team_id = ?",
                           (team["id"],))
         label = team["name"]
@@ -673,7 +684,12 @@ def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,
                       "WHERE id=?",
                       (db.js(nets), db.js(chans), db.js(prefs), existing["id"]))
             return existing["id"], label, False
-        if kind == "team":
+        if kind == "smart":
+            c.execute("INSERT INTO passes (kind, filter, label, networks, channels, "
+                      "prefs, enabled, created_at) VALUES ('smart',?,?,?,?,?,1,?)",
+                      (db.js(smart), label, db.js(nets), db.js(chans),
+                       db.js(prefs), int(time.time())))
+        elif kind == "team":
             c.execute("INSERT INTO passes (kind, team_id, team_name, networks, channels, "
                       "prefs, enabled, created_at) VALUES ('team',?,?,?,?,?,1,?)",
                       (team["id"], team["name"], db.js(nets), db.js(chans),
@@ -909,13 +925,14 @@ def _why_map():
     out = {}
     for r in db.query(
             """SELECT o.channel_vcn, o.begins_at, o.source, o.airing_id, o.pass_id,
-                      p.kind, p.team_name, p.series_title, p.enabled
+                      p.kind, p.team_name, p.series_title, p.label, p.enabled
                FROM our_grabs o LEFT JOIN passes p ON p.id = o.pass_id"""):
-        if r["pass_id"] and (r["team_name"] or r["series_title"]):
+        name = r["team_name"] or r["series_title"] or r["label"]
+        if r["pass_id"] and name:
             out[(r["channel_vcn"], r["begins_at"])] = {
                 "who": "ce",
-                "kind": "sports" if r["kind"] == "team" else "series",
-                "reason": f"the {r['team_name'] or r['series_title']} pass",
+                "kind": _PASS_ICON.get(r["kind"], "series"),
+                "reason": f"the {name} pass",
                 "pass_id": r["pass_id"],
                 "airing_id": r["airing_id"],
             }
@@ -1099,20 +1116,26 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = ""):
 def api_rules():
     """Every pass, with what it follows and where it may record from."""
     out = []
-    for p in db.query("SELECT * FROM passes ORDER BY COALESCE(team_name, series_title)"):
+    for p in db.query("SELECT * FROM passes "
+                      "ORDER BY COALESCE(team_name, series_title, label)"):
         nets = db.unjs(p["networks"]) or []
         chans = db.unjs(p["channels"]) or []
         booked = db.one("SELECT COUNT(*) c FROM our_grabs WHERE pass_id = ?", (p["id"],))["c"]
+        tree = db.unjs(p["filter"], None) if p["kind"] == "smart" else None
         out.append({
             "id": p["id"], "who": "ce", "kind": p["kind"],
-            "icon": "sports" if p["kind"] == "team" else "series",
-            "title": p["team_name"] or p["series_title"],
+            "icon": {"team": "sports", "smart": "smart"}.get(p["kind"], "series"),
+            "title": passes.rule_label(p),
             "team_id": p["team_id"], "series": p["series_title"],
+            "filter": tree,
             "networks": nets, "channels": chans,
             "prefs": db.unjs(p["prefs"], {}) or {},
             "enabled": bool(p["enabled"]), "booked": booked,
-            "detail": ("Every game, from the live broadcast" if p["kind"] == "team"
-                       else "Every episode the guide carries"),
+            "detail": {
+                "team": "Every game, from the live broadcast",
+                "series": "Every episode the guide carries",
+                "smart": ("Anything matching " + smartfilter.describe(tree or {})),
+            }.get(p["kind"], ""),
         })
 
     # Plex's own recurring rules belong here too. A rule you just made would
@@ -1188,7 +1211,8 @@ def api_rule_upcoming(rule_id: int):
 @app.post("/api/rules/{rule_id}")
 async def api_rule_edit(rule_id: int, networks: str = Form(""),
                         channels: str = Form(""), enabled: str = Form(""),
-                        settings: str = Form("")):
+                        settings: str = Form(""), filter: str = Form(""),
+                        name: str = Form("")):
     """Change a pass: where it may record from, its Plex settings, or pause it."""
     r = db.one("SELECT * FROM passes WHERE id = ?", (rule_id,))
     if not r:
@@ -1198,9 +1222,25 @@ async def api_rule_edit(rule_id: int, networks: str = Form(""),
     # An empty settings field means "not sent", not "clear them".
     prefs = db.unjs(settings, None) if settings else None
     keep = db.js(_pass_prefs(prefs)) if prefs is not None else r["prefs"]
+
+    tree = db.unjs(filter, None) if filter else None
+    if tree is not None:
+        if r["kind"] != "smart":
+            return JSONResponse({"ok": False, "error":
+                                 "only a smart pass has conditions"}, status_code=400)
+        try:
+            smartfilter.build(tree)          # refuse to store what cannot run
+        except smartfilter.FilterError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    filt = db.js(tree) if tree is not None else r["filter"]
+    label = (name or "").strip() or (r["label"] if "label" in r.keys() else None)
+    if tree is not None and not (name or "").strip():
+        label = smartfilter.describe(tree)
+
     with db.tx() as c:
-        c.execute("UPDATE passes SET networks=?, channels=?, prefs=?, enabled=? WHERE id=?",
-                  (db.js(nets), db.js(chans), keep,
+        c.execute("UPDATE passes SET networks=?, channels=?, prefs=?, filter=?, "
+                  "label=?, enabled=? WHERE id=?",
+                  (db.js(nets), db.js(chans), keep, filt, label,
                    1 if enabled not in ("0", "false") else 0, rule_id))
     done = await asyncio.to_thread(passes.run_passes)
     made = len([d for d in done if d["action"] == "scheduled"])
@@ -1210,11 +1250,119 @@ async def api_rule_edit(rule_id: int, networks: str = Form(""),
                          + f"{made} new airing(s) scheduled."})
 
 
+SMART_LIMIT = 40          # airings a smart filter may book without being told twice
+
+
+@app.get("/api/filter/fields")
+def api_filter_fields():
+    """What a smart filter can ask about, and the answers worth offering.
+
+    The panel is built from this rather than from a copy of it, so a field
+    added here appears in the UI without anyone editing two places.
+    """
+    def distinct(sql):
+        return [r[0] for r in db.query(sql) if r[0]]
+
+    genres = set()
+    for r in db.query("SELECT genres FROM programs WHERE genres IS NOT NULL"):
+        for g in db.unjs(r["genres"]):
+            if g:
+                genres.add(g)
+
+    values = {
+        "genres": sorted(genres),
+        "ratings": distinct("SELECT DISTINCT content_rating FROM programs "
+                            "WHERE content_rating IS NOT NULL AND content_rating != '' "
+                            "ORDER BY content_rating"),
+        "kinds": [{"value": v, "label": l} for v, l in smartfilter.KINDS],
+        "weekdays": [{"value": v, "label": l} for v, l in smartfilter.WEEKDAYS],
+        "channels": distinct("SELECT DISTINCT vcn FROM channels ORDER BY "
+                             "CAST(vcn AS REAL)"),
+        "networks": distinct("SELECT DISTINCT network FROM channels "
+                             "WHERE network IS NOT NULL ORDER BY network"),
+    }
+    fields = [{"id": fid, "label": f["label"], "kind": f["kind"],
+               "values": f.get("values")}
+              for fid, f in smartfilter.FIELDS.items()]
+    # How much of the guide can answer this field at all. A filter on content
+    # rating behaves very differently when a third of the guide has none.
+    total = db.one("SELECT COUNT(*) c FROM programs")["c"] or 0
+    have = db.one("SELECT COUNT(*) c FROM programs WHERE content_rating IS NOT NULL "
+                  "AND content_rating != ''")["c"] or 0
+    return JSONResponse({
+        "ok": True, "fields": fields,
+        "comparisons": {k: [{"value": c, "label": l} for c, l in v]
+                        for k, v in smartfilter.COMPARISONS.items()},
+        "values": values,
+        "coverage": {"programs": total, "rated": have},
+        "limit": SMART_LIMIT,
+    })
+
+
+@app.post("/api/filter/preview")
+async def api_filter_preview(filter: str = Form(...), networks: str = Form(""),
+                             channels: str = Form("")):
+    """What this filter would record, before anybody commits to it.
+
+    A filter is not obviously loose when you write it. "Genre is Comedy" reads
+    like one thing and books hundreds, against a real DVR, on a real disk. So
+    the count comes back before the Create button will do anything.
+    """
+    tree = db.unjs(filter, None)
+    if not tree:
+        return JSONResponse({"ok": False, "error": "add a condition first"},
+                            status_code=400)
+    nets = db.unjs(networks, []) or []
+    chans = db.unjs(channels, []) or []
+    try:
+        rows = await asyncio.to_thread(passes.smart_airings, tree)
+    except smartfilter.FilterError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    allowed = [r for r in rows if passes.in_sources(r, nets, chans)]
+    games = passes.group_by_game(allowed)
+    logos = _logo_map()
+    sample = []
+    for guid, airings in list(games.items()):
+        pick, reason = passes.choose_airing(airings)
+        if not pick:
+            continue
+        sample.append({
+            "title": pick["title"], "parent": pick["grandparent_title"] or "",
+            "b": pick["begins_at"], "vcn": pick["channel_vcn"],
+            "call_sign": pick["channel_call_sign"] or "",
+            "logo": bool(logos.get(pick["channel_vcn"])), "reason": reason,
+        })
+    sample.sort(key=lambda x: x["b"] or 0)
+    count = len(sample)
+
+    warn = ""
+    if count > SMART_LIMIT:
+        warn = (f"This would schedule {count} recordings in the next 30 days. "
+                "That is a lot of disk and a lot of guide. Narrow it, or say "
+                "you meant it.")
+    elif smartfilter.is_loose(tree):
+        warn = ("Nothing here narrows by what the programme is, only by where "
+                "or when it airs, so this will match most of the guide as it "
+                "fills up.")
+    elif count == 0:
+        warn = "Nothing in the guide matches this yet."
+
+    return JSONResponse({
+        "ok": True, "count": count, "airings": len(allowed),
+        "over": count > SMART_LIMIT, "loose": smartfilter.is_loose(tree),
+        "limit": SMART_LIMIT, "warning": warn,
+        "describes": smartfilter.describe(tree),
+        "sample": sample[:25],
+    })
+
+
 @app.post("/api/rules")
 async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
                           series: str = Form(""), networks: str = Form(""),
                           channels: str = Form(""), template: int = Form(0),
-                          settings: str = Form("")):
+                          settings: str = Form(""), filter: str = Form(""),
+                          name: str = Form(""), confirm: str = Form("")):
     """Create a schedule that keeps matching new airings.
 
     With no source limit this is something Plex can express on its own, so it
@@ -1225,6 +1373,9 @@ async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
     nets = db.unjs(networks, []) or []
     chans = db.unjs(channels, []) or []
     prefs = dict(db.unjs(settings, {}) or {})
+
+    if kind == "smart":
+        return await _make_smart_rule(filter, name, nets, chans, prefs, confirm)
 
     if kind == "team":
         t = db.one("SELECT * FROM teams WHERE id = ?", (team_id or 0,))
@@ -1255,6 +1406,52 @@ async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
     return JSONResponse({"ok": True, "ce_rule": True, "message":
                          f"CouchElephant is following {label}, only from {where}. "
                          f"{made} upcoming airing(s) scheduled."})
+
+
+async def _make_smart_rule(filter_json, name, nets, chans, prefs, confirm):
+    """A smart filter is always CouchElephant's to run.
+
+    Plex rules follow one programme or one team. A condition tree is not
+    something they can be told, so there is no Plex equivalent to hand this to
+    and no decision to make about who owns it.
+    """
+    tree = db.unjs(filter_json, None)
+    if not tree:
+        return JSONResponse({"ok": False, "error": "add a condition first"},
+                            status_code=400)
+    try:
+        rows = await asyncio.to_thread(passes.smart_airings, tree)
+    except smartfilter.FilterError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    allowed = [r for r in rows if passes.in_sources(r, nets, chans)]
+    count = len(passes.group_by_game(allowed))
+    said_yes = str(confirm).lower() in ("1", "true", "yes")
+    # A big filter is not refused, it is questioned. The user gets the number
+    # and says it again, which is the difference between a guard and a wall.
+    if (count > SMART_LIMIT or smartfilter.is_loose(tree)) and not said_yes:
+        return JSONResponse({
+            "ok": False, "needs_confirm": True, "count": count,
+            "limit": SMART_LIMIT, "loose": smartfilter.is_loose(tree),
+            "error": (f"This filter matches {count} programmes in the next 30 days "
+                      "and would book every one of them. Press Create again to "
+                      "confirm that is what you want."),
+        }, status_code=409)
+
+    pass_id, label, created = await asyncio.to_thread(
+        _make_pass, "smart", None, None, nets, chans, prefs, False, tree, name)
+    if not created:
+        return JSONResponse({"ok": False, "error":
+                             f"You already have a smart pass for {label}."},
+                            status_code=409)
+
+    done = await asyncio.to_thread(passes.run_passes)
+    made = len([d for d in done if d["action"] == "scheduled"])
+    where = " or ".join(nets + chans)
+    return JSONResponse({"ok": True, "ce_rule": True, "id": pass_id, "message":
+                         f"Smart pass \u201c{label}\u201d created"
+                         + (f", only from {where}" if where else "")
+                         + f". {made} upcoming airing(s) scheduled."})
 
 
 def _make_plex_rule(label, rows, template, prefs):

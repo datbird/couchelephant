@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS programs (
     art                   TEXT,
     originally_available  TEXT,
     year                  INTEGER,
+    content_rating        TEXT,
+    duration              INTEGER,
     updated_at            INTEGER
 );
 
@@ -118,6 +120,9 @@ CREATE TABLE IF NOT EXISTS passes (
     -- CBS and FOX" is said. Plex has no equivalent: its rules take one channel.
     networks     TEXT,
     channels     TEXT,
+    -- A smart pass carries a condition tree instead of a team or a series.
+    filter       TEXT,
+    label        TEXT,
     enabled      INTEGER DEFAULT 1,
     created_at   INTEGER
 );
@@ -233,6 +238,14 @@ MIGRATIONS = [
     ("plex_subscriptions", "target", "TEXT"),
     ("passes", "series_guid", "TEXT"),
     ("passes", "series_title", "TEXT"),
+    # The parental rating and the running time, so a smart filter can ask about
+    # them. Both come from the guide listing and are empty until the next sync.
+    ("programs", "content_rating", "TEXT"),
+    ("programs", "duration", "INTEGER"),
+    # A smart pass keeps its condition tree here, as JSON. Plex cannot express
+    # one, so this kind of pass is always CouchElephant's to run.
+    ("passes", "filter", "TEXT"),
+    ("passes", "label", "TEXT"),
 ]
 
 

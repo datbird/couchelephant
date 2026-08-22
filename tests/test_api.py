@@ -335,3 +335,173 @@ def test_an_oversized_upload_is_refused(client, synced):
 def test_a_missing_logo_serves_a_blank_not_a_404(client, synced):
     r = client.get("/logo/99.9")
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
+# ---- smart passes ----
+
+def test_the_field_list_says_what_can_be_asked_and_with_what(client, synced):
+    d = client.get("/api/filter/fields").json()
+    ids = [f["id"] for f in d["fields"]]
+    for expect in ("genre", "rating", "title", "year", "duration", "channel", "hd"):
+        assert expect in ids
+    assert "Football" in d["values"]["genres"]
+    assert "TV-PG" in d["values"]["ratings"]
+    assert d["coverage"]["rated"] < d["coverage"]["programs"], \
+        "the panel needs to know the guide does not rate everything"
+
+
+def test_every_comparison_offered_is_one_the_server_accepts(client, synced):
+    """The panel builds itself from this, so a label with no implementation is
+    a dead control the user can pick."""
+    from app import smartfilter
+    d = client.get("/api/filter/fields").json()
+    for kind, offered in d["comparisons"].items():
+        for c in offered:
+            assert c["value"] in {x for x, _ in smartfilter.COMPARISONS[kind]}
+
+
+def test_the_preview_counts_before_anything_is_created(client, synced):
+    d = client.post("/api/filter/preview", data={
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}'}).json()
+    assert d["ok"] and d["count"] == 1
+    assert d["sample"][0]["title"] == "Chiefs at Buccaneers"
+    assert fake_plex.STATE.created == [], "a preview books nothing"
+
+
+def test_the_preview_warns_when_a_filter_narrows_by_nothing(client, synced):
+    d = client.post("/api/filter/preview",
+                    data={"filter": '{"field":"hd","cmp":"yes"}'}).json()
+    assert d["loose"] is True
+    assert "most of the guide" in d["warning"]
+
+
+def test_the_preview_reports_a_broken_filter_in_words(client, synced):
+    d = client.post("/api/filter/preview",
+                    data={"filter": '{"field":"year","cmp":"gt","value":"soon"}'})
+    assert d.status_code == 400
+    assert "not a number" in d.json()["error"]
+
+
+def test_a_smart_pass_is_always_couchelephants(client, synced):
+    r = client.post("/api/rules", data={
+        "kind": "smart", "name": "Comedy nights",
+        "filter": '{"field":"genre","cmp":"is","value":"Comedy"}',
+        "networks": "[]", "channels": "[]"})
+    d = r.json()
+    assert d["ok"] and d["ce_rule"] is True
+    row = db.one("SELECT * FROM passes WHERE kind='smart'")
+    assert row["label"] == "Comedy nights"
+    assert db.unjs(row["filter"])["field"] == "genre"
+
+
+def test_a_smart_pass_books_the_live_broadcast_straight_away(client, synced):
+    client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]"})
+    grab = db.one("SELECT * FROM our_grabs")
+    assert grab, "it books now, not at the next sync"
+    assert grab["channel_vcn"] == "41.1", "the premiere, not the repeat"
+
+
+def test_a_loose_filter_is_questioned_before_it_is_obeyed(client, synced):
+    r = client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"hd","cmp":"yes"}',
+        "networks": "[]", "channels": "[]"})
+    assert r.status_code == 409
+    d = r.json()
+    assert d["needs_confirm"] is True
+    assert "Press Create again" in d["error"]
+    assert not db.query("SELECT 1 FROM passes"), "nothing was created"
+    assert fake_plex.STATE.created == [], "and nothing was booked"
+
+
+def test_saying_yes_creates_it(client, synced):
+    data = {"kind": "smart", "filter": '{"field":"hd","cmp":"yes"}',
+            "networks": "[]", "channels": "[]", "confirm": "1"}
+    assert client.post("/api/rules", data=data).json()["ok"] is True
+    assert db.one("SELECT 1 FROM passes WHERE kind='smart'")
+
+
+def test_a_named_filter_keeps_its_name_and_an_unnamed_one_describes_itself(client, synced):
+    client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Comedy"}',
+        "networks": "[]", "channels": "[]"})
+    rules = [r for r in client.get("/api/rules").json()["rules"] if r["kind"] == "smart"]
+    assert rules[0]["title"] == "genre is Comedy"
+    assert rules[0]["icon"] == "smart"
+
+
+def test_a_smart_pass_explains_what_it_will_record(client, synced):
+    client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]"})
+    rid = db.one("SELECT id FROM passes WHERE kind='smart'")["id"]
+    d = client.get(f"/api/rules/{rid}/upcoming").json()
+    assert d["ok"]
+    assert d["upcoming"][0]["vcn"] == "41.1"
+    assert "premiere" in d["upcoming"][0]["reason"]
+
+
+def test_the_schedule_names_the_smart_pass_that_booked_it(client, synced):
+    client.post("/api/rules", data={
+        "kind": "smart", "name": "Chiefs football",
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]"})
+    sync.sync_recordings(_plex())
+    rows = [r for r in client.get("/api/schedule").json()["rows"] if r["who"] == "ce"]
+    assert rows and "Chiefs football pass" in rows[0]["reason"]
+    assert rows[0]["kind"] == "smart"
+
+
+def test_editing_a_smart_pass_changes_its_conditions(client, synced):
+    client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]"})
+    rid = db.one("SELECT id FROM passes WHERE kind='smart'")["id"]
+    r = client.post(f"/api/rules/{rid}", data={
+        "networks": "[]", "channels": "[]", "enabled": "1",
+        "filter": '{"field":"genre","cmp":"is","value":"Comedy"}'})
+    assert r.json()["ok"]
+    assert db.unjs(db.one("SELECT filter FROM passes WHERE id=?", (rid,))["filter"]) \
+        == {"field": "genre", "cmp": "is", "value": "Comedy"}
+
+
+def test_a_filter_that_cannot_run_is_never_stored(client, synced):
+    client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]"})
+    rid = db.one("SELECT id FROM passes WHERE kind='smart'")["id"]
+    before = db.one("SELECT filter FROM passes WHERE id=?", (rid,))["filter"]
+    r = client.post(f"/api/rules/{rid}", data={
+        "networks": "[]", "channels": "[]", "enabled": "1",
+        "filter": '{"field":"nonsense","cmp":"is","value":"x"}'})
+    assert r.status_code == 400
+    assert db.one("SELECT filter FROM passes WHERE id=?", (rid,))["filter"] == before
+
+
+def test_a_broken_filter_does_not_stop_the_other_passes_running(client, synced):
+    """One bad row in the passes table used to take the whole run down."""
+    client.post("/api/pass", data={"team_id": "236"})
+    with db.tx() as c:
+        c.execute("INSERT INTO passes (kind, filter, label, enabled, created_at) "
+                  "VALUES ('smart', ?, 'broken', 1, 0)", ('{"field":"nope"}',))
+    done = passes.run_passes()
+    assert any(d["action"] == "failed" for d in done)
+    assert any(d["action"] in ("scheduled", "skipped") and d["pass"] != "broken"
+               for d in done)
+
+
+def test_the_same_filter_twice_is_refused(client, synced):
+    data = {"kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Comedy"}',
+            "networks": "[]", "channels": "[]"}
+    assert client.post("/api/rules", data=data).json()["ok"] is True
+    assert client.post("/api/rules", data=data).status_code == 409
+
+
+def test_a_smart_pass_obeys_the_source_limit_like_any_other(client, synced):
+    r = client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": '["ABC"]', "channels": "[]"})
+    assert r.json()["ok"]
+    assert db.one("SELECT 1 FROM our_grabs") is None, \
+        "the game is only on NBC, and the pass was told ABC"

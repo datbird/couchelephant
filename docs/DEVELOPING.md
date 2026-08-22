@@ -134,10 +134,11 @@ now. `COUCHELEPHANT_FAKE_ANCHOR` overrides the anchor.
 | `test_passes.py` | choosing the airing, source limits, the pin |
 | `test_sync.py` | the pull, enrichment, attribution |
 | `test_filters.py` | guide filter tokens |
+| `test_smartfilter.py` | the smart filter: what it compiles to, and what it refuses |
 | `test_auth.py` | hashing, sessions, the three modes |
 | `test_api.py` | every endpoint, in process |
 | `test_conventions.py` | rules the code holds itself to, checked not remembered |
-| `ui/` | the browser: guide, record, recordings, settings, phone, first run |
+| `ui/` | the browser: guide, record, recordings, smart passes, settings, phone, first run |
 
 The UI suite fails a test on any uncaught page error, so an exception that
 leaves a panel half drawn is a failure even when the assertions would pass.

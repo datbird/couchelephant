@@ -23,14 +23,21 @@ def _airing_id(guid, media):
     return f"{guid}#{media.get('channelIdentifier')}@{media.get('beginsAt')}"
 
 
+def _int_or_none(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _upsert_program(c, m, section, now):
     teams = [{"id": t.get("id"), "name": t.get("tag")} for t in (m.get("Team") or [])]
     genres = [g.get("tag") for g in (m.get("Genre") or [])]
     c.execute(
         """INSERT INTO programs (guid, rating_key, title, grandparent_title, summary, type,
                                  section, genres, teams, thumb, art, originally_available,
-                                 year, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                 year, content_rating, duration, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(guid) DO UPDATE SET
              rating_key=excluded.rating_key, title=excluded.title,
              grandparent_title=excluded.grandparent_title, summary=excluded.summary,
@@ -43,11 +50,20 @@ def _upsert_program(c, m, section, now):
                         THEN programs.teams ELSE excluded.teams END,
              thumb=excluded.thumb, art=excluded.art,
              originally_available=excluded.originally_available,
-             year=excluded.year, updated_at=excluded.updated_at""",
+             year=excluded.year,
+             -- Not every item carries a rating. An incoming blank means the
+             -- guide did not say, not that the rating was withdrawn.
+             content_rating=CASE WHEN excluded.content_rating IS NULL OR
+                                      excluded.content_rating = ''
+                                 THEN programs.content_rating
+                                 ELSE excluded.content_rating END,
+             duration=COALESCE(excluded.duration, programs.duration),
+             updated_at=excluded.updated_at""",
         (m.get("guid"), m.get("ratingKey"), m.get("title"), m.get("grandparentTitle"),
          m.get("summary"), m.get("type"), section, db.js(genres), db.js(teams),
          m.get("thumb") or m.get("grandparentThumb"), m.get("art"),
-         m.get("originallyAvailableAt"), m.get("year"), now),
+         m.get("originallyAvailableAt"), m.get("year"), m.get("contentRating"),
+         _int_or_none(m.get("duration")), now),
     )
 
 

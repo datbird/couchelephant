@@ -410,6 +410,45 @@ tr:hover td{background:var(--panel2)}
 .own{display:inline-block;width:10px;height:14px;border-radius:2px;flex:0 0 10px}
 .own.ce{background:var(--accent)}
 .own.plex{background:var(--live-dot)}
+/* ---- smart filter builder ----
+   A tree of groups. Depth is shown by an indent and a rail down the left, so a
+   nested group reads as belonging to the one above it without a box in a box
+   in a box, which stops fitting on a phone at about two levels. */
+.sfgroup{border:1px solid var(--line);border-radius:10px;background:var(--panel2);
+  padding:10px;margin:8px 0}
+.sfgroup .sfgroup{background:var(--panel);margin-left:12px;
+  border-left:3px solid var(--accent-bd)}
+.sfhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.sfhead .sfmatch{font-size:12px;color:var(--dim)}
+.sfhead select{padding:3px 8px;font-size:12px}
+.sfhead .sfdel{margin-left:auto}
+.sfrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0}
+.sfrow select,.sfrow input{padding:5px 8px;font-size:13px;min-width:0}
+.sfrow .sffield{flex:0 0 auto;min-width:120px}
+.sfrow .sfcmp{flex:0 0 auto;min-width:120px}
+.sfrow .sfval{flex:1 1 140px;min-width:110px}
+.sfrow .sfblank{display:inline-flex;align-items:center;gap:5px;font-size:11px;
+  color:var(--dim);white-space:nowrap}
+.sfrow .sfx{flex:0 0 auto}
+.sfacts{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+.sfempty{font-size:12px;color:var(--dim);padding:4px 0}
+/* The count, and the warning that comes with a loose filter. */
+.sfcount{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+  background:var(--panel2);font-size:13px}
+.sfcount b{font-size:16px}
+.sfcount.warn{border-color:var(--warn-bd);background:var(--warn-soft);
+  color:var(--warn-fg)}
+.sfcount.bad{border-color:var(--bad-bd);background:var(--bad-soft);color:var(--bad-fg)}
+.sfsample{margin-top:10px;max-height:210px;overflow:auto;border:1px solid var(--line);
+  border-radius:10px}
+.sfsample table{width:100%;border-collapse:collapse;font-size:12px}
+.sfsample td{padding:6px 10px;border-bottom:1px solid var(--line)}
+.sfsample tr:last-child td{border-bottom:0}
+@media (max-width:640px){
+  .sfrow .sffield,.sfrow .sfcmp,.sfrow .sfval{flex:1 1 100%}
+  .sfgroup .sfgroup{margin-left:6px}
+}
 .ownkey{display:flex;gap:16px;align-items:center;font-size:11px;color:var(--dim);
   margin:0 0 12px;text-transform:uppercase;letter-spacing:.4px}
 .ownkey span{display:inline-flex;align-items:center;gap:6px}
@@ -598,6 +637,8 @@ tr:hover td{background:var(--panel2)}
 .kind.sports{color:var(--accent-ink);border-color:var(--accent-bd);
   background:var(--accent-soft)}
 .kind.series{color:var(--dim)}
+.kind.smart{color:var(--accent-ink);border-color:var(--accent-bd);
+  background:var(--accent-soft)}
 tr.off td{opacity:.55}
 button.tiny{padding:3px 9px;font-size:12px}
 details.card>summary{list-style:none}
@@ -910,6 +951,7 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 </style>
 <script src="/static/js/ce.js"></script>
 <script src="/static/js/sources.js"></script>
+<script src="/static/js/smartfilter.js"></script>
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
 <div class="topbar">

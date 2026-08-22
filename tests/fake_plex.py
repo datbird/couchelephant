@@ -70,6 +70,9 @@ SPORTS_ITEMS = [{
     "guid": GAME_GUID, "ratingKey": "plex%3A%2F%2Fepisode%2Fgame1",
     "title": "Chiefs at Buccaneers", "grandparentTitle": "NFL Football",
     "summary": "A game.", "type": "episode", "year": 2026,
+    "duration": 7_200_000,
+    # No contentRating on purpose. Most sport in a real guide carries none,
+    # which is what makes blank handling worth testing.
     "Genre": [{"tag": "Football"}],
     # A bulk listing carries no Team. This is the quirk B1 depended on.
     "Media": [_media("41.1", LIVE_AT, premiere=True),
@@ -80,12 +83,15 @@ SHOW_ITEMS = [{
     "guid": EPISODE_GUID, "ratingKey": "plex%3A%2F%2Fepisode%2Fep1",
     "title": "Quiz Night", "grandparentTitle": "Quiz Show",
     "summary": "An episode.", "type": "episode", "year": 2026,
-    "Genre": [{"tag": "Game Show"}],
+    "contentRating": "TV-PG", "duration": 3_600_000,
+    "Genre": [{"tag": "Game Show"}, {"tag": "Comedy"}],
     "Media": [_media("9.1", EPISODE_AT, premiere=True, res="1080")],
 }, {
     "guid": DRM_GUID, "ratingKey": "plex%3A%2F%2Fepisode%2Fdrm1",
     "title": "Locked Broadcast", "grandparentTitle": "Locked",
-    "summary": "Encrypted.", "type": "episode",
+    "summary": "Encrypted.", "type": "episode", "year": 2020,
+    "contentRating": "TV-MA", "duration": 5_400_000,
+    "Genre": [{"tag": "Drama"}],
     "Media": [_media("5.1", DRM_AT, premiere=True, drm=True)],
 }]
 

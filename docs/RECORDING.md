@@ -38,12 +38,56 @@ Plex now has exactly one broadcast it can record.
 
 ## Passes
 
-A pass follows a team, or a programme, and keeps matching new airings on its
-own. Every sync it looks at what is coming up, chooses an airing for each, and
-books it.
+A pass follows something and keeps matching new airings on its own. Every sync
+it looks at what is coming up, chooses an airing for each, and books it.
+
+There are three kinds:
+
+| | |
+| --- | --- |
+| **Sports team** | Every game the team plays, always the live broadcast |
+| **Smart filter** | Anything in the guide matching a tree of conditions |
+| **Programme or series** | Every episode the guide carries |
+
+The first two are offered together under **Smart Pass**, because they are the
+two ways of saying "record things I have not named individually".
 
 A pass records its decisions whether or not it acts, including the ones it
 declined and why. Open a pass to see what it will record next.
+
+### Smart filters
+
+A smart filter is a nested tree. A group matches **all**, **any** or **none** of
+what is in it, and a group can hold more groups, to any depth. So "comedy or
+sci-fi, not rated TV-MA, first shown after 2015" is one rule.
+
+What can be asked, all of it from Plex's own guide:
+
+| | |
+| --- | --- |
+| The programme | title, series, description, genre, content rating, year, kind, first shown, length |
+| The broadcast | channel, network, high definition, live, day of the week, start hour |
+
+There is no quality score. Plex's guide carries none: not a star rating, not an
+audience score, not a critic score. Content rating means the parental one,
+TV-14 or PG-13.
+
+**A blank is a decision, not a default.** The guide does not rate everything. On
+one real server 294 of 400 shows carried a content rating and 40 of 159 sports
+did. In SQL a missing value fails every comparison including a negative one, so
+"content rating is not TV-MA" would quietly let every unrated programme
+through. Each condition therefore carries **or blank**, off to start with, and
+the panel says how much of your guide can answer at all.
+
+**A smart filter is always CouchElephant's.** A Plex rule follows one programme
+or one team. It cannot be given conditions, so there is no Plex form to hand
+this to and no decision about who owns it.
+
+**Loose filters are questioned.** The panel counts what a filter would record
+before anything is created, and shows the first matches. A filter that would
+book more than 40 programmes, or that narrows only by where and when something
+airs rather than by what it is, has to be confirmed a second time. The button
+says the number. It is a question, not a refusal: press again and it is made.
 
 ### Source limits
 

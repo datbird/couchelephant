@@ -190,7 +190,7 @@ def test_a_plain_plex_recording_can_be_booked_from_the_add_panel(recordings):
 def test_switching_to_a_programme_changes_what_is_searched(recordings):
     recordings.click("#addrule")
     recordings.wait_for_selector("#rlist > *", timeout=15000)
-    recordings.check('input[name=rkind][value="series"]')
+    recordings.check('input[name=rmode][value="series"]')
     recordings.wait_for_selector("#rq")
     assert "Search programmes" in recordings.get_attribute("#rq", "placeholder")
     recordings.wait_for_function(

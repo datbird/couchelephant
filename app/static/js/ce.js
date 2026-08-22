@@ -59,6 +59,10 @@
       ' width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"' +
       ' stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19"' +
       ' height="13" rx="2"/><path d="M8 2.8L12 6l4-3.2"/></svg></span>',
+    smart: '<span class="kind smart" title="From a smart filter"><svg viewBox="0 0 24 24"' +
+      ' width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"' +
+      ' stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M3 5h18M6 12h12M10 19h4"/></svg></span>',
     one: '<span class="kind series" title="One broadcast"><svg viewBox="0 0 24 24"' +
       ' width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">' +
       '<circle cx="12" cy="12" r="6"/></svg></span>'
