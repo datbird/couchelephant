@@ -78,8 +78,34 @@ async def sync_loop():
 # ---------- guide ----------
 
 @app.get("/", response_class=HTMLResponse)
-def guide(request: Request, day: str = "", channel: str = "", sports: int = 0):
+def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q: str = ""):
+    """Guide and search are the same page.
+
+    A query switches the view from one day's grid to matches across the whole
+    guide, because they answer the same question and splitting them into two
+    tabs made you navigate to find out what is on.
+    """
     now = int(time.time())
+    if q.strip():
+        like = f"%{q.strip()}%"
+        sql = ["""SELECT a.*, p.title, p.grandparent_title, p.summary, p.teams, p.section
+                  FROM airings a JOIN programs p ON p.guid = a.program_guid
+                  WHERE (p.title LIKE ? OR p.grandparent_title LIKE ? OR p.summary LIKE ?)
+                    AND a.ends_at > ?"""]
+        args = [like, like, like, now]
+        if channel:
+            sql.append("AND a.channel_vcn = ?")
+            args.append(channel)
+        if sports:
+            sql.append("AND p.section = 'sports'")
+        sql.append("ORDER BY a.begins_at LIMIT 400")
+        rows = db.query(" ".join(sql), tuple(args))
+        channels = db.query(
+            "SELECT DISTINCT channel_vcn AS vcn, channel_call_sign AS cs FROM airings "
+            "WHERE channel_vcn IS NOT NULL ORDER BY CAST(channel_vcn AS REAL)")
+        return page(request, "guide.html", rows=rows, days=[], day="",
+                    channels=channels, channel=channel, sports=sports, q=q)
+
     start = now
     if day:
         try:
@@ -112,22 +138,13 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0):
         "SELECT DISTINCT channel_vcn AS vcn, channel_call_sign AS cs FROM airings "
         "WHERE channel_vcn IS NOT NULL ORDER BY CAST(channel_vcn AS REAL)")
     return page(request, "guide.html", rows=rows, days=days, day=day or days[0]["key"],
-                channels=channels, channel=channel, sports=sports)
+                channels=channels, channel=channel, sports=sports, q="")
 
 
-@app.get("/search", response_class=HTMLResponse)
-def search(request: Request, q: str = ""):
-    rows = []
-    if q.strip():
-        like = f"%{q.strip()}%"
-        rows = db.query(
-            """SELECT a.*, p.title, p.grandparent_title, p.summary, p.teams, p.section
-               FROM airings a JOIN programs p ON p.guid = a.program_guid
-               WHERE (p.title LIKE ? OR p.grandparent_title LIKE ? OR p.summary LIKE ?)
-                 AND a.ends_at > ?
-               ORDER BY a.begins_at LIMIT 300""",
-            (like, like, like, int(time.time())))
-    return page(request, "search.html", rows=rows, q=q)
+@app.get("/search")
+def search_redirect(q: str = ""):
+    """Search used to be its own tab. Keep the URL working."""
+    return RedirectResponse(f"/?q={q}" if q else "/", status_code=307)
 
 
 # ---------- recordings ----------

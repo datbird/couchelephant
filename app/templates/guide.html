@@ -1,18 +1,46 @@
 {% extends "base.html" %}{% set nav='guide' %}
-{% block title %}Guide - CouchElephant{% endblock %}
+{% block title %}{{ 'Search - CouchElephant' if q else 'Guide - CouchElephant' }}{% endblock %}
 {% block body %}
-<h1>Guide</h1>
-<div class="sub">{{ rows|length }} airings shown. Times in {{ settings.timezone }}.</div>
 
+<div class="toolbar">
+  <div>
+    <h1>{{ 'Search' if q else 'Guide' }}</h1>
+    <div class="sub" style="margin:0">
+      {% if q %}
+        {{ rows|length }} match{{ '' if rows|length == 1 else 'es' }} for "{{ q }}" across the whole guide
+      {% else %}
+        {{ rows|length }} airings. Times in {{ settings.timezone }}.
+      {% endif %}
+    </div>
+  </div>
+
+  <form method="get" action="/" class="searchbox {{ 'open' if q }}" id="sb">
+    {% if channel %}<input type="hidden" name="channel" value="{{ channel }}">{% endif %}
+    {% if sports %}<input type="hidden" name="sports" value="1">{% endif %}
+    <button type="button" class="iconbtn" id="sbtoggle" title="Search the guide" aria-label="Search">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    </button>
+    <input name="q" id="sbinput" value="{{ q }}" placeholder="Search programmes, teams, descriptions..."
+           autocomplete="off">
+    {% if q %}<a class="iconbtn" href="/" title="Clear search" aria-label="Clear">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></a>{% endif %}
+  </form>
+</div>
+
+{% if not q %}
 <div class="daybar">
   {% for d in days %}
     <a href="/?day={{ d.key }}{% if channel %}&channel={{ channel }}{% endif %}{% if sports %}&sports=1{% endif %}"
        class="{{ 'on' if d.key == day }}">{{ d.label }}</a>
   {% endfor %}
 </div>
+{% endif %}
 
 <form method="get" action="/" class="row" style="margin-bottom:14px">
-  <input type="hidden" name="day" value="{{ day }}">
+  {% if q %}<input type="hidden" name="q" value="{{ q }}">
+  {% else %}<input type="hidden" name="day" value="{{ day }}">{% endif %}
   <select name="channel" onchange="this.form.submit()">
     <option value="">All channels</option>
     {% for c in channels %}
@@ -28,17 +56,18 @@
 <div class="card" style="padding:0">
 {% if rows %}
 <table>
-  <tr><th>Time</th><th>Ch</th><th>Programme</th><th>Teams</th><th></th></tr>
+  <tr><th>{{ 'When' if q else 'Time' }}</th><th>Ch</th><th>Programme</th><th>Teams</th><th></th></tr>
   {% for r in rows %}
   <tr>
-    <td class="dim" style="white-space:nowrap">{{ r.begins_at|fmt('%-I:%M %p') }}</td>
+    <td class="dim" style="white-space:nowrap">
+      {{ r.begins_at|fmt if q else r.begins_at|fmt('%-I:%M %p') }}</td>
     <td class="dim" style="white-space:nowrap">{{ r.channel_vcn }} {{ r.channel_call_sign or '' }}</td>
     <td>
       {% if r.grandparent_title and r.grandparent_title != r.title %}
         <span class="dim tiny">{{ r.grandparent_title }}</span><br>
       {% endif %}
       <b>{{ r.title }}</b>
-      {% if r.summary %}<div class="tiny dim">{{ r.summary[:110] }}</div>{% endif %}
+      {% if r.summary %}<div class="tiny dim">{{ r.summary[:120] }}</div>{% endif %}
     </td>
     <td class="tiny dim">
       {% for t in r.teams|unjs %}{{ t.name }}{% if not loop.last %} vs {% endif %}{% endfor %}
@@ -51,7 +80,33 @@
   {% endfor %}
 </table>
 {% else %}
-  <div class="empty">Nothing in the guide for this day yet. Try <b>Sync now</b>.</div>
+  <div class="empty">
+    {% if q %}Nothing in the guide matches "{{ q }}".
+    {% else %}Nothing in the guide for this day yet. Try <b>Sync now</b>.{% endif %}
+  </div>
 {% endif %}
 </div>
+
+<script>
+// The box collapses to an icon until it is wanted, so the day bar keeps the width.
+(function () {
+  var box = document.getElementById('sb'),
+      btn = document.getElementById('sbtoggle'),
+      inp = document.getElementById('sbinput');
+  btn.addEventListener('click', function () {
+    if (box.classList.contains('open') && inp.value.trim()) { box.submit(); return; }
+    box.classList.toggle('open');
+    if (box.classList.contains('open')) inp.focus();
+  });
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { inp.value = ''; box.classList.remove('open'); }
+  });
+  // "/" focuses search, the way every guide should behave.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '/' && document.activeElement !== inp) {
+      e.preventDefault(); box.classList.add('open'); inp.focus();
+    }
+  });
+})();
+</script>
 {% endblock %}

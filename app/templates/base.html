@@ -63,6 +63,17 @@ button.danger{background:transparent;color:#ff8b8e;border-color:#e5484d55}
 .banner.bad{background:rgba(229,72,77,.12);border:1px solid #e5484d44;color:#ff8b8e}
 .banner.ok{background:rgba(76,175,80,.12);border:1px solid #4caf5044;color:#8fd694}
 .empty{padding:28px;text-align:center;color:var(--dim)}
+.toolbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.searchbox{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;padding:4px 6px}
+.searchbox input{border:none;background:transparent;padding:5px 4px;width:0;opacity:0;
+  transition:width .18s ease,opacity .18s ease}
+.searchbox.open input{width:300px;opacity:1}
+.searchbox input:focus{outline:none}
+.iconbtn{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;
+  border-radius:6px;background:transparent;border:none;color:var(--dim);cursor:pointer}
+.iconbtn:hover{color:var(--text);background:var(--panel2)}
+@media (max-width:700px){.searchbox.open input{width:150px}}
 footer{margin:34px 0 10px;text-align:center;font-size:12px;letter-spacing:1.6px;
   text-transform:uppercase;color:var(--dim);opacity:.65}
 </style>
@@ -73,7 +84,6 @@ footer{margin:34px 0 10px;text-align:center;font-size:12px;letter-spacing:1.6px;
     ><span class="brand-a">Couch</span><span class="brand-b">Elephant</span></span>
   <nav>
     <a href="/" class="{{ 'on' if nav=='guide' }}">Guide</a>
-    <a href="/search" class="{{ 'on' if nav=='search' }}">Search</a>
     <a href="/recordings" class="{{ 'on' if nav=='recordings' }}">Recordings</a>
     <a href="/passes" class="{{ 'on' if nav=='passes' }}">Sports Passes</a>
     <a href="/settings" class="{{ 'on' if nav=='settings' }}">Settings</a>
