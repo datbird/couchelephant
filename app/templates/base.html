@@ -24,8 +24,10 @@ body{margin:0;background:var(--bg);color:var(--text);
 a{color:inherit;text-decoration:none}
 header{display:flex;align-items:center;gap:22px;padding:0 22px;height:64px;
   background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
-header .brand{display:flex;align-items:center;gap:9px}
-header .mark{height:43px;width:auto;display:block}
+header .brand{display:flex;align-items:center;gap:9px;height:100%}
+/* Fills the bar edge to edge. The artwork is cropped to its own bounds, so
+   height:100% leaves no gap above or below. */
+header .mark{height:100%;width:auto;display:block;align-self:stretch}
 header .wordmark{height:22px;width:auto;display:block}
 @media (max-width:760px){header .wordmark{display:none}}
 header nav{display:flex;gap:18px}
