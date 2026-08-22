@@ -180,12 +180,16 @@ def _schedule(plex, row, target_section, source="pass", template=None, prefs=Non
             raise PlexError("Plex offered no single-event recording option")
 
     if prefs is None:
-        prefs = {
-            "oneShot": "1",
-            # These two are what stop Plex picking a different airing later.
-            "lineupChannel": row["channel_identifier"] or "",
-            "startTimeslot": str(row["begins_at"]),
-        }
+        prefs = {}
+    prefs = dict(prefs)
+    # These three are not the user's to change on a pass booking. The pin is
+    # the whole mechanism: without it Plex picks the airing itself, which is
+    # the bug this app exists to fix.
+    prefs.update({
+        "oneShot": "1",
+        "lineupChannel": row["channel_identifier"] or "",
+        "startTimeslot": str(row["begins_at"]),
+    })
     key = plex.create_recording(
         chosen["parameters"],
         target_section or chosen.get("targetLibrarySectionID") or 2,
@@ -284,7 +288,8 @@ def run_passes(force_dry_run=None):
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
                 continue
             try:
-                _schedule(plex, pick, None, "pass", pass_id=p["id"])
+                _schedule(plex, pick, None, "pass", prefs=dict(db.unjs(p["prefs"]) or {}),
+                          pass_id=p["id"])
                 _log(p["id"], pick, "scheduled", reason, False)
                 results.append({"pass": label, "game": pick["title"],
                                 "action": "scheduled", "reason": reason,

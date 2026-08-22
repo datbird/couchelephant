@@ -275,7 +275,8 @@ var KIND_ICON = {
     fetch('/api/rules').then(function (r) { return r.json(); }).then(function (d) {
       var rules = d.rules || [];
       var c = document.getElementById('pcount');
-      if (c) c.textContent = rules.length ? rules.length : '';
+      // Bracketed, or "Passes 1" reads as the name of a second tab.
+      if (c) c.textContent = rules.length ? '(' + rules.length + ')' : '';
       if (!rules.length) {
         wrap.innerHTML = '<div class="empty">No passes yet. Press <b>+</b> above to ' +
           'follow a team or a programme.</div>';
@@ -284,20 +285,27 @@ var KIND_ICON = {
       var h = '';
       rules.forEach(function (r) {
         var where = r.networks.concat(r.channels);
-        h += '<div class="passrow" data-id="' + r.id + '">' + (KIND_ICON[r.icon] || '');
+        h += '<div class="passrow" data-id="' + esc(r.id) + '" data-who="' + r.who + '">' +
+             '<i class="own ' + r.who + '" title="' +
+             (r.who === 'ce' ? 'CouchElephant keeps this rule'
+                             : 'Plex holds this rule') + '"></i>' +
+             (KIND_ICON[r.icon] || '');
         h += '<div class="pmeta"><b>' + esc(r.title) + '</b><span class="dim tiny">' +
-             (r.kind === 'team' ? 'Every game, from the live broadcast'
-                                : 'Every episode the guide carries') +
+             esc(r.detail) +
              (where.length ? ' &middot; only on ' + esc(where.join(', ')) : '') +
              ' &middot; ' + r.booked + ' booked</span></div>';
         if (!r.enabled) h += '<span class="pill">paused</span>';
-        h += '<div class="pacts">' +
-             '<button type="button" class="tiny" data-act="edit">Edit</button>' +
-             '<button type="button" class="tiny" data-act="toggle">' +
-               (r.enabled ? 'Pause' : 'Resume') + '</button>' +
-             '<button type="button" class="tiny danger" data-act="remove">Remove</button>' +
+        h += '<div class="pacts">';
+        if (r.who === 'ce') {
+          h += '<button type="button" class="tiny" data-act="edit">Edit</button>' +
+               '<button type="button" class="tiny" data-act="toggle">' +
+                 (r.enabled ? 'Pause' : 'Resume') + '</button>';
+        }
+        h += '<button type="button" class="tiny danger" data-act="remove">Remove</button>' +
              '</div></div>';
-        h += '<div class="passdetail" data-detail="' + r.id + '" hidden></div>';
+        if (r.who === 'ce') {
+          h += '<div class="passdetail" data-detail="' + esc(r.id) + '" hidden></div>';
+        }
       });
       wrap.innerHTML = h;
     });
@@ -313,7 +321,9 @@ var KIND_ICON = {
       return;
     }
     if (act && act.act === 'remove') {
-      post('/passes/' + id + '/delete');
+      post(rowEl.dataset.who === 'plex'
+        ? '/api/plexrule/' + encodeURIComponent(id) + '/delete'
+        : '/passes/' + id + '/delete');
       return;
     }
     if (act && act.act === 'edit') {
@@ -321,7 +331,9 @@ var KIND_ICON = {
       return;
     }
 
-    // A plain click opens the pass and shows what it will record next.
+    // Only our own passes can explain themselves. Plex does not tell us what
+    // it would pick, so opening one of its rules has nothing to show.
+    if (rowEl.dataset.who === 'plex') return;
     var det = wrap.querySelector('[data-detail="' + id + '"]');
     if (open === id) { det.hidden = true; rowEl.classList.remove('open'); open = null; return; }
     wrap.querySelectorAll('.passdetail').forEach(function (d) { d.hidden = true; });
@@ -370,48 +382,108 @@ var KIND_ICON = {
   window.loadPasses();
 })();
 
-// Add a schedule. Both kinds are CouchElephant's own: it picks the airing and
-// pins it. The source limit is here too, because a rule that may only use
-// certain networks is the reason someone would make one here rather than in
-// Plex.
+// Add a schedule. The same panel the guide shows when you press record, so
+// Plex's own options are here too. With no CouchElephant option set this books
+// a plain Plex rule and Plex takes it from there.
 (function () {
-  var open = document.getElementById('addrule');
+  var opener = document.getElementById('addrule');
   var ovl = document.getElementById('ovl'), box = document.getElementById('ovlbox');
-  if (!open || !ovl || !box) return;
+  if (!opener || !ovl || !box) return;
 
-  var st = {kind: 'team', team: null, series: null, nets: [], chans: [], src: null};
+  var st = {kind: 'team', team: null, series: null, nets: [], chans: [],
+            src: null, tpl: null, pick: 0, editing: null, q: ''};
 
-  function esc(t) {
-    return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
-      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
-    });
-  }
   function shut() { ovl.classList.remove('show'); box.innerHTML = ''; }
   ovl.addEventListener('click', function (e) { if (e.target === ovl) shut(); });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && ovl.classList.contains('show')) shut();
   });
 
-  function summary() {
-    var p = st.nets.concat(st.chans);
-    return !p.length ? 'Anywhere' : p.length <= 2 ? p.join(', ') : p.length + ' selected';
+  function chosen() { return st.kind === 'team' ? st.team : st.series; }
+  function chosenName() { return st.kind === 'team' ? (st.team && st.team.name) : st.series; }
+
+  // Who ends up owning it, said before the button is pressed.
+  function verdict() {
+    return (st.nets.length || st.chans.length) ? 'ce' : 'plex';
   }
 
   function paint() {
-    var pickedLabel = st.kind === 'team'
-      ? (st.team ? st.team.name : 'No team chosen yet')
-      : (st.series ? st.series : 'No programme chosen yet');
     var lbl = document.getElementById('rpick');
     if (lbl) {
-      lbl.textContent = pickedLabel;
-      lbl.classList.toggle('set', !!(st.kind === 'team' ? st.team : st.series));
+      lbl.textContent = chosenName() || 'nothing yet';
+      lbl.classList.toggle('set', !!chosen());
     }
+    var picked = st.nets.concat(st.chans);
     var sum = document.getElementById('multisum');
-    if (sum) sum.textContent = summary();
-    var btn = document.getElementById('multibtn');
-    if (btn) btn.classList.toggle('set', !!(st.nets.length || st.chans.length));
+    if (sum) {
+      sum.textContent = !picked.length ? 'Anywhere'
+        : picked.length <= 2 ? picked.join(', ') : picked.length + ' selected';
+    }
+    var mb = document.getElementById('multibtn');
+    if (mb) mb.classList.toggle('set', !!picked.length);
     var go = document.getElementById('rgo');
-    if (go) go.disabled = !st.editing && !(st.kind === 'team' ? st.team : st.series);
+    if (go) go.disabled = !st.editing && !chosen();
+    var bar = document.getElementById('optbar');
+    if (bar) {
+      var v = verdict();
+      bar.className = 'optbar ' + v;
+      bar.innerHTML = '<i class="own ' + v + '"></i><span>' + (v === 'ce'
+        ? '<b>CouchElephant schedule.</b> It watches the guide and books each ' +
+          'airing itself, because a Plex rule takes one channel and you have ' +
+          'named more than one source.'
+        : '<b>Plex schedule.</b> This becomes an ordinary Plex rule, and Plex ' +
+          'takes it from here.') + '</span>';
+    }
+  }
+
+  function row(owner, id, label, control, hint, cls) {
+    return '<label class="optrow' + (cls ? ' ' + cls : '') + '" for="' + id + '">' +
+      '<i class="own ' + owner + '" title="' +
+        (owner === 'ce' ? 'CouchElephant feature' : 'Plex DVR feature') + '"></i>' +
+      '<span class="optlabel">' + esc(label) +
+        (hint ? '<span class="opthint">' + esc(hint) + '</span>' : '') + '</span>' +
+      control + '</label>';
+  }
+
+  function field(stg) {
+    var id = 'set_' + stg.id, c = '';
+    if (stg.options && stg.options.length) {
+      c += '<select id="' + id + '" data-set="' + esc(stg.id) + '">';
+      stg.options.forEach(function (op) {
+        c += '<option value="' + esc(op.value) + '"' +
+             (String(op.value) === String(stg.value) ? ' selected' : '') + '>' +
+             esc(op.label) + '</option>';
+      });
+      c += '</select>';
+    } else if (stg.type === 'bool') {
+      var on = String(stg.value) === 'true' || String(stg.value) === '1';
+      c += '<input type="checkbox" id="' + id + '" data-set="' + esc(stg.id) +
+           '" data-bool="1"' + (on ? ' checked' : '') + '>';
+    } else if (stg.type === 'int') {
+      c += '<input type="number" id="' + id + '" data-set="' + esc(stg.id) +
+           '" value="' + esc(stg.value) + '">';
+    } else {
+      c += '<input type="text" id="' + id + '" data-set="' + esc(stg.id) +
+           '" value="' + esc(stg.value) + '">';
+    }
+    return row('plex', id, stg.label, c);
+  }
+
+  function multiField() {
+    var picked = st.nets.concat(st.chans);
+    var summary = !picked.length ? 'Anywhere'
+      : picked.length <= 2 ? picked.join(', ') : picked.length + ' selected';
+    var c = '<span class="multi" id="multi">' +
+      '<button type="button" class="multibtn" id="multibtn">' +
+        '<span id="multisum">' + esc(summary) + '</span>' +
+        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+          'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
+          'stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>' +
+      '<span class="multimenu" id="multimenu">' +
+        '<input class="multiq" id="multiq" placeholder="Search..." autocomplete="off">' +
+        '<span class="multibody" id="multibody"></span></span></span>';
+    return row('ce', 'multibtn', 'Limit to networks or channels', c,
+               'Plex takes one channel. This takes as many as you like.', 'wide');
   }
 
   function render() {
@@ -421,45 +493,53 @@ var KIND_ICON = {
          (st.editing ? esc(st.editing.title) : 'A recording schedule') +
          '</h2></div><button class="ovlclose" id="rx" aria-label="Close">&times;</button></div>';
 
-    h += '<div class="optbar ce"><i class="own ce"></i><span><b>CouchElephant ' +
-         'schedule.</b> It watches the guide and books each airing itself, always ' +
-         'from the live broadcast.</span></div>';
+    h += '<div class="optbar" id="optbar"></div>';
 
     if (!st.editing) {
-    h += '<div class="ovlsec"><h3>What to follow</h3>';
-    [['team', 'A team', 'every game it plays'],
-     ['series', 'A programme', 'every episode the guide carries']].forEach(function (k) {
-      h += '<label class="pickrow' + (st.kind === k[0] ? ' on' : '') + '">' +
-           '<input type="radio" name="rkind" value="' + k[0] + '"' +
-           (st.kind === k[0] ? ' checked' : '') + '>' +
-           '<span>' + k[1] + '</span><span class="note">' + k[2] + '</span></label>';
-    });
-    h += '</div>';
+      h += '<div class="ovlsec"><h3>What to follow</h3>';
+      [['team', 'A team', 'every game it plays'],
+       ['series', 'A programme', 'every episode the guide carries']].forEach(function (k) {
+        h += '<label class="pickrow' + (st.kind === k[0] ? ' on' : '') + '">' +
+             '<input type="radio" name="rkind" value="' + k[0] + '"' +
+             (st.kind === k[0] ? ' checked' : '') + '>' +
+             '<span>' + k[1] + '</span><span class="note">' + k[2] + '</span></label>';
+      });
+      h += '</div>';
 
-    h += '<div class="ovlsec"><h3 id="rhead">' +
-         (st.kind === 'team' ? 'Which team' : 'Which programme') + '</h3>' +
-         '<div class="rpicked">Following: <b id="rpick">nothing yet</b></div>' +
-         '<input class="fsearch rq" id="rq" autocomplete="off" placeholder="' +
-         (st.kind === 'team' ? 'Search teams...' : 'Search programmes in the guide...') +
-         '">' +
-         '<div class="rlist" id="rlist"></div></div>';
+      h += '<div class="ovlsec"><h3>' +
+           (st.kind === 'team' ? 'Which team' : 'Which programme') + '</h3>' +
+           '<div class="rpicked">Following: <b id="rpick">nothing yet</b></div>' +
+           '<input class="fsearch rq" id="rq" autocomplete="off" value="' + esc(st.q) +
+           '" placeholder="' +
+           (st.kind === 'team' ? 'Search teams...' : 'Search programmes in the guide...') +
+           '"><div class="rlist" id="rlist"></div></div>';
+    }
+
+    // Plex's own choices, once there is something to ask Plex about.
+    if (st.tpl && st.tpl.length > 1) {
+      h += '<div class="ovlsec"><h3>What Plex records</h3>';
+      st.tpl.forEach(function (t, i) {
+        h += '<label class="pickrow' + (i === st.pick ? ' on' : '') + '">' +
+             '<input type="radio" name="rtpl" value="' + i + '"' +
+             (i === st.pick ? ' checked' : '') + '>' +
+             '<span>' + esc(t.title) + '</span></label>';
+      });
+      h += '</div>';
     }
 
     h += '<div class="ovlsec"><h3>Options</h3>' +
-         '<div class="ownkey"><span><i class="own ce"></i>CouchElephant</span></div>' +
-         '<div class="optgrid"><label class="optrow wide" for="multibtn">' +
-         '<i class="own ce" title="CouchElephant feature"></i>' +
-         '<span class="optlabel">Limit to networks or channels' +
-         '<span class="opthint">Plex takes one channel. This takes as many as you like.' +
-         '</span></span>' +
-         '<span class="multi" id="multi"><button type="button" class="multibtn" id="multibtn">' +
-         '<span id="multisum">Anywhere</span>' +
-         '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
-         'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
-         '<path d="M6 9l6 6 6-6"/></svg></button>' +
-         '<span class="multimenu" id="multimenu">' +
-         '<input class="multiq" id="multiq" placeholder="Search..." autocomplete="off">' +
-         '<span class="multibody" id="multibody"></span></span></span></label></div></div>';
+         '<div class="ownkey"><span><i class="own ce"></i>CouchElephant</span>' +
+         '<span><i class="own plex"></i>Plex DVR</span></div><div class="optgrid">';
+    h += multiField();
+    if (st.tpl && st.tpl[st.pick]) {
+      st.tpl[st.pick].settings.forEach(function (stg) { h += field(stg); });
+    }
+    h += '</div>';
+    if (!st.tpl) {
+      h += '<div class="note" style="margin-top:10px">Plex\'s own options appear ' +
+           'once you have chosen what to follow.</div>';
+    }
+    h += '</div>';
 
     h += '<div class="ovlfoot"><button class="primary" id="rgo"' +
          (st.editing ? '' : ' disabled') + '>' +
@@ -472,17 +552,38 @@ var KIND_ICON = {
     document.getElementById('rcancel').addEventListener('click', shut);
     box.querySelectorAll('input[name=rkind]').forEach(function (r) {
       r.addEventListener('change', function () {
-        st.kind = r.value; st.team = null; st.series = null; render();
+        st.kind = r.value; st.team = null; st.series = null; st.tpl = null;
+        st.pick = 0; st.q = '';
+        render();
       });
+    });
+    box.querySelectorAll('input[name=rtpl]').forEach(function (r) {
+      r.addEventListener('change', function () { st.pick = +r.value; render(); });
     });
     var q = document.getElementById('rq');
     if (q) {
-      q.addEventListener('input', function () { search(q.value); });
-      search('');
+      q.addEventListener('input', function () { st.q = q.value; search(st.q); });
+      search(st.q);
     }
     wireMulti();
     document.getElementById('rgo').addEventListener('click', create);
     paint();
+  }
+
+  // Once something is chosen, ask Plex what it can do with it.
+  function loadTemplates() {
+    var url = st.kind === 'team'
+      ? '/api/rules/options?kind=team&team_id=' + encodeURIComponent(st.team.id)
+      : '/api/rules/options?kind=series&series=' + encodeURIComponent(st.series);
+    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      st.tpl = d.ok ? d.templates : null;
+      st.pick = 0;
+      render();
+      if (!d.ok) {
+        var m = document.getElementById('ovlmsg');
+        if (m) { m.className = 'note said bad'; m.textContent = d.error; }
+      }
+    });
   }
 
   var timer = null;
@@ -497,21 +598,21 @@ var KIND_ICON = {
         if (!list) return;
         var h = '', rows = st.kind === 'team' ? (d.teams || []) : (d.series || []);
         if (!rows.length) {
-          // A team only exists while the guide carries a game it plays, so an
-          // empty result usually means the season has not reached it yet.
           list.innerHTML = '<div class="fempty">Nothing matches. ' +
-            (st.kind === 'team'
-              ? 'Only teams playing in your guide are listed.'
-              : 'Only programmes still to air are listed.') + '</div>';
+            (st.kind === 'team' ? 'Only teams playing in your guide are listed.'
+                                : 'Only programmes still to air are listed.') + '</div>';
           return;
         }
         rows.forEach(function (r2) {
           if (st.kind === 'team') {
-            h += '<button type="button" class="rrow" data-team="' + r2.id + '" data-name="' +
+            h += '<button type="button" class="rrow' +
+                 (st.team && String(st.team.id) === String(r2.id) ? ' on' : '') +
+                 '" data-team="' + r2.id + '" data-name="' +
                  esc(r2.name) + '"><span class="rt">' + esc(r2.name) + '</span>' +
                  (r2.followed ? '<span class="pill ok">following</span>' : '') + '</button>';
           } else {
-            h += '<button type="button" class="rrow" data-series="' + esc(r2.name) +
+            h += '<button type="button" class="rrow' +
+                 (st.series === r2.name ? ' on' : '') + '" data-series="' + esc(r2.name) +
                  '"><span class="rt">' + esc(r2.name) + '</span>' +
                  '<span class="rn">' + r2.airings + ' upcoming</span></button>';
           }
@@ -520,25 +621,32 @@ var KIND_ICON = {
         list.querySelectorAll('[data-team]').forEach(function (b) {
           b.addEventListener('click', function () {
             st.team = {id: b.dataset.team, name: b.dataset.name};
-            list.querySelectorAll('.rrow').forEach(function (x) { x.classList.remove('on'); });
-            b.classList.add('on'); paint();
+            loadTemplates();
           });
         });
         list.querySelectorAll('[data-series]').forEach(function (b) {
           b.addEventListener('click', function () {
             st.series = b.dataset.series;
-            list.querySelectorAll('.rrow').forEach(function (x) { x.classList.remove('on'); });
-            b.classList.add('on'); paint();
+            loadTemplates();
           });
         });
       });
     }, 180);
   }
 
+  function placeMenu(btn, menu) {
+    requestAnimationFrame(function () {
+      menu.classList.remove('up');
+      var panel = menu.closest('.ovlbox') || document.documentElement;
+      var room = panel.getBoundingClientRect().bottom - btn.getBoundingClientRect().bottom;
+      if (room < menu.offsetHeight + 16) menu.classList.add('up');
+    });
+  }
 
   function wireMulti() {
     var btn = document.getElementById('multibtn'), menu = document.getElementById('multimenu'),
         mq = document.getElementById('multiq');
+    if (!btn) return;
     btn.addEventListener('click', function (e) {
       e.preventDefault();
       if (menu.classList.toggle('open')) {
@@ -553,19 +661,6 @@ var KIND_ICON = {
     document.addEventListener('click', function (e) {
       var m = document.getElementById('multi');
       if (m && !m.contains(e.target)) menu.classList.remove('open');
-    });
-  }
-
-  // Open upward when the panel has no room below. The menu sits in a scrolling
-  // box, so a menu that overflows is clipped rather than scrolled to.
-  function placeMenu(btn, menu) {
-    // After the next frame, so the menu is measured at the height it actually
-    // rendered. Measuring in the same tick reads the empty box and never flips.
-    requestAnimationFrame(function () {
-      menu.classList.remove('up');
-      var panel = menu.closest('.ovlbox') || document.documentElement;
-      var room = panel.getBoundingClientRect().bottom - btn.getBoundingClientRect().bottom;
-      if (room < menu.offsetHeight + 16) menu.classList.add('up');
     });
   }
 
@@ -609,7 +704,12 @@ var KIND_ICON = {
 
   function create(e) {
     var btn = e.target, msg = document.getElementById('ovlmsg');
+    var back = st.editing ? 'Save pass' : 'Create schedule';
     btn.disabled = true; btn.textContent = 'Working...';
+    var vals = {};
+    box.querySelectorAll('[data-set]').forEach(function (el) {
+      vals[el.dataset.set] = el.dataset.bool ? (el.checked ? 'true' : 'false') : el.value;
+    });
     var url = st.editing ? '/api/rules/' + st.editing.id : '/api/rules';
     var body = st.editing
       ? new URLSearchParams({networks: JSON.stringify(st.nets),
@@ -620,7 +720,9 @@ var KIND_ICON = {
           team_id: st.team ? st.team.id : '',
           series: st.series || '',
           networks: JSON.stringify(st.nets),
-          channels: JSON.stringify(st.chans)
+          channels: JSON.stringify(st.chans),
+          template: st.pick,
+          settings: JSON.stringify(vals)
         });
     fetch(url, {method: 'POST', body: body})
       .then(function (r) { return r.text().then(function (t) {
@@ -630,19 +732,19 @@ var KIND_ICON = {
       .then(function (j) {
         msg.className = 'note said ' + (j.ok ? 'ok' : 'bad');
         msg.textContent = j.message || j.error || '';
-        if (j.ok) { btn.textContent = 'Done'; setTimeout(function () { location.reload(); }, 900); }
-        else { btn.disabled = false; btn.textContent = st.editing ? 'Save pass' : 'Create schedule'; }
+        if (j.ok) { btn.textContent = 'Done'; setTimeout(function () { location.reload(); }, 1100); }
+        else { btn.disabled = false; btn.textContent = back; }
       })
       .catch(function (err) {
         msg.className = 'note said bad';
         msg.textContent = 'Could not reach CouchElephant: ' + err;
-        btn.disabled = false; btn.textContent = st.editing ? 'Save pass' : 'Create schedule';
+        btn.disabled = false; btn.textContent = back;
       });
   }
 
-  open.addEventListener('click', function () {
-    st = {kind: 'team', team: null, series: null, nets: [], chans: [], src: st.src,
-          editing: null};
+  opener.addEventListener('click', function () {
+    st = {kind: 'team', team: null, series: null, nets: [], chans: [],
+          src: st.src, tpl: null, pick: 0, editing: null, q: ''};
     ovl.classList.add('show'); render();
   });
 
@@ -656,7 +758,7 @@ var KIND_ICON = {
             team: r.kind === 'team' ? {id: r.team_id, name: r.title} : null,
             series: r.kind === 'team' ? null : r.title,
             nets: r.networks.slice(), chans: r.channels.slice(),
-            src: st.src, editing: r};
+            src: st.src, tpl: null, pick: 0, editing: r, q: ''};
       ovl.classList.add('show'); render();
     });
   };

@@ -225,6 +225,12 @@ MIGRATIONS = [
     ("channels", "custom_logo_at", "INTEGER"),
     # Which rule booked this, so the schedule can say why a thing records.
     ("our_grabs", "pass_id", "INTEGER"),
+    # Plex's own recording settings, kept on the pass and applied to every
+    # broadcast it books, so padding and quality are not lost by using a pass.
+    ("passes", "prefs", "TEXT"),
+    # What a Plex rule follows. Its own title is the generic template name,
+    # "All Episodes", which says nothing about which programme.
+    ("plex_subscriptions", "target", "TEXT"),
     ("passes", "series_guid", "TEXT"),
     ("passes", "series_title", "TEXT"),
 ]

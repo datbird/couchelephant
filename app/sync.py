@@ -291,14 +291,24 @@ def sync_recordings(plex):
             key = str(s.get("key"))
             detail = plex.subscription(key) or s
             settings = {st.get("id"): st.get("value") for st in (detail.get("Setting") or [])}
+            # Plex titles a rule by its template, "All Episodes", which says
+            # nothing about what it follows. The programme is on the body, under
+            # Directory for a series rule and Video for a single event.
+            body = (detail.get("Directory") or detail.get("Video")
+                    or s.get("Directory") or s.get("Video") or {})
+            if isinstance(body, list):
+                body = body[0] if body else {}
+            target = body.get("grandparentTitle") or body.get("title") or None
             c.execute(
-                """INSERT INTO plex_subscriptions (key, title, type, target_section, settings,
-                                                   created_at, updated_at, owned_by_us)
-                   VALUES (?,?,?,?,?,?,?,?)
+                """INSERT INTO plex_subscriptions (key, title, type, target, target_section,
+                                                   settings, created_at, updated_at, owned_by_us)
+                   VALUES (?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(key) DO UPDATE SET title=excluded.title, type=excluded.type,
+                     target=COALESCE(excluded.target, plex_subscriptions.target),
                      target_section=excluded.target_section, settings=excluded.settings,
                      updated_at=excluded.updated_at, owned_by_us=excluded.owned_by_us""",
-                (key, s.get("title"), str(s.get("type")), str(s.get("targetLibrarySectionID")),
+                (key, s.get("title"), str(s.get("type")), target,
+                 str(s.get("targetLibrarySectionID")),
                  db.js(settings), s.get("createdAt"), now, 1 if key in ours else 0),
             )
         c.execute("DELETE FROM plex_subscriptions WHERE updated_at < ?", (now,))

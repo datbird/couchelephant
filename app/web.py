@@ -495,6 +495,38 @@ def _enum(raw):
     return out
 
 
+def _template_payload(options, row=None, pin=True):
+    """Plex's own recording choices, ready to render.
+
+    Settings Plex leaves unlabelled are plumbing and stay hidden, the same as
+    in its own dialog. For a single broadcast the channel and the airing time
+    arrive already pinned, which is the whole point of this app.
+    """
+    out = []
+    for i, s_ in enumerate(options):
+        title = s_.get("title") or "Record"
+        one_shot = title.lower().startswith("this ")
+        settings = []
+        for st in (s_.get("Setting") or []):
+            sid = st.get("id")
+            if sid in _HIDDEN_SETTINGS or not (st.get("label") or "").strip():
+                continue
+            value = str(st.get("value"))
+            if pin and one_shot and row is not None and sid == "lineupChannel":
+                value = row["channel_identifier"] or value
+            if pin and one_shot and row is not None and sid == "startTimeslot":
+                value = str(row["begins_at"])
+            settings.append({
+                "id": sid, "label": st.get("label"), "type": st.get("type"),
+                "value": value, "options": _enum(st.get("enumValues")),
+            })
+        out.append({
+            "index": i, "title": title, "type": s_.get("type"),
+            "one_shot": one_shot, "settings": settings,
+        })
+    return out
+
+
 def _airing_row(airing_id):
     return db.one(
         """SELECT a.*, p.rating_key, p.title, p.grandparent_title, p.teams
@@ -521,30 +553,7 @@ async def api_record_options(airing_id: str):
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=502)
 
-    out = []
-    for i, s_ in enumerate(options):
-        title = s_.get("title") or "Record"
-        one_shot = title.lower().startswith("this ")
-        settings = []
-        for st in (s_.get("Setting") or []):
-            sid = st.get("id")
-            if sid in _HIDDEN_SETTINGS or not (st.get("label") or "").strip():
-                continue
-            value = str(st.get("value"))
-            # CouchElephant's whole point is pinning the single event to the
-            # broadcast the user picked, so those two arrive already set.
-            if one_shot and sid == "lineupChannel":
-                value = row["channel_identifier"] or value
-            if one_shot and sid == "startTimeslot":
-                value = str(row["begins_at"])
-            settings.append({
-                "id": sid, "label": st.get("label"), "type": st.get("type"),
-                "value": value, "options": _enum(st.get("enumValues")),
-            })
-        out.append({
-            "index": i, "title": title, "type": s_.get("type"),
-            "one_shot": one_shot, "settings": settings,
-        })
+    out = _template_payload(options, row)
     # Where a recording could come from. Networks first, because "only ABC,
     # CBS and FOX" is how people say it; channels are the finer grain.
     nets, chans = {}, []
@@ -1010,6 +1019,43 @@ def api_sources():
     })
 
 
+@app.get("/api/rules/options")
+def api_rule_options(kind: str = "team", team_id: str = "", series: str = ""):
+    """Plex's own options for a rule that follows this team or programme.
+
+    A template belongs to a programme, so one upcoming broadcast stands in for
+    the rest. Only the recurring choices are offered here: a rule that records
+    one broadcast is not a rule.
+    """
+    if kind == "team":
+        rows = passes.candidate_airings(int(team_id or 0))
+    else:
+        rows = passes.series_airings((series or "").strip())
+    if not rows:
+        return JSONResponse({"ok": False, "error":
+                             "Nothing from this is in the guide yet, so Plex has no "
+                             "options to offer for it."})
+    row = rows[0]
+    try:
+        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+        options = passes.templates(plex, row)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    payload = [t for t in _template_payload(options, row, pin=False) if not t["one_shot"]]
+    # Put the one that names what you chose first, since that is the rule the
+    # user means; Plex lists them in its own order.
+    if kind == "team":
+        t = db.one("SELECT name FROM teams WHERE id = ?", (team_id or 0,))
+        want = t["name"] if t else ""
+    else:
+        want = (series or "").strip()
+    if want:
+        payload.sort(key=lambda t: 0 if want.lower() in (t["title"] or "").lower() else 1)
+    return JSONResponse({"ok": True, "templates": payload,
+                         "sample": row["title"]})
+
+
 @app.get("/api/rules")
 def api_rules():
     """Every pass, with what it follows and where it may record from."""
@@ -1019,12 +1065,39 @@ def api_rules():
         chans = db.unjs(p["channels"]) or []
         booked = db.one("SELECT COUNT(*) c FROM our_grabs WHERE pass_id = ?", (p["id"],))["c"]
         out.append({
-            "id": p["id"], "kind": p["kind"],
+            "id": p["id"], "who": "ce", "kind": p["kind"],
             "icon": "sports" if p["kind"] == "team" else "series",
             "title": p["team_name"] or p["series_title"],
             "team_id": p["team_id"], "series": p["series_title"],
             "networks": nets, "channels": chans,
             "enabled": bool(p["enabled"]), "booked": booked,
+            "detail": ("Every game, from the live broadcast" if p["kind"] == "team"
+                       else "Every episode the guide carries"),
+        })
+
+    # Plex's own recurring rules belong here too. A rule you just made would
+    # otherwise be invisible until Plex got round to scheduling something.
+    sports_titles = {r["title"] for r in db.query(
+        "SELECT DISTINCT title FROM programs WHERE teams IS NOT NULL AND teams != '[]'")}
+    for s_ in db.query("SELECT * FROM plex_subscriptions ORDER BY title"):
+        cfg = db.unjs(s_["settings"], {}) or {}
+        if str(cfg.get("oneShot", "")).lower() in ("1", "true", "yes"):
+            continue
+        booked = db.one("SELECT COUNT(*) c FROM plex_grabs WHERE subscription = ?",
+                        (s_["key"],))["c"]
+        bits = [s_["title"]] if s_["target"] else []
+        bits.append("New only" if cfg.get("onlyNewAirings") == "1" else "New and repeats")
+        if cfg.get("lineupChannel"):
+            bits.append("one channel")
+        out.append({
+            "id": s_["key"], "who": "plex",
+            "kind": "team" if str(s_["type"]) == "15" else "series",
+            "icon": "sports" if (str(s_["type"]) == "15"
+                                 or s_["title"] in sports_titles) else "series",
+            "title": s_["target"] or s_["title"],
+            "team_id": None, "series": None,
+            "networks": [], "channels": [], "enabled": True, "booked": booked,
+            "detail": ", ".join(bits),
         })
     return JSONResponse({"ok": True, "rules": out})
 
@@ -1096,46 +1169,90 @@ async def api_rule_edit(rule_id: int, networks: str = Form(""),
 @app.post("/api/rules")
 async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
                           series: str = Form(""), networks: str = Form(""),
-                          channels: str = Form("")):
+                          channels: str = Form(""), template: int = Form(0),
+                          settings: str = Form("")):
     """Create a schedule that keeps matching new airings.
 
-    Both kinds are CouchElephant's own: it picks the airing and pins it, which
-    is the whole reason this app exists.
+    With no source limit this is something Plex can express on its own, so it
+    becomes a plain Plex rule and Plex takes it from there. Name more than one
+    network or channel and Plex cannot say it, so CouchElephant keeps the rule
+    and books each airing itself.
     """
     nets = db.unjs(networks, []) or []
     chans = db.unjs(channels, []) or []
+    prefs = dict(db.unjs(settings, {}) or {})
+
     if kind == "team":
         t = db.one("SELECT * FROM teams WHERE id = ?", (team_id or 0,))
         if not t:
             return JSONResponse({"ok": False, "error": "pick a team"}, status_code=400)
+        label, rows = t["name"], passes.candidate_airings(t["id"])
+    else:
+        label = (series or "").strip()
+        if not label:
+            return JSONResponse({"ok": False, "error": "pick a programme"}, status_code=400)
+        rows = passes.series_airings(label)
+
+    if not (nets or chans):
+        return await asyncio.to_thread(_make_plex_rule, label, rows, template, prefs)
+
+    if kind == "team":
         if db.one("SELECT 1 FROM passes WHERE kind='team' AND team_id = ?", (t["id"],)):
             return JSONResponse({"ok": False,
                                  "error": f"You already follow {t['name']}."}, status_code=409)
         with db.tx() as c:
             c.execute("INSERT INTO passes (kind, team_id, team_name, networks, channels, "
-                      "enabled, created_at) VALUES ('team',?,?,?,?,1,?)",
-                      (t["id"], t["name"], db.js(nets), db.js(chans), int(time.time())))
-        label = t["name"]
+                      "prefs, enabled, created_at) VALUES ('team',?,?,?,?,?,1,?)",
+                      (t["id"], t["name"], db.js(nets), db.js(chans), db.js(prefs),
+                       int(time.time())))
     else:
-        name = (series or "").strip()
-        if not name:
-            return JSONResponse({"ok": False, "error": "pick a programme"}, status_code=400)
-        if db.one("SELECT 1 FROM passes WHERE kind='series' AND series_title = ?", (name,)):
+        if db.one("SELECT 1 FROM passes WHERE kind='series' AND series_title = ?", (label,)):
             return JSONResponse({"ok": False,
-                                 "error": f"You already follow {name}."}, status_code=409)
+                                 "error": f"You already follow {label}."}, status_code=409)
         with db.tx() as c:
             c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
-                      "channels, enabled, created_at) VALUES ('series',?,?,?,?,1,?)",
-                      (name, name, db.js(nets), db.js(chans), int(time.time())))
-        label = name
+                      "channels, prefs, enabled, created_at) "
+                      "VALUES ('series',?,?,?,?,?,1,?)",
+                      (label, label, db.js(nets), db.js(chans), db.js(prefs),
+                       int(time.time())))
 
     done = await asyncio.to_thread(passes.run_passes)
     made = len([d for d in done if d["action"] == "scheduled"])
     where = " or ".join(nets + chans)
-    return JSONResponse({"ok": True, "message":
-                         f"Following {label}"
-                         + (f", only from {where}" if where else "")
-                         + f". {made} upcoming airing(s) scheduled."})
+    return JSONResponse({"ok": True, "ce_rule": True, "message":
+                         f"CouchElephant is following {label}, only from {where}. "
+                         f"{made} upcoming airing(s) scheduled."})
+
+
+def _make_plex_rule(label, rows, template, prefs):
+    """Hand the rule to Plex, which is all it needs when nothing narrows it."""
+    if not rows:
+        return JSONResponse({"ok": False, "error":
+                             f"Nothing from {label} is in the guide yet, so there is "
+                             "nothing for Plex to make a rule from."}, status_code=400)
+    row = rows[0]
+    try:
+        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+        options = [t for t in passes.templates(plex, row)
+                   if not (t.get("title") or "").lower().startswith("this ")]
+        if not options:
+            raise PlexError("Plex offered no recurring rule for this")
+        chosen = options[template] if 0 <= template < len(options) else options[0]
+        prefs = dict(prefs)
+        prefs["oneShot"] = "0"
+        key = plex.create_recording(
+            chosen["parameters"],
+            chosen.get("targetLibrarySectionID") or 2,
+            int(chosen.get("type") or 2), prefs)
+        if key and not plex.subscription_exists(key):
+            raise PlexError("Plex accepted the rule and then discarded it. It may "
+                            "already have one for this.")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
+    sync.sync_recordings(plex)
+    return JSONResponse({"ok": True, "ce_rule": False, "message":
+                         f"Plex is now recording {chosen.get('title') or label}. "
+                         "It appears in the schedule as Plex's own rule."})
 
 
 @app.post("/passes/add")
@@ -1146,6 +1263,18 @@ def pass_add(team_id: int = Form(...)):
             c.execute("INSERT INTO passes (kind, team_id, team_name, enabled, created_at) "
                       "VALUES ('team', ?, ?, 1, ?)", (t["id"], t["name"], int(time.time())))
     return RedirectResponse("/recordings", status_code=303)
+
+
+@app.post("/api/plexrule/{key}/delete")
+def api_plexrule_delete(key: str):
+    """Remove one of Plex's own recurring rules."""
+    try:
+        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+        plex.delete_subscription(key)
+        sync.sync_recordings(plex)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
+    return JSONResponse({"ok": True, "message": "Removed from Plex."})
 
 
 @app.post("/passes/{pass_id}/delete")

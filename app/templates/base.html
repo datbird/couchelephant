@@ -352,9 +352,12 @@ tr:hover td{background:var(--panel2)}
 .ovl{position:fixed;inset:0;background:var(--scrim);z-index:50;display:none;
   align-items:center;justify-content:center;padding:24px}
 .ovl.show{display:flex}
+/* Down only. Nothing in the panel is meant to scroll sideways, and the box's
+   own border rounds scrollWidth 2px past clientWidth, which is enough to put a
+   scrollbar across the bottom of a panel that fits. */
 .ovlbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-  width:min(720px,100%);max-height:min(86vh,860px);overflow:auto;
-  box-shadow:var(--shadow-lg)}
+  width:min(720px,100%);max-height:min(86vh,860px);
+  overflow-x:hidden;overflow-y:auto;box-shadow:var(--shadow-lg)}
 .ovlhead{display:flex;gap:16px;padding:20px 22px 16px;border-bottom:1px solid var(--line)}
 .ovlthumb{width:104px;height:150px;object-fit:cover;border-radius:6px;flex:0 0 104px;
   background:var(--panel2)}
@@ -559,7 +562,10 @@ tr:hover td{background:var(--panel2)}
    explanation, and in a half-width cell that line was clipped. */
 .optrow.wide{grid-column:1/-1}
 .optrow.wide .optlabel{overflow:visible;white-space:normal}
-.optrow.wide .multi{max-width:320px;flex:0 0 320px}
+/* Allowed to shrink. Fixed at 320 it pushed the panel 2px wider than its own
+   box, which is all it takes to put a scrollbar across the bottom. */
+.optrow.wide .multi{max-width:320px;flex:0 1 320px;min-width:0}
+.optgrid>*{min-width:0}
 
 @media (max-width:700px){
   .optgrid{grid-template-columns:1fr}
