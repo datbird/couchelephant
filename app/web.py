@@ -3,6 +3,7 @@ import asyncio
 import datetime
 import os
 import time
+import urllib.parse
 import zoneinfo
 
 from fastapi import FastAPI, Form, Request
@@ -267,28 +268,157 @@ def api_program(airing_id: str):
     })
 
 
+# Settings Plex exposes but does not label. It hides them in its own UI, and
+# they are plumbing rather than choices: oneShot is what makes a recording a
+# single event at all.
+_HIDDEN_SETTINGS = {"oneShot", "remoteMedia", "comskipEnabled"}
+
+
+def _enum(raw):
+    """Plex packs a setting's choices as `value:Label|value:Label`.
+
+    Labels are URL encoded inside that string, so `07%3A00 PM` has to be
+    decoded or every time option reads as gibberish.
+    """
+    out = []
+    for part in (raw or "").split("|"):
+        if not part:
+            continue
+        value, _, label = part.partition(":")
+        out.append({"value": value, "label": urllib.parse.unquote(label) or "Any"})
+    return out
+
+
+def _airing_row(airing_id):
+    return db.one(
+        """SELECT a.*, p.rating_key, p.title, p.guid AS program_guid_full
+           FROM airings a JOIN programs p ON p.guid = a.program_guid
+           WHERE a.id = ?""", (airing_id,))
+
+
+@app.get("/api/record/options")
+async def api_record_options(airing_id: str):
+    """What Plex offers for this programme, read from Plex rather than guessed.
+
+    Reading the template means any option Plex adds later appears here without
+    a change, and the labels are its own.
+    """
+    row = _airing_row(airing_id)
+    if not row:
+        return JSONResponse({"error": "airing not found"}, status_code=404)
+    if row["drm"]:
+        return JSONResponse({"error": "This airing is DRM encrypted and cannot be recorded."},
+                            status_code=400)
+    try:
+        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+        options = await asyncio.to_thread(passes.templates, plex, row)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=502)
+
+    out = []
+    for i, s_ in enumerate(options):
+        title = s_.get("title") or "Record"
+        one_shot = title.lower().startswith("this ")
+        settings = []
+        for st in (s_.get("Setting") or []):
+            sid = st.get("id")
+            if sid in _HIDDEN_SETTINGS or not (st.get("label") or "").strip():
+                continue
+            value = str(st.get("value"))
+            # CouchElephant's whole point is pinning the single event to the
+            # broadcast the user picked, so those two arrive already set.
+            if one_shot and sid == "lineupChannel":
+                value = row["channel_identifier"] or value
+            if one_shot and sid == "startTimeslot":
+                value = str(row["begins_at"])
+            settings.append({
+                "id": sid, "label": st.get("label"), "type": st.get("type"),
+                "value": value, "options": _enum(st.get("enumValues")),
+            })
+        out.append({
+            "index": i, "title": title, "type": s_.get("type"),
+            "one_shot": one_shot, "settings": settings,
+        })
+    return JSONResponse({
+        "ok": True, "title": row["title"], "templates": out,
+        "dry_run": db.get_setting("dry_run") == "1",
+    })
+
+
 @app.post("/api/record")
-async def api_record(airing_id: str = Form(...)):
-    """Schedule this exact broadcast, pinned to its channel and start time."""
+async def api_record(airing_id: str = Form(...), template: int = Form(0),
+                     settings: str = Form("")):
+    """Schedule this broadcast with the options the user chose."""
     if db.get_setting("dry_run") == "1":
         return JSONResponse({"ok": False, "error":
-                             "Preview mode is on. Turn it off in Settings to record."}, status_code=400)
-    row = db.one(
-        """SELECT a.*, p.rating_key, p.title FROM airings a
-           JOIN programs p ON p.guid = a.program_guid WHERE a.id = ?""", (airing_id,))
+                             "Preview mode is on. Turn it off in Settings to record."},
+                            status_code=400)
+    row = _airing_row(airing_id)
     if not row:
         return JSONResponse({"ok": False, "error": "airing not found"}, status_code=404)
     if row["drm"]:
         return JSONResponse({"ok": False, "error":
-                             "This airing is DRM encrypted and cannot be recorded."}, status_code=400)
+                             "This airing is DRM encrypted and cannot be recorded."},
+                            status_code=400)
     try:
         plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        await asyncio.to_thread(passes._schedule, plex, row, None, "manual")
+        options = await asyncio.to_thread(passes.templates, plex, row)
+        if not options:
+            raise PlexError("Plex offered no recording options")
+        chosen = options[template] if 0 <= template < len(options) else options[0]
+
+        prefs = dict(db.unjs(settings, {}) or {})
+        # oneShot is never shown, and it is what separates one game from every
+        # future airing of the same programme. It follows the template.
+        prefs["oneShot"] = "1" if (chosen.get("title") or "").lower().startswith("this ") else "0"
+        prefs = {k: v for k, v in prefs.items() if v is not None}
+
+        await asyncio.to_thread(passes._schedule, plex, row, None, "manual", chosen, prefs)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
     await asyncio.to_thread(sync.sync_recordings, Plex(db.get_setting("plex_url"),
                                                       db.get_setting("plex_token")))
     return JSONResponse({"ok": True, "message": "Recording scheduled."})
+
+
+@app.post("/api/record/cancel")
+async def api_record_cancel(airing_id: str = Form(...)):
+    """Undo a recording this app scheduled."""
+    mine = db.one("SELECT * FROM our_grabs WHERE airing_id = ?", (airing_id,))
+    if not mine:
+        return JSONResponse({"ok": False, "error": "CouchElephant did not schedule this."},
+                            status_code=404)
+    key = mine["subscription"]
+    plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+    if not key:
+        # Scheduled before the key was being stored, or Plex was slow to list
+        # it. Look it up again rather than refusing to cancel.
+        try:
+            key = await asyncio.to_thread(plex.find_subscription,
+                                          mine["program_guid"], mine["begins_at"])
+        except Exception:
+            key = None
+    if not key:
+        return JSONResponse({"ok": False, "error":
+                             "Cannot find this recording in Plex. It may already be gone."},
+                            status_code=404)
+    try:
+        await asyncio.to_thread(plex.delete_subscription, key)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
+    await asyncio.to_thread(passes.forget, airing_id)
+    await asyncio.to_thread(sync.sync_recordings, plex)
+    # Deleting the subscription stops Plex recording, but a recording already
+    # under way leaves the part it captured in the library. Say so rather than
+    # letting the user find a stray file later.
+    started = db.one(
+        "SELECT status FROM plex_grabs WHERE title = ? AND status IN "
+        "('inprogress','complete') LIMIT 1", (mine["title"],))
+    if started:
+        return JSONResponse({"ok": True, "message":
+                             "Cancelled. It had already started, so what Plex "
+                             "captured so far is still in your library."})
+    return JSONResponse({"ok": True, "message": "Recording cancelled."})
 
 
 @app.post("/api/pass")

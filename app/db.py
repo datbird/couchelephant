@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS our_grabs (
     channel_vcn  TEXT,
     begins_at    INTEGER,
     source       TEXT,
+    subscription TEXT,
     created_at   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_ourgrabs_guid ON our_grabs(program_guid);
@@ -201,6 +202,9 @@ MIGRATIONS = [
     ("channels", "logo_source", "TEXT"),
     ("channels", "logo_fetched_at", "INTEGER"),
     ("channels", "logo_attempts", "INTEGER DEFAULT 0"),
+    # The Plex subscription a recording of ours created, so it can be cancelled
+    # again from the same place it was scheduled.
+    ("our_grabs", "subscription", "TEXT"),
 ]
 
 

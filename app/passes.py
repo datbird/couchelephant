@@ -103,48 +103,84 @@ def _log(pass_id, row, action, reason, dry_run, subscription=None):
         )
 
 
-def _schedule(plex, row, target_section, source="pass"):
-    """Create a one-shot recording pinned to exactly this broadcast."""
-    options = plex.template(row["rating_key"])
-    single = None
-    for t in options:
-        for s in (t.get("MediaSubscription") or []):
-            title = (s.get("title") or "").lower()
-            if title.startswith("this "):
-                single = s
-                break
-        if single:
-            break
-    if not single:
-        raise PlexError("Plex offered no single-event recording option")
+def templates(plex, row):
+    """Every recording option Plex offers for this programme, in its order."""
+    out = []
+    for t in plex.template(row["rating_key"]):
+        out.extend(t.get("MediaSubscription") or [])
+    return out
 
-    prefs = {
-        "oneShot": "1",
-        # These two are what stop Plex picking a different airing later.
-        "lineupChannel": row["channel_identifier"] or "",
-        "startTimeslot": str(row["begins_at"]),
-    }
-    plex.create_recording(
-        single["parameters"],
-        target_section or single.get("targetLibrarySectionID") or 2,
-        int(single.get("type") or 4),
+
+def single_template(options):
+    """The one-shot option. Plex titles it "This Event" or "This Episode"."""
+    for s in options:
+        if (s.get("title") or "").lower().startswith("this "):
+            return s
+    return None
+
+
+def _schedule(plex, row, target_section, source="pass", template=None, prefs=None):
+    """Create a recording for this broadcast.
+
+    With no template given this is the pinned one-shot the passes rely on.
+    The overlay passes its own template and settings, so the user gets the
+    same choices Plex itself offers.
+    """
+    chosen = template
+    if chosen is None:
+        chosen = single_template(templates(plex, row))
+        if not chosen:
+            raise PlexError("Plex offered no single-event recording option")
+
+    if prefs is None:
+        prefs = {
+            "oneShot": "1",
+            # These two are what stop Plex picking a different airing later.
+            "lineupChannel": row["channel_identifier"] or "",
+            "startTimeslot": str(row["begins_at"]),
+        }
+    key = plex.create_recording(
+        chosen["parameters"],
+        target_section or chosen.get("targetLibrarySectionID") or 2,
+        int(chosen.get("type") or 4),
         prefs,
     )
-    remember(row, source)
-    return single.get("targetLibrarySectionID")
+    # Plex answers 200 and hands back a key, then sometimes drops the
+    # subscription by itself. Reporting a recording it did not keep is worse
+    # than failing, so check before claiming anything.
+    if key and not plex.subscription_exists(key):
+        raise PlexError(
+            "Plex accepted the recording and then discarded it. That usually "
+            "means it already has this episode, or the airing is a repeat and "
+            "the rule is set to new airings only.")
+    if not key:
+        # Older path: no key in the reply, so look it up.
+        try:
+            key = plex.find_subscription(row["program_guid"], row["begins_at"], tries=3)
+        except Exception:
+            key = None
+    remember(row, source, key)
+    return chosen.get("targetLibrarySectionID")
 
 
-def remember(row, source):
-    """Record that this airing was scheduled by us."""
+def remember(row, source, subscription=None):
+    """Record that this airing was scheduled by us, and by which subscription."""
     with db.tx() as c:
         c.execute(
             """INSERT INTO our_grabs (airing_id, program_guid, title, channel_vcn,
-                                      begins_at, source, created_at)
-               VALUES (?,?,?,?,?,?,?)
+                                      begins_at, source, subscription, created_at)
+               VALUES (?,?,?,?,?,?,?,?)
                ON CONFLICT(airing_id) DO UPDATE SET source=excluded.source,
+                 subscription=COALESCE(excluded.subscription, our_grabs.subscription),
                  created_at=excluded.created_at""",
             (row["id"], row["program_guid"], row["title"], row["channel_vcn"],
-             row["begins_at"], source, _now()))
+             row["begins_at"], source, subscription, _now()))
+
+
+def forget(airing_id):
+    """Drop our record of an airing, after the recording has been cancelled."""
+    with db.tx() as c:
+        c.execute("DELETE FROM our_grabs WHERE airing_id = ?", (airing_id,))
 
 
 def run_passes(force_dry_run=None):

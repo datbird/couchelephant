@@ -9,6 +9,7 @@ Two quirks worth knowing:
   - Creating a recording needs the template's own `parameters` string PLUS
     targetLibrarySectionID and type. Posting the template params alone is a 400.
 """
+import time
 import urllib.parse
 
 import httpx
@@ -128,7 +129,61 @@ class Plex:
             r = c.post(url)
         if r.status_code >= 400:
             raise PlexError(f"create recording -> HTTP {r.status_code}: {r.text[:300]}")
-        return r.text
+        # The reply carries the new subscription, key included. Reading it here
+        # is exact; hunting for it afterwards in the scheduled list is not.
+        try:
+            subs = r.json().get("MediaContainer", {}).get("MediaSubscription") or []
+            key = subs[0].get("key") if subs else None
+            return str(key) if key is not None else None
+        except Exception:
+            return None
+
+    def subscription_exists(self, key):
+        """True while Plex still holds this subscription.
+
+        Plex will answer a create with 200 and a key, then drop the
+        subscription on its own, for instance when the airing is a repeat and
+        the rule is new-airings-only. Without this check the app reports a
+        recording that does not exist.
+        """
+        with self._client() as c:
+            r = c.get(f"{self.base}/media/subscriptions/{key}",
+                      params={"X-Plex-Token": self.token})
+        return r.status_code < 400
+
+    def find_subscription(self, guid, begins_at, tries=1, wait=0.7):
+        """The subscription key Plex just minted for this broadcast.
+
+        Plex answers a create with the subscription body but no key we can rely
+        on, so the key is read back from the scheduled operations, matched on
+        the programme guid and the start time of the airing actually chosen.
+        That pair names exactly one broadcast.
+
+        Straight after a create the operation is not always listed yet, hence
+        the retries: without them the key is lost and cancelling has to go
+        looking for it again later.
+        """
+        for attempt in range(max(1, tries)):
+            key = self._find_subscription_once(guid, begins_at)
+            if key:
+                return key
+            if attempt + 1 < tries:
+                time.sleep(wait)
+        return None
+
+    def _find_subscription_once(self, guid, begins_at):
+        for op in self.scheduled():
+            meta = op.get("Metadata") or op.get("Video") or {}
+            if meta.get("guid") != guid:
+                continue
+            media = meta.get("Media")
+            if isinstance(media, dict):
+                media = [media]
+            for m in (media or []):
+                if int(m.get("beginsAt") or 0) == int(begins_at):
+                    key = op.get("mediaSubscriptionID")
+                    return str(key) if key is not None else None
+        return None
 
     def delete_subscription(self, key):
         with self._client() as c:

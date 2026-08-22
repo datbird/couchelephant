@@ -659,8 +659,10 @@
            '<div class="ch">' + esc(a.vcn) + ' ' + esc(a.call_sign) +
            (a.premiere ? ' &middot; <b>LIVE</b>' : '') + (a.drm ? ' &middot; DRM' : '') + '</div></div>';
       h += '<div class="act">';
-      if (a.ours) h += '<span class="pill ok">CouchElephant is recording this</span>';
-      else if (a.drm) h += '<span class="pill bad">cannot record</span>';
+      if (a.ours) {
+        h += '<span class="pill ok">recording</span> ' +
+             '<button class="danger" data-cancel="' + esc(a.id) + '">Cancel</button>';
+      } else if (a.drm) h += '<span class="pill bad">cannot record</span>';
       else if (d.dry_run) {
         h += '<button disabled title="Preview mode is on">Record</button>';
       } else h += '<button data-rec="' + esc(a.id) + '">Record</button>';
@@ -691,7 +693,12 @@
 
     document.getElementById('ovlx').addEventListener('click', close);
     box.querySelectorAll('[data-rec]').forEach(function (b) {
-      b.addEventListener('click', function () { post('/api/record', {airing_id: b.dataset.rec}, b); });
+      b.addEventListener('click', function () { openOptions(b.dataset.rec, d); });
+    });
+    box.querySelectorAll('[data-cancel]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        post('/api/record/cancel', {airing_id: b.dataset.cancel}, b, b.dataset.cancel);
+      });
     });
     box.querySelectorAll('[data-team]').forEach(function (b) {
       b.addEventListener('click', function () { post('/api/pass', {team_id: b.dataset.team}, b); });
@@ -708,7 +715,106 @@
     if (msg.scrollIntoView) msg.scrollIntoView({block: 'nearest', behavior: 'smooth'});
   }
 
-  function post(url, data, btn) {
+  // ---- the options step ----
+  // Plex offers more than "record this". It can also follow the series or the
+  // team, and each choice carries its own settings. Those come from Plex's own
+  // template, so this panel shows whatever Plex offers rather than a list
+  // copied here that would go stale.
+  var optState = null;
+
+  function field(st) {
+    var id = 'set_' + st.id, h = '';
+    h += '<label class="optrow" for="' + id + '">';
+    h += '<span class="optlabel">' + esc(st.label) + '</span>';
+    if (st.options && st.options.length) {
+      h += '<select id="' + id + '" data-set="' + esc(st.id) + '">';
+      st.options.forEach(function (o) {
+        h += '<option value="' + esc(o.value) + '"' +
+             (String(o.value) === String(st.value) ? ' selected' : '') + '>' +
+             esc(o.label) + '</option>';
+      });
+      h += '</select>';
+    } else if (st.type === 'bool') {
+      var on = String(st.value) === 'true' || String(st.value) === '1';
+      h += '<input type="checkbox" id="' + id + '" data-set="' + esc(st.id) +
+           '" data-bool="1"' + (on ? ' checked' : '') + '>';
+    } else if (st.type === 'int') {
+      h += '<input type="number" id="' + id + '" data-set="' + esc(st.id) +
+           '" value="' + esc(st.value) + '">';
+    } else {
+      h += '<input type="text" id="' + id + '" data-set="' + esc(st.id) +
+           '" value="' + esc(st.value) + '">';
+    }
+    return h + '</label>';
+  }
+
+  function renderOptions(o, prog, airingId) {
+    var t = optState.templates[optState.pick];
+    var h = '';
+    h += '<div class="ovlhead"><div class="ovlmeta">';
+    h += '<div class="parent">Record</div><h2>' + esc(o.title) + '</h2>';
+    h += '</div><button class="ovlclose" id="ovlx" aria-label="Close">&times;</button></div>';
+
+    h += '<div class="ovlsec"><h3>What to record</h3>';
+    optState.templates.forEach(function (x, i) {
+      h += '<label class="pickrow' + (i === optState.pick ? ' on' : '') + '">' +
+           '<input type="radio" name="tpl" value="' + i + '"' +
+           (i === optState.pick ? ' checked' : '') + '>' +
+           '<span>' + esc(x.title) + '</span>' +
+           '<span class="note">' + (x.one_shot ? 'this broadcast only'
+             : 'keeps matching new airings') + '</span></label>';
+    });
+    h += '</div>';
+
+    if (t.one_shot) {
+      h += '<div class="ovlsec"><div class="note">CouchElephant has already set ' +
+           '<b>Limit to channel</b> and <b>Limit to airing time</b> to the broadcast ' +
+           'you picked. That is what stops Plex choosing a repeat.</div></div>';
+    }
+
+    h += '<div class="ovlsec"><h3>Options</h3><div class="optgrid">';
+    t.settings.forEach(function (st) { h += field(st); });
+    h += '</div></div>';
+
+    h += '<div class="ovlfoot">' +
+         '<button class="primary" id="optgo">Schedule</button>' +
+         '<button id="optback">Back</button>' +
+         '<span class="note" id="ovlmsg"></span></div>';
+    box.innerHTML = h;
+
+    document.getElementById('ovlx').addEventListener('click', close);
+    document.getElementById('optback').addEventListener('click', function () {
+      window.openProgram(prog.airing_id || airingId);
+    });
+    box.querySelectorAll('input[name=tpl]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        optState.pick = +r.value;
+        renderOptions(o, prog, airingId);
+      });
+    });
+    document.getElementById('optgo').addEventListener('click', function (e) {
+      var vals = {};
+      box.querySelectorAll('[data-set]').forEach(function (el) {
+        vals[el.dataset.set] = el.dataset.bool ? (el.checked ? 'true' : 'false') : el.value;
+      });
+      post('/api/record', {airing_id: airingId, template: optState.pick,
+                           settings: JSON.stringify(vals)}, e.target, airingId);
+    });
+  }
+
+  function openOptions(airingId, prog) {
+    box.innerHTML = '<div class="empty">Asking Plex what it can record...</div>';
+    fetch('/api/record/options?airing_id=' + encodeURIComponent(airingId))
+      .then(function (r) { return r.json(); })
+      .then(function (o) {
+        if (!o.ok) { box.innerHTML = '<div class="empty">' + esc(o.error) + '</div>'; return; }
+        optState = {templates: o.templates, pick: 0};
+        renderOptions(o, prog, airingId);
+      })
+      .catch(function (e) { box.innerHTML = '<div class="empty">' + esc(e) + '</div>'; });
+  }
+
+  function post(url, data, btn, reopen) {
     btn.disabled = true;
     var old = btn.textContent;
     btn.textContent = 'Working...';
@@ -729,6 +835,22 @@
         if (res.j.ok) {
           say(res.j.message || 'Done.', 'ok');
           btn.textContent = 'Done';
+          // Show the programme again so the airing row reflects what just
+          // happened: a scheduled airing offers Cancel, a cancelled one Record.
+          // Keep the grid behind the overlay honest too, rather than leaving a
+          // block that still looks unscheduled until the next page load.
+          var blk = document.querySelector('.gprog[data-aid="' +
+            String(reopen).replace(/"/g, '\\"') + '"]');
+          if (blk) {
+            var on = url.indexOf('cancel') === -1;
+            blk.classList.toggle('sched-ce', on);
+            var t = blk.querySelector('.t');
+            if (t && on && !t.querySelector('.rec')) {
+              t.insertAdjacentHTML('afterbegin', '<i class="rec"></i>');
+            }
+            if (t && !on) { var i = t.querySelector('.rec'); if (i) i.remove(); }
+          }
+          if (reopen) setTimeout(function () { window.openProgram(reopen); }, 650);
         } else {
           say(res.j.error || res.j.message || ('Request failed (HTTP ' + res.ok + ').'), 'bad');
           btn.disabled = false; btn.textContent = old;
