@@ -1,5 +1,7 @@
 # CouchElephant
 
+*A CouchElephant never forgets.*
+
 A sidecar for a Plex DVR. It reads the guide into SQLite, shows you what Plex is
 set up to record, and does one thing Plex gets wrong: recording a team's games
 from the **live broadcast** rather than a rebroadcast.

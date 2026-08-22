@@ -4,11 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}CouchElephant{% endblock %}</title>
+<meta name="description" content="A CouchElephant never forgets.">
 <style>
 :root {
-  --bg:#141517; --panel:#1c1e21; --panel2:#232629; --line:#2e3236;
-  --text:#e6e8ea; --dim:#9aa1a8; --accent:#e5a00d; --ok:#4caf50;
-  --warn:#e5a00d; --bad:#e5484d; --live:#3d8bfd;
+  /* Sampled from the logo, not guessed. */
+  --bg:#040c15; --panel:#0b1621; --panel2:#12202d; --line:#1d2c3a;
+  --text:#f2ede6; --dim:#7a838c; --accent:#f3a30b; --ok:#4caf50;
+  --warn:#f3a30b; --bad:#e5484d; --live:#5e7990;
+  --wordmark:#f2ede6; --wordmark-dim:#7a838c;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
@@ -16,7 +19,9 @@ body{margin:0;background:var(--bg);color:var(--text);
 a{color:inherit;text-decoration:none}
 header{display:flex;align-items:center;gap:22px;padding:0 22px;height:56px;
   background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
-header .brand{font-weight:700;letter-spacing:.4px;color:var(--accent)}
+header .brand{font-weight:700;letter-spacing:.2px;font-size:17px;white-space:nowrap}
+header .brand-a{color:var(--wordmark)}
+header .brand-b{color:var(--wordmark-dim)}
 header nav{display:flex;gap:18px}
 header nav a{color:var(--dim);padding:4px 0;border-bottom:2px solid transparent}
 header nav a.on,header nav a:hover{color:var(--text);border-bottom-color:var(--accent)}
@@ -58,11 +63,14 @@ button.danger{background:transparent;color:#ff8b8e;border-color:#e5484d55}
 .banner.bad{background:rgba(229,72,77,.12);border:1px solid #e5484d44;color:#ff8b8e}
 .banner.ok{background:rgba(76,175,80,.12);border:1px solid #4caf5044;color:#8fd694}
 .empty{padding:28px;text-align:center;color:var(--dim)}
+footer{margin:34px 0 10px;text-align:center;font-size:12px;letter-spacing:1.6px;
+  text-transform:uppercase;color:var(--dim);opacity:.65}
 </style>
 </head>
 <body>
 <header>
-  <span class="brand">CouchElephant</span>
+  <span class="brand" title="A CouchElephant never forgets."
+    ><span class="brand-a">Couch</span><span class="brand-b">Elephant</span></span>
   <nav>
     <a href="/" class="{{ 'on' if nav=='guide' }}">Guide</a>
     <a href="/search" class="{{ 'on' if nav=='search' }}">Search</a>
@@ -89,6 +97,7 @@ button.danger{background:transparent;color:#ff8b8e;border-color:#e5484d55}
   <div class="banner bad">Last sync failed: {{ last_sync.detail }}</div>
 {% endif %}
 {% block body %}{% endblock %}
+<footer>A CouchElephant never forgets.</footer>
 </main>
 </body>
 </html>
