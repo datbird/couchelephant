@@ -54,36 +54,17 @@
 
 <div class="card" style="padding:0">
 {% if rows %}
-<table>
-  <tr><th>{{ 'When' if q else 'Time' }}</th><th>Ch</th><th>Programme</th><th>Teams</th><th></th></tr>
-  {% for r in rows %}
-  <tr>
-    <td class="dim" style="white-space:nowrap">
-      {{ r.begins_at|fmt if q else r.begins_at|fmt('%-I:%M %p') }}</td>
-    <td class="chcell">
-      {% if logos.get(r.channel_vcn) %}
-        <img src="/logo/{{ r.channel_vcn }}" alt="" class="chlogo"
-             title="{{ r.channel_vcn }} {{ r.channel_call_sign or '' }}" loading="lazy">
-      {% endif %}
-      <span class="chtext">{{ r.channel_vcn }}<br><span class="tiny">{{ r.channel_call_sign or '' }}</span></span>
-    </td>
-    <td>
-      {% if r.grandparent_title and r.grandparent_title != r.title %}
-        <span class="dim tiny">{{ r.grandparent_title }}</span><br>
-      {% endif %}
-      <b>{{ r.title }}</b>
-      {% if r.summary %}<div class="tiny dim">{{ r.summary[:120] }}</div>{% endif %}
-    </td>
-    <td class="tiny dim">
-      {% for t in r.teams|unjs %}{{ t.name }}{% if not loop.last %} vs {% endif %}{% endfor %}
-    </td>
-    <td style="white-space:nowrap">
-      {% if r.premiere %}<span class="pill live">LIVE</span>{% endif %}
-      {% if r.drm %}<span class="pill bad">DRM</span>{% endif %}
-    </td>
-  </tr>
-  {% endfor %}
+<table id="grid">
+  <thead>
+    <tr><th>{{ 'When' if q else 'Time' }}</th><th>Ch</th><th>Programme</th><th>Teams</th><th></th></tr>
+  </thead>
+  <tbody id="gridbody">
+    {% include "_rows.html" %}
+  </tbody>
 </table>
+<div id="sentinel"></div>
+<div id="loadmore" class="empty tiny" style="display:none">Loading more...</div>
+<div id="allloaded" class="empty tiny" style="display:none">That is the whole {{ 'result' if q else 'day' }}.</div>
 {% else %}
   <div class="empty">
     {% if q %}Nothing in the guide matches "{{ q }}".
@@ -123,6 +104,46 @@
       e.preventDefault(); open();
     }
   });
+})();
+
+// Infinite scroll. Rows come back as HTML from the same template the first
+// page used, so the two can never render differently.
+(function () {
+  var body = document.getElementById('gridbody'),
+      sentinel = document.getElementById('sentinel'),
+      spinner = document.getElementById('loadmore'),
+      done = document.getElementById('allloaded');
+  if (!body || !sentinel) return;
+
+  var offset = body.querySelectorAll('tr').length,
+      busy = false, finished = false,
+      params = new URLSearchParams(window.location.search);
+
+  function load() {
+    if (busy || finished) return;
+    busy = true;
+    spinner.style.display = 'block';
+    params.set('offset', offset);
+    fetch('/partial/airings?' + params.toString(), {headers: {'X-Requested-With': 'fetch'}})
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var trimmed = html.trim();
+        if (!trimmed) {
+          finished = true;
+          done.style.display = 'block';
+        } else {
+          body.insertAdjacentHTML('beforeend', trimmed);
+          offset = body.querySelectorAll('tr').length;
+        }
+      })
+      .catch(function () { finished = true; })
+      .finally(function () { busy = false; spinner.style.display = 'none'; });
+  }
+
+  // Start fetching a little before the sentinel is actually on screen.
+  new IntersectionObserver(function (entries) {
+    if (entries[0].isIntersecting) load();
+  }, {rootMargin: '600px'}).observe(sentinel);
 })();
 </script>
 {% endblock %}

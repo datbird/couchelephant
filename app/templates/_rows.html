@@ -1,0 +1,29 @@
+{# One row template, used by the first page and by the infinite-scroll partial,
+   so the markup can never drift between them. #}
+{% for r in rows %}
+<tr>
+  <td class="dim" style="white-space:nowrap">
+    {{ r.begins_at|fmt if q else r.begins_at|fmt('%-I:%M %p') }}</td>
+  <td class="chcell">
+    {% if logos.get(r.channel_vcn) %}
+      <img src="/logo/{{ r.channel_vcn }}" alt="" class="chlogo"
+           title="{{ r.channel_vcn }} {{ r.channel_call_sign or '' }}" loading="lazy">
+    {% endif %}
+    <span class="chtext">{{ r.channel_vcn }}<br><span class="tiny">{{ r.channel_call_sign or '' }}</span></span>
+  </td>
+  <td>
+    {% if r.grandparent_title and r.grandparent_title != r.title %}
+      <span class="dim tiny">{{ r.grandparent_title }}</span><br>
+    {% endif %}
+    <b>{{ r.title }}</b>
+    {% if r.summary %}<div class="tiny dim">{{ r.summary[:120] }}</div>{% endif %}
+  </td>
+  <td class="tiny dim">
+    {% for t in r.teams|unjs %}{{ t.name }}{% if not loop.last %} vs {% endif %}{% endfor %}
+  </td>
+  <td style="white-space:nowrap">
+    {% if r.premiere %}<span class="pill live">LIVE</span>{% endif %}
+    {% if r.drm %}<span class="pill bad">DRM</span>{% endif %}
+  </td>
+</tr>
+{% endfor %}

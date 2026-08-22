@@ -91,6 +91,57 @@ async def sync_loop():
 
 # ---------- guide ----------
 
+PAGE_SIZE = 80
+
+
+def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, limit: int):
+    """Rows for the guide, whether that is one day or a search.
+
+    Ordering ends with a.id so paging is deterministic. Without a unique tie
+    breaker, two airings sharing a start time can repeat or vanish across pages.
+    """
+    now = int(time.time())
+    sql = ["""SELECT a.*, p.title, p.grandparent_title, p.summary, p.teams, p.section
+              FROM airings a JOIN programs p ON p.guid = a.program_guid"""]
+    args = []
+    if q.strip():
+        like = f"%{q.strip()}%"
+        sql.append("""WHERE (p.title LIKE ? OR p.grandparent_title LIKE ? OR p.summary LIKE ?)
+                        AND a.ends_at > ?""")
+        args += [like, like, like, now]
+        order = "ORDER BY a.begins_at, CAST(a.channel_vcn AS REAL), a.id"
+    else:
+        start = now
+        if day:
+            try:
+                d = datetime.datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=tz())
+                start = int(d.timestamp())
+            except ValueError:
+                pass
+        sql.append("WHERE a.ends_at > ? AND a.begins_at < ?")
+        args += [start, start + 86400]
+        order = "ORDER BY a.begins_at, CAST(a.channel_vcn AS REAL), a.id"
+    if channel:
+        sql.append("AND a.channel_vcn = ?")
+        args.append(channel)
+    if sports:
+        sql.append("AND p.section = 'sports'")
+    sql.append(f"{order} LIMIT ? OFFSET ?")
+    args += [limit, offset]
+    return db.query(" ".join(sql), tuple(args))
+
+
+@app.get("/partial/airings", response_class=HTMLResponse)
+def airings_partial(request: Request, day: str = "", channel: str = "", sports: int = 0,
+                    q: str = "", offset: int = 0):
+    """Just the rows, for infinite scroll. Empty response means the end."""
+    rows = _airings_query(day, channel, sports, q, offset, PAGE_SIZE)
+    if not rows:
+        return HTMLResponse("")
+    return templates.TemplateResponse(
+        "_rows.html", {"request": request, "rows": rows, "q": q, "logos": _logo_map()})
+
+
 @app.get("/", response_class=HTMLResponse)
 def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q: str = ""):
     """Guide and search are the same page.
@@ -100,57 +151,21 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q
     tabs made you navigate to find out what is on.
     """
     now = int(time.time())
-    if q.strip():
-        like = f"%{q.strip()}%"
-        sql = ["""SELECT a.*, p.title, p.grandparent_title, p.summary, p.teams, p.section
-                  FROM airings a JOIN programs p ON p.guid = a.program_guid
-                  WHERE (p.title LIKE ? OR p.grandparent_title LIKE ? OR p.summary LIKE ?)
-                    AND a.ends_at > ?"""]
-        args = [like, like, like, now]
-        if channel:
-            sql.append("AND a.channel_vcn = ?")
-            args.append(channel)
-        if sports:
-            sql.append("AND p.section = 'sports'")
-        sql.append("ORDER BY a.begins_at LIMIT 400")
-        rows = db.query(" ".join(sql), tuple(args))
-        channels = _channel_list()
-        return page(request, "guide.html", rows=rows, days=[], day="",
-                    channels=channels, channel=channel, sports=sports, q=q,
-                    logos=_logo_map())
-
-    start = now
-    if day:
-        try:
-            d = datetime.datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=tz())
-            start = int(d.timestamp())
-        except ValueError:
-            pass
-    end = start + 86400
-
-    sql = ["""SELECT a.*, p.title, p.grandparent_title, p.summary, p.teams, p.section
-              FROM airings a JOIN programs p ON p.guid = a.program_guid
-              WHERE a.ends_at > ? AND a.begins_at < ?"""]
-    args = [start, end]
-    if channel:
-        sql.append("AND a.channel_vcn = ?")
-        args.append(channel)
-    if sports:
-        sql.append("AND p.section = 'sports'")
-    sql.append("ORDER BY a.begins_at, CAST(a.channel_vcn AS REAL) LIMIT 800")
-    rows = db.query(" ".join(sql), tuple(args))
+    rows = _airings_query(day, channel, sports, q, 0, PAGE_SIZE)
 
     days = []
-    base = datetime.datetime.fromtimestamp(now, tz()).replace(hour=0, minute=0, second=0, microsecond=0)
-    for i in range(12):
-        d = base + datetime.timedelta(days=i)
-        days.append({"key": d.strftime("%Y-%m-%d"),
-                     "label": "Today" if i == 0 else d.strftime("%a %-d")})
+    if not q.strip():
+        base = datetime.datetime.fromtimestamp(now, tz()).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        for i in range(12):
+            d = base + datetime.timedelta(days=i)
+            days.append({"key": d.strftime("%Y-%m-%d"),
+                         "label": "Today" if i == 0 else d.strftime("%a %-d")})
 
-    channels = _channel_list()
-    return page(request, "guide.html", rows=rows, days=days, day=day or days[0]["key"],
-                channels=channels, channel=channel, sports=sports, q="",
-                logos=_logo_map())
+    return page(request, "guide.html", rows=rows, days=days,
+                day=(day or (days[0]["key"] if days else "")),
+                channels=_channel_list(), channel=channel, sports=sports,
+                q=q, logos=_logo_map())
 
 
 @app.get("/search")
