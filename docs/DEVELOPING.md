@@ -84,10 +84,17 @@ the BSDs. If you run the app outside Linux, that is the line to change.
 ./scripts/test.sh --unit -k passes -x
 ```
 
-It runs in a throwaway container built from `Dockerfile.test`, which is the
-shipping image plus pytest and Playwright. The working tree is mounted read
-only and copied into the container's own scratch, so a run checks what you have
-edited and cannot write back over it.
+It runs in a throwaway container built from `Dockerfile.test`. The working tree
+is mounted read only and copied into the container's own scratch, so a run
+checks what you have edited and cannot write back over it.
+
+That image is based on Playwright's, not on the slim base the app ships on.
+`playwright install --with-deps` asks apt for `ttf-unifont` and
+`ttf-ubuntu-font-family`, which no longer exist in Debian, so building the
+browser onto the shipping base fails. Microsoft's image already carries
+Chromium and its libraries, pinned to the same Playwright version as
+`requirements-dev.txt`. The app is pure Python with pinned dependencies, so it
+behaves the same either way.
 
 ### It refuses to run anywhere real
 

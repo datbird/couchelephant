@@ -1,19 +1,23 @@
-# The suite's own image. It is the shipping image plus the test tools, so what
-# the tests exercise is what the container runs, not a lookalike built from a
-# different base.
-FROM python:3.12-slim
+# The suite's own image.
+#
+# The base is Playwright's, not python:3.12-slim like the shipping image. That
+# is deliberate: `playwright install --with-deps` names Debian font packages
+# that no longer exist (`ttf-unifont`, `ttf-ubuntu-font-family`), so building
+# the browser onto the slim image fails outright. Microsoft's image already
+# carries Chromium and every library it needs, pinned to the same Playwright
+# version as requirements-dev.txt.
+#
+# The app is pure Python and pins its own dependencies, so it behaves the same
+# here as it does in the image that ships.
+FROM mcr.microsoft.com/playwright/python:v1.49.1-noble
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
 COPY requirements.txt requirements-dev.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
-
-# Chromium and its system libraries. This is the slow layer; it is cached and
-# only rebuilds when requirements-dev.txt changes.
-RUN playwright install --with-deps chromium
+RUN pip install --no-cache-dir --break-system-packages \
+      -r requirements.txt -r requirements-dev.txt
 
 # No COPY of the source. The runner mounts the working tree, so a test run
 # checks what you have edited rather than what you last committed.
