@@ -590,6 +590,23 @@ tr:hover td{background:var(--panel2)}
 .rq{width:100%;margin-bottom:8px}
 .rlist{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:7px;
   background:var(--panel2)}
+/* The catalogue is 1,310 teams, so the list needs room and a way to narrow it
+   before scrolling is the only tool. */
+.rlist.tall{max-height:320px}
+.rleagues{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.rleagues button{padding:3px 10px;font-size:12px;border-radius:20px}
+.rleagues button.on{background:var(--accent);color:var(--on-accent);
+  border-color:var(--accent);font-weight:600}
+.rcount{font-size:11px;color:var(--dim);margin:6px 0 0}
+/* A team the guide is not carrying yet. Following it is allowed; it just has
+   nothing to book until the season starts. */
+.rrow .rlg{margin-left:auto;color:var(--dim);font-size:11px;white-space:nowrap;
+  padding-left:10px}
+.rrow .rsoon{color:var(--dim);font-size:11px;white-space:nowrap;
+  border:1px solid var(--line);border-radius:20px;padding:1px 7px}
+.rrow .rnow{color:var(--accent-ink);background:var(--accent-soft);
+  border:1px solid var(--accent-bd);border-radius:20px;padding:1px 7px;
+  font-size:11px;white-space:nowrap}
 .rrow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
   background:none;border:none;border-bottom:1px solid var(--line);color:var(--text);
   font:inherit;font-size:13px;padding:8px 10px;cursor:pointer}

@@ -77,6 +77,13 @@ CREATE INDEX IF NOT EXISTS idx_airings_channel ON airings(channel_vcn, begins_at
 CREATE TABLE IF NOT EXISTS teams (
     id         INTEGER PRIMARY KEY,
     name       TEXT,
+    -- Which league it plays in, and when it was last seen in the guide.
+    -- Teams are kept once seen rather than deleted when they stop playing,
+    -- so the list you pick from grows over a season instead of shrinking to
+    -- whoever is on this week.
+    league     TEXT,
+    in_guide   INTEGER DEFAULT 0,
+    last_seen  INTEGER,
     updated_at INTEGER
 );
 
@@ -246,6 +253,10 @@ MIGRATIONS = [
     # one, so this kind of pass is always CouchElephant's to run.
     ("passes", "filter", "TEXT"),
     ("passes", "label", "TEXT"),
+    # Teams are now remembered rather than dropped when they stop playing.
+    ("teams", "league", "TEXT"),
+    ("teams", "in_guide", "INTEGER DEFAULT 0"),
+    ("teams", "last_seen", "INTEGER"),
 ]
 
 

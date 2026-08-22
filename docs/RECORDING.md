@@ -55,6 +55,41 @@ two ways of saying "record things I have not named individually".
 A pass records its decisions whether or not it acts, including the ones it
 declined and why. Open a pass to see what it will record next.
 
+### Which teams you can follow
+
+Plex only knows the teams playing inside the guide it holds, about eleven days.
+On a real server that was **76 teams**: whoever happens to be on this week. You
+could not follow your team in the off-season, and a college side whose season
+starts in November was simply absent in August.
+
+So CouchElephant ships its own catalogue, `app/data/teams.json`, and the list
+you pick from is the union of that and whatever Plex currently knows.
+
+| League | Teams |
+| --- | --- |
+| NFL, NBA, MLB, NHL, WNBA, MLS, NWSL | every side |
+| NCAA | 929 schools, across football, both basketballs, baseball and hockey |
+| Premier League, La Liga, Serie A, Bundesliga, Ligue 1, Liga MX, and their second tiers | every side |
+
+1,310 in total. Rebuild it with `python3 scripts/build_teams.py`.
+
+**The catalogue is how you find a team, not what makes a pass work.** An airing
+carries Plex's own team ids, so a pass follows an id. A team Plex has seen has
+one and starts at once. A team only in the catalogue has none yet, so the pass
+says **waiting for this team to appear in the guide** rather than looking like
+it is running. The next sync that carries the team fills the id in and the pass
+starts booking.
+
+Names are matched on a normalised form, so accents, club words and punctuation
+do not split one team into two: `Club Tijuana` is `Tijuana`, `FC Bayern
+Munchen` is `Bayern Munich`, `San Jose State` is `San José State`. The same
+rule is written in the app and in the builder, and a test compares them, since
+two spellings of the rule means nothing ever matches.
+
+Teams are also no longer deleted when they stop playing. They keep their row,
+their id and their name, and lose only the "in the guide" mark. The list grows
+over a season instead of shrinking to this week.
+
 ### Smart filters
 
 A smart filter is a nested tree. A group matches **all**, **any** or **none** of

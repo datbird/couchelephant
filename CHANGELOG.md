@@ -4,6 +4,15 @@
 
 ### Added
 
+- **1,310 teams to follow, not 76.** Plex lists only the teams playing in the
+  next eleven days. CouchElephant now ships its own catalogue: every NFL, NBA,
+  MLB, NHL, WNBA, MLS and NWSL side, 929 NCAA schools, and the top two tiers of
+  six football leagues. The picker filters by league and marks which teams are
+  in the guide this week.
+- A team can be followed before it plays. The pass says it is waiting, and
+  starts the moment the team appears in the guide.
+- Teams are no longer deleted when they stop playing, so the list grows over a
+  season instead of shrinking to whoever is on this week.
 - **Smart passes.** The add panel now offers **Smart Pass** (a sports team, or a
   smart filter) and **Programme or Series**.
 - A smart filter is a nested tree of conditions. A group matches all, any or

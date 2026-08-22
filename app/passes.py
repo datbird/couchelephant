@@ -45,6 +45,8 @@ def _future_airings(horizon_days=30):
 
 def candidate_airings(team_id, horizon_days=30):
     """Future airings of games featuring this team, newest guide data only."""
+    if not team_id:
+        return []
     out = []
     for r in _future_airings(horizon_days):
         teams = db.unjs(r["teams"])
@@ -90,6 +92,11 @@ def smart_airings(tree, horizon_days=30):
 
 def rule_airings(rule, horizon_days=30):
     """Everything a rule could record, before the source limit is applied."""
+    if rule["kind"] == "team" and not rule["team_id"]:
+        # Followed from the catalogue before the team had ever played. An
+        # airing carries Plex's ids, so there is nothing to match on yet.
+        # `sync.resolve_team_passes` fills the id in when it appears.
+        return []
     if rule["kind"] == "smart":
         return smart_airings(db.unjs(rule["filter"], {}) or {}, horizon_days)
     if rule["kind"] == "series":

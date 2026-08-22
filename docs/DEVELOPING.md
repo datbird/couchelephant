@@ -135,6 +135,7 @@ now. `COUCHELEPHANT_FAKE_ANCHOR` overrides the anchor.
 | `test_sync.py` | the pull, enrichment, attribution |
 | `test_filters.py` | guide filter tokens |
 | `test_smartfilter.py` | the smart filter: what it compiles to, and what it refuses |
+| `test_teamcat.py` | the shipped team catalogue, and how it meets Plex's list |
 | `test_auth.py` | hashing, sessions, the three modes |
 | `test_api.py` | every endpoint, in process |
 | `test_conventions.py` | rules the code holds itself to, checked not remembered |

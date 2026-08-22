@@ -3,7 +3,7 @@ import os
 import time
 import traceback
 
-from . import db
+from . import db, teamcat
 from .plex import Plex, discover, PlexError
 
 
@@ -245,19 +245,65 @@ def enrich_sports(plex, provider):
 
 
 def sync_teams(plex, provider, sports):
+    """Mirror the teams Plex currently knows, and remember the ones it forgets.
+
+    Plex lists only the teams playing inside the guide window, about eleven
+    days. Deleting the rest, which is what this used to do, meant the list you
+    pick from shrank to whoever was on this week, and a pass you made in
+    September lost its team's name in October.
+
+    So nothing is deleted. A team seen in the guide is marked `in_guide`; one
+    that has dropped out keeps its row, its id and its name, and stops being
+    marked. The id is the thing that matters: it is what an airing carries and
+    what a pass follows.
+    """
     if not sports:
         return 0
     now = _now()
     rows = plex.teams(provider, sports)
     with db.tx() as c:
+        c.execute("UPDATE teams SET in_guide = 0")
         for t in rows:
+            name = t.get("title")
+            entry = teamcat.find(name)
             c.execute(
-                "INSERT INTO teams (id, name, updated_at) VALUES (?,?,?) "
-                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at",
-                (int(t.get("key")), t.get("title"), now),
+                "INSERT INTO teams (id, name, league, in_guide, last_seen, updated_at) "
+                "VALUES (?,?,?,1,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, "
+                "  league=COALESCE(excluded.league, teams.league), "
+                "  in_guide=1, last_seen=excluded.last_seen, "
+                "  updated_at=excluded.updated_at",
+                (int(t.get("key")), name, entry["league"] if entry else None,
+                 now, now),
             )
-        c.execute("DELETE FROM teams WHERE updated_at < ?", (now,))
     return len(rows)
+
+
+def resolve_team_passes():
+    """Give an id to a pass that was made for a team Plex had not heard of.
+
+    A team can be followed from the catalogue before it plays. Such a pass has
+    a name and no id, and matches nothing, because an airing carries ids. Once
+    the team turns up in the guide the id is known, and this is where the pass
+    stops waiting and starts working.
+
+    Returns how many passes were resolved.
+    """
+    waiting = db.query("SELECT id, team_name FROM passes "
+                       "WHERE kind = 'team' AND team_id IS NULL AND team_name != ''")
+    if not waiting:
+        return 0
+    known = {teamcat.norm(r["name"]): r["id"]
+             for r in db.query("SELECT id, name FROM teams WHERE name IS NOT NULL")}
+    done = 0
+    with db.tx() as c:
+        for p in waiting:
+            hit = known.get(teamcat.norm(p["team_name"]))
+            if hit is None:
+                continue
+            c.execute("UPDATE passes SET team_id = ? WHERE id = ?", (hit, p["id"]))
+            done += 1
+    return done
 
 
 def network_of(title):
@@ -395,6 +441,9 @@ def full_sync():
 
         chans = sync_channels(plex)
         teams = sync_teams(plex, provider, sports)
+        # A pass made for a team that had not played yet starts working here,
+        # the moment the guide first carries it.
+        woke = resolve_team_passes()
         guide = sync_guide(plex, provider, shows, sports, movies)
         enriched = enrich_sports(plex, provider)
         got, bad, tried = cache_logos()
@@ -404,7 +453,8 @@ def full_sync():
         nch = cov["channels"]
         detail = (f"{guide['programs']} programs, {guide['airings']} airings, "
                   f"{teams} teams, {enriched} sports enriched, "
-                  f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
+                  + (f"{woke} pass(es) resolved, " if woke else "")
+                  + f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
                   + (f" (+{got} fetched)" if got else "")
                   + (f" ({bad} failed)" if bad else "")
                   + f", {subs} subscriptions")

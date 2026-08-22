@@ -350,7 +350,8 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   var st = {mode: 'smart', sub: 'team', kind: 'team',
             team: null, series: null, nets: [], chans: [],
             tpl: null, pick: 0, editing: null, q: '',
-            tree: null, name: '', preview: null, confirmed: false};
+            tree: null, name: '', preview: null, confirmed: false,
+            league: '', leagues: []};
   // One picker, kept across panel rebuilds so its fetched list is not
   // re-requested every time the panel redraws.
   st.picker = new CE.SourcePicker(st, paint);
@@ -591,9 +592,18 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
              '<div class="rpicked">Following: <b id="rpick">nothing yet</b></div>' +
              '<input class="fsearch rq" id="rq" autocomplete="off" value="' + esc(st.q) +
              '" placeholder="' +
-             (st.kind === 'team' ? 'Search teams...'
+             (st.kind === 'team' ? 'Search 1,300+ teams, pro and college...'
                                  : 'Search programmes in the guide...') +
-             '"><div class="rlist" id="rlist"></div></div>';
+             '">';
+        if (st.kind === 'team') {
+          // Every league, so a long list can be cut down before scrolling is
+          // the only way through it.
+          h += '<div class="rleagues" id="rleagues"></div>';
+        }
+        h += '<div class="rlist' + (st.kind === 'team' ? ' tall' : '') +
+             '" id="rlist"></div>' +
+             (st.kind === 'team' ? '<div class="rcount" id="rcount"></div>' : '') +
+             '</div>';
       }
     } else if (st.kind === 'smart') {
       h += smartSection();
@@ -620,8 +630,13 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     }
     h += '</div>';
     if (!st.tpl) {
-      h += '<div class="note" style="margin-top:10px">Plex\'s own options appear ' +
-           'once you have chosen what to follow.</div>';
+      h += '<div class="note" style="margin-top:10px">' +
+           (st.team && !st.team.id
+             ? '<b>' + esc(st.team.name) + '</b> is not in the guide this week, so ' +
+               'Plex has no options to offer for it yet. CouchElephant keeps this ' +
+               'pass and starts booking games the moment the team appears.'
+             : 'Plex\'s own options appear once you have chosen what to follow.') +
+           '</div>';
     }
     h += '</div>';
 
@@ -692,30 +707,66 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     });
   }
 
+  function paintLeagues(d) {
+    var wrap = document.getElementById('rleagues');
+    if (!wrap) return;
+    if (d.leagues) st.leagues = d.leagues;
+    var h = '<button type="button" class="tiny' + (st.league ? '' : ' on') +
+            '" data-league="">All</button>';
+    st.leagues.forEach(function (l) {
+      h += '<button type="button" class="tiny' + (st.league === l ? ' on' : '') +
+           '" data-league="' + esc(l) + '">' + esc(l) + '</button>';
+    });
+    wrap.innerHTML = h;
+    wrap.querySelectorAll('[data-league]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        st.league = b.dataset.league;
+        paintLeagues({});
+        search(st.q);
+      });
+    });
+  }
+
+  function paintCount(d) {
+    var el = document.getElementById('rcount');
+    if (!el) return;
+    el.textContent = d.matched + ' of ' + d.total + ' teams' +
+      (d.playing_now ? ', ' + d.playing_now + ' playing this week' : '') +
+      (d.more ? '. Showing the first ' + (d.matched - d.more) + '; search to narrow.' : '');
+  }
+
   var timer = null;
   function search(term) {
     clearTimeout(timer);
     timer = setTimeout(function () {
       var url = st.kind === 'team'
-        ? '/api/teams?q=' + encodeURIComponent(term)
+        ? '/api/teams?q=' + encodeURIComponent(term) +
+          '&league=' + encodeURIComponent(st.league)
         : '/api/series?q=' + encodeURIComponent(term);
       fetch(url).then(function (r) { return r.json(); }).then(function (d) {
         var list = document.getElementById('rlist');
         if (!list) return;
+        if (st.kind === 'team') { paintLeagues(d); paintCount(d); }
         var h = '', rows = st.kind === 'team' ? (d.teams || []) : (d.series || []);
         if (!rows.length) {
           list.innerHTML = '<div class="fempty">Nothing matches. ' +
-            (st.kind === 'team' ? 'Only teams playing in your guide are listed.'
+            (st.kind === 'team' ? 'Try another spelling, or clear the league.'
                                 : 'Only programmes still to air are listed.') + '</div>';
           return;
         }
         rows.forEach(function (r2) {
           if (st.kind === 'team') {
+            // A team with no id is in the catalogue but not in the guide.
+            // Following it is allowed and it starts when the season does.
             h += '<button type="button" class="rrow' +
-                 (st.team && String(st.team.id) === String(r2.id) ? ' on' : '') +
-                 '" data-team="' + r2.id + '" data-name="' +
+                 (st.team && st.team.name === r2.name ? ' on' : '') +
+                 '" data-team="' + (r2.id == null ? '' : r2.id) + '" data-name="' +
                  esc(r2.name) + '"><span class="rt">' + esc(r2.name) + '</span>' +
-                 (r2.followed ? '<span class="pill ok">following</span>' : '') + '</button>';
+                 (r2.league ? '<span class="rlg">' + esc(r2.league) + '</span>' : '') +
+                 (r2.playing ? '<span class="rnow">in the guide</span>'
+                             : '<span class="rsoon">not on this week</span>') +
+                 (r2.followed ? '<span class="pill ok">following</span>' : '') +
+                 '</button>';
           } else {
             h += '<button type="button" class="rrow' +
                  (st.series === r2.name ? ' on' : '') + '" data-series="' + esc(r2.name) +
@@ -726,8 +777,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
         list.innerHTML = h;
         list.querySelectorAll('[data-team]').forEach(function (b) {
           b.addEventListener('click', function () {
-            st.team = {id: b.dataset.team, name: b.dataset.name};
-            loadTemplates();
+            st.team = {id: b.dataset.team || null, name: b.dataset.name};
+            // Plex has options to offer only for a team it has heard of.
+            if (st.team.id) loadTemplates(); else render();
           });
         });
         list.querySelectorAll('[data-series]').forEach(function (b) {
@@ -755,7 +807,8 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
          settings: JSON.stringify(vals),
          enabled: st.editing.enabled ? '1' : '0'}
       : {kind: st.kind,
-         team_id: st.team ? st.team.id : '',
+         team_id: (st.team && st.team.id) ? st.team.id : '',
+         team: st.team ? st.team.name : '',
          series: st.series || '',
          networks: JSON.stringify(st.nets),
          channels: JSON.stringify(st.chans),

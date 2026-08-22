@@ -44,7 +44,7 @@ def test_the_sports_team_route_is_unchanged(add):
     add.check('input[name=rmode][value="smart"]')
     add.check('input[name=rsub][value="team"]')
     add.wait_for_selector("#rlist > *", timeout=15000)
-    assert "Search teams" in add.get_attribute("#rq", "placeholder")
+    assert "teams" in add.get_attribute("#rq", "placeholder")
     add.click("#rlist >> text=Kansas City Chiefs")
     add.wait_for_selector('[data-set="minVideoQuality"]', timeout=15000)
     assert "Kansas City Chiefs" in add.locator("#rpick").inner_text()

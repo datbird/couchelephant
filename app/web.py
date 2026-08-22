@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, cf_access, db, filters, passes, smartfilter, sync
+from . import auth, cf_access, db, filters, passes, smartfilter, sync, teamcat
 from .plex import Plex, PlexError
 
 BASE = os.path.dirname(__file__)
@@ -667,8 +667,16 @@ def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,
                           (db.js(smart),))
         label = (name or "").strip() or smartfilter.describe(smart)
     elif kind == "team":
-        existing = db.one("SELECT id FROM passes WHERE kind='team' AND team_id = ?",
-                          (team["id"],))
+        # A team picked from the catalogue has no Plex id until it plays, so
+        # the duplicate check falls back to the name. Otherwise every unplayed
+        # team looks like the same pass, because they all have id NULL.
+        if team.get("id"):
+            existing = db.one("SELECT id FROM passes WHERE kind='team' AND team_id = ?",
+                              (team["id"],))
+        else:
+            existing = db.one(
+                "SELECT id FROM passes WHERE kind='team' AND team_id IS NULL "
+                "AND team_name = ?", (team["name"],))
         label = team["name"]
     else:
         existing = db.one("SELECT id FROM passes WHERE kind='series' AND series_title = ?",
@@ -692,7 +700,7 @@ def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,
         elif kind == "team":
             c.execute("INSERT INTO passes (kind, team_id, team_name, networks, channels, "
                       "prefs, enabled, created_at) VALUES ('team',?,?,?,?,?,1,?)",
-                      (team["id"], team["name"], db.js(nets), db.js(chans),
+                      (team.get("id"), team["name"], db.js(nets), db.js(chans),
                        db.js(prefs), int(time.time())))
         else:
             c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
@@ -1041,19 +1049,77 @@ def api_series(q: str = ""):
     return JSONResponse({"ok": True, "series": [dict(r) for r in rows]})
 
 
+TEAM_PAGE = 300
+
+
 @app.get("/api/teams")
-def api_teams(q: str = ""):
+def api_teams(q: str = "", league: str = "", playing: int = 0):
+    """Every team you could follow: the shipped catalogue and Plex's own list.
+
+    Plex knows only the teams playing inside its guide window, about eleven
+    days. That was 76 teams on a real server, so "follow the Chiefs" in June
+    found nothing. The catalogue in app/data/teams.json carries the rest, and
+    the two are merged here.
+
+    A team Plex has seen has an id and works at once. One that is only in the
+    catalogue has no id yet; following it is allowed, and the pass waits for
+    the team to appear rather than pretending to run.
+    """
     q = (q or "").strip()
-    # No low cap here. Teams only exist while the guide carries a game they
-    # play, so the whole list is short, and silently showing 60 of 82 would
-    # look like a team had gone missing.
-    rows = db.query(
-        "SELECT t.id, t.name, EXISTS(SELECT 1 FROM passes p WHERE p.team_id = t.id) "
-        "AS followed FROM teams t WHERE ? = '' OR t.name LIKE ? COLLATE NOCASE "
-        "ORDER BY t.name LIMIT 400", (q, f"%{q}%"))
-    total = db.one("SELECT COUNT(*) c FROM teams")["c"]
-    return JSONResponse({"ok": True, "total": total,
-                         "teams": [dict(r) for r in rows]})
+    nq = teamcat.norm(q)
+
+    followed_ids, followed_names = set(), set()
+    for r in db.query("SELECT team_id, team_name FROM passes WHERE kind = 'team'"):
+        if r["team_id"]:
+            followed_ids.add(r["team_id"])
+        if r["team_name"]:
+            followed_names.add(teamcat.norm(r["team_name"]))
+
+    out, seen = [], set()
+    # Plex's own first: these have ids, so they can be followed today.
+    for r in db.query("SELECT id, name, league, in_guide FROM teams ORDER BY name"):
+        entry = teamcat.find(r["name"])
+        key = teamcat.norm(r["name"])
+        seen.add(key)
+        out.append({
+            "id": r["id"], "name": r["name"],
+            "league": r["league"] or (entry["league"] if entry else ""),
+            "sports": entry["sports"] if entry else [],
+            "playing": bool(r["in_guide"]),
+            "followed": r["id"] in followed_ids or key in followed_names,
+        })
+    for t in teamcat.all_teams():
+        key = teamcat.norm(t["name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "id": None, "name": t["name"], "league": t["league"],
+            "sports": t.get("sports") or [], "playing": False,
+            "followed": key in followed_names,
+        })
+
+    total = len(out)
+    if league:
+        out = [t for t in out if t["league"] == league]
+    if playing:
+        out = [t for t in out if t["playing"]]
+    if q:
+        # Matched on the normalised name as well as the raw one, so "st louis"
+        # finds "St. Louis" and "bayern munchen" finds "Bayern Munich".
+        low = q.lower()
+        out = [t for t in out
+               if low in t["name"].lower() or (nq and nq in teamcat.norm(t["name"]))]
+
+    # In the guide first: those play this week, and are usually what is meant.
+    out.sort(key=lambda t: (not t["playing"], t["name"]))
+    return JSONResponse({
+        "ok": True, "total": total, "matched": len(out),
+        "leagues": teamcat.leagues(),
+        "playing_now": sum(1 for t in out if t["playing"]),
+        "more": max(0, len(out) - TEAM_PAGE),
+        "teams": out[:TEAM_PAGE],
+    })
 
 
 @app.get("/api/sources")
@@ -1131,8 +1197,10 @@ def api_rules():
             "networks": nets, "channels": chans,
             "prefs": db.unjs(p["prefs"], {}) or {},
             "enabled": bool(p["enabled"]), "booked": booked,
+            "waiting": p["kind"] == "team" and not p["team_id"],
             "detail": {
-                "team": "Every game, from the live broadcast",
+                "team": ("Every game, from the live broadcast" if p["team_id"] else
+                         "Waiting for this team to appear in the guide"),
                 "series": "Every episode the guide carries",
                 "smart": ("Anything matching " + smartfilter.describe(tree or {})),
             }.get(p["kind"], ""),
@@ -1362,7 +1430,8 @@ async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
                           series: str = Form(""), networks: str = Form(""),
                           channels: str = Form(""), template: int = Form(0),
                           settings: str = Form(""), filter: str = Form(""),
-                          name: str = Form(""), confirm: str = Form("")):
+                          name: str = Form(""), confirm: str = Form(""),
+                          team: str = Form("")):
     """Create a schedule that keeps matching new airings.
 
     With no source limit this is something Plex can express on its own, so it
@@ -1379,9 +1448,28 @@ async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
 
     if kind == "team":
         t = db.one("SELECT * FROM teams WHERE id = ?", (team_id or 0,))
-        if not t:
-            return JSONResponse({"ok": False, "error": "pick a team"}, status_code=400)
-        label, rows = t["name"], passes.candidate_airings(t["id"])
+        if t:
+            label, rows = t["name"], passes.candidate_airings(t["id"])
+        else:
+            # Picked from the catalogue, and not yet in the guide. Plex has no
+            # id for it and no rule it could hold, so CouchElephant keeps this
+            # one and starts the moment the team turns up.
+            wanted = (team or "").strip()
+            if not wanted or not teamcat.find(wanted):
+                return JSONResponse({"ok": False, "error": "pick a team"},
+                                    status_code=400)
+            _, label, created = await asyncio.to_thread(
+                _make_pass, "team", {"id": None, "name": wanted}, None,
+                nets, chans, prefs, False)
+            if not created:
+                return JSONResponse({"ok": False,
+                                     "error": f"You already follow {label}."},
+                                    status_code=409)
+            return JSONResponse({"ok": True, "ce_rule": True, "waiting": True,
+                                 "message":
+                                 f"Following {label}. It is not in the guide yet, so "
+                                 "nothing is scheduled. CouchElephant starts booking "
+                                 "its games the moment it appears."})
     else:
         label = (series or "").strip()
         if not label:

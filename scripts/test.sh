@@ -60,7 +60,7 @@ fi
 
 # The source is copied out of a read-only mount into the container's own
 # scratch, so a test cannot write back over the working tree either.
-BOOT='mkdir -p /work/home && cp -r /src/app /src/tests /src/pytest.ini /work/ && cd /work && exec "$@"'
+BOOT='mkdir -p /work/home && cp -r /src/app /src/tests /src/scripts /src/pytest.ini /work/ && cd /work && exec "$@"'
 
 fail=0
 
