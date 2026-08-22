@@ -7,6 +7,7 @@ import zoneinfo
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import db, passes, sync
@@ -15,6 +16,7 @@ from .plex import Plex, PlexError
 BASE = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
 app = FastAPI(title="CouchElephant", docs_url=None, redoc_url=None)
+app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="static")
 
 
 # ---------- helpers ----------

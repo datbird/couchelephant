@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}CouchElephant{% endblock %}</title>
 <meta name="description" content="A CouchElephant never forgets.">
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<meta name="theme-color" content="#040c15">
 <style>
 :root {
   /* Sampled from the logo, not guessed. */
@@ -19,7 +24,9 @@ body{margin:0;background:var(--bg);color:var(--text);
 a{color:inherit;text-decoration:none}
 header{display:flex;align-items:center;gap:22px;padding:0 22px;height:56px;
   background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
-header .brand{font-weight:700;letter-spacing:.2px;font-size:17px;white-space:nowrap}
+header .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.2px;
+  font-size:17px;white-space:nowrap}
+header .mark{height:30px;width:auto;display:block}
 header .brand-a{color:var(--wordmark)}
 header .brand-b{color:var(--wordmark-dim)}
 header nav{display:flex;gap:18px}
@@ -87,8 +94,10 @@ footer{margin:34px 0 10px;text-align:center;font-size:12px;letter-spacing:1.6px;
 </head>
 <body>
 <header>
-  <span class="brand" title="A CouchElephant never forgets."
-    ><span class="brand-a">Couch</span><span class="brand-b">Elephant</span></span>
+  <a class="brand" href="/" title="A CouchElephant never forgets.">
+    <img src="/static/mark.png" alt="" class="mark">
+    <span class="brand-a">Couch</span><span class="brand-b">Elephant</span>
+  </a>
   <nav>
     <a href="/" class="{{ 'on' if nav=='guide' }}">Guide</a>
     <a href="/recordings" class="{{ 'on' if nav=='recordings' }}">Recordings</a>
