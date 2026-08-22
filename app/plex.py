@@ -1,0 +1,152 @@
+"""Plex Media Server client, scoped to Live TV and the DVR.
+
+Plex's API is documented at developer.plex.tv but the server's real paths are
+older and differ from the docs, so the paths here are the ones the web client
+actually calls and that were verified against a live server.
+
+Two quirks worth knowing:
+  - The EPG provider is addressed as `tv.plex.providers.epg.cloud:<dvrKey>`.
+  - Creating a recording needs the template's own `parameters` string PLUS
+    targetLibrarySectionID and type. Posting the template params alone is a 400.
+"""
+import httpx
+
+TIMEOUT = httpx.Timeout(120.0, connect=15.0)
+
+
+class PlexError(RuntimeError):
+    pass
+
+
+class Plex:
+    def __init__(self, base_url: str, token: str):
+        if not base_url:
+            raise PlexError("no Plex server URL configured")
+        if not token:
+            raise PlexError("no Plex token configured")
+        self.base = base_url.rstrip("/")
+        self.token = token
+
+    def _client(self):
+        return httpx.Client(timeout=TIMEOUT, headers={"Accept": "application/json"})
+
+    def _get(self, path, params=None):
+        params = dict(params or {})
+        params["X-Plex-Token"] = self.token
+        with self._client() as c:
+            r = c.get(self.base + path, params=params)
+        if r.status_code >= 400:
+            raise PlexError(f"GET {path} -> HTTP {r.status_code}: {r.text[:200]}")
+        try:
+            return r.json().get("MediaContainer", {})
+        except Exception:
+            raise PlexError(f"GET {path} returned non-JSON: {r.text[:200]}")
+
+    # ---------- identity ----------
+
+    def server_info(self):
+        return self._get("/")
+
+    # ---------- DVR ----------
+
+    def dvrs(self):
+        return self._get("/livetv/dvrs").get("Dvr", []) or []
+
+    def grabber_devices(self):
+        return self._get("/media/grabbers/devices").get("Device", []) or []
+
+    def epg_sections(self, provider):
+        return self._get(f"/{provider}/sections").get("Directory", []) or []
+
+    def section_all(self, provider, section, **filters):
+        """Everything in an EPG section. `type=4` means airings (episodes)."""
+        return self._get(f"/{provider}/sections/{section}/all", filters).get("Metadata", []) or []
+
+    def section_search(self, provider, section, query, type_=4):
+        return self._get(
+            f"/{provider}/sections/{section}/search", {"query": query, "type": type_}
+        ).get("Metadata", []) or []
+
+    def metadata(self, provider, rating_key):
+        """Full metadata for one programme.
+
+        The Team array only exists here. A bulk `/sections/N/all` listing
+        returns Genre but NOT Team, which is why sports rows need enriching
+        one at a time.
+        """
+        items = self._get(f"/{provider}/metadata/{rating_key}").get("Metadata", []) or []
+        return items[0] if items else None
+
+    def teams(self, provider, section):
+        """Every team the guide knows about, with the ids used by `?team=<id>`."""
+        return self._get(f"/{provider}/sections/{section}/team").get("Directory", []) or []
+
+    def by_team(self, provider, section, team_id):
+        return self.section_all(provider, section, type=4, team=team_id)
+
+    # ---------- recordings ----------
+
+    def subscriptions(self):
+        return self._get("/media/subscriptions").get("MediaSubscription", []) or []
+
+    def subscription(self, key):
+        subs = self._get(f"/media/subscriptions/{key}").get("MediaSubscription", []) or []
+        return subs[0] if subs else None
+
+    def scheduled(self):
+        return self._get("/media/subscriptions/scheduled").get("MediaGrabOperation", []) or []
+
+    def template(self, rating_key):
+        """Recording options for a programme, including the parameters blob."""
+        c = self._get("/media/subscriptions/template", {"guid": rating_key})
+        return c.get("SubscriptionTemplate", []) or []
+
+    def create_recording(self, parameters: str, target_section: int, type_: int,
+                         prefs: dict | None = None):
+        """Schedule a recording.
+
+        `parameters` comes verbatim from the template and is already encoded, so
+        it is concatenated rather than passed through a params dict. Anything in
+        `prefs` pins the recording further, which is how a specific airing is
+        chosen instead of leaving Plex to guess between duplicates.
+        """
+        url = f"{self.base}/media/subscriptions?{parameters}"
+        url += f"&targetLibrarySectionID={target_section}&type={type_}"
+        for k, v in (prefs or {}).items():
+            url += f"&prefs%5B{k}%5D={v}"
+        url += f"&X-Plex-Token={self.token}"
+        with self._client() as c:
+            r = c.post(url)
+        if r.status_code >= 400:
+            raise PlexError(f"create recording -> HTTP {r.status_code}: {r.text[:300]}")
+        return r.text
+
+    def delete_subscription(self, key):
+        with self._client() as c:
+            r = c.delete(f"{self.base}/media/subscriptions/{key}",
+                         params={"X-Plex-Token": self.token})
+        if r.status_code >= 400:
+            raise PlexError(f"delete subscription {key} -> HTTP {r.status_code}")
+        return True
+
+
+def discover(plex: Plex):
+    """Work out the EPG provider id and which sections hold Shows and Sports.
+
+    These are per-DVR and per-server, so they are discovered rather than
+    configured. Returns (provider, shows_section, sports_section).
+    """
+    dvrs = plex.dvrs()
+    if not dvrs:
+        raise PlexError("no DVR is configured on this Plex server")
+    provider = dvrs[0].get("epgIdentifier")
+    if not provider:
+        raise PlexError("the DVR has no EPG identifier")
+    shows = sports = None
+    for d in plex.epg_sections(provider):
+        title = (d.get("title") or "").lower()
+        if title == "sports":
+            sports = d.get("key")
+        elif title == "shows":
+            shows = d.get("key")
+    return provider, shows, sports

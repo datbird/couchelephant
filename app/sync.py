@@ -1,0 +1,240 @@
+"""Pull the guide and the DVR state from Plex into SQLite."""
+import time
+import traceback
+
+from . import db
+from .plex import Plex, discover, PlexError
+
+
+def _now():
+    return int(time.time())
+
+
+def _airing_id(guid, media):
+    """Stable per-broadcast id. Plex's own Media id is not always present, so
+    the channel and start time identify the broadcast instead."""
+    mid = media.get("id")
+    if mid:
+        return f"{guid}#{mid}"
+    return f"{guid}#{media.get('channelIdentifier')}@{media.get('beginsAt')}"
+
+
+def _upsert_program(c, m, section, now):
+    teams = [{"id": t.get("id"), "name": t.get("tag")} for t in (m.get("Team") or [])]
+    genres = [g.get("tag") for g in (m.get("Genre") or [])]
+    c.execute(
+        """INSERT INTO programs (guid, rating_key, title, grandparent_title, summary, type,
+                                 section, genres, teams, thumb, art, originally_available,
+                                 year, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           ON CONFLICT(guid) DO UPDATE SET
+             rating_key=excluded.rating_key, title=excluded.title,
+             grandparent_title=excluded.grandparent_title, summary=excluded.summary,
+             section=excluded.section, genres=excluded.genres, teams=excluded.teams,
+             thumb=excluded.thumb, art=excluded.art,
+             originally_available=excluded.originally_available,
+             year=excluded.year, updated_at=excluded.updated_at""",
+        (m.get("guid"), m.get("ratingKey"), m.get("title"), m.get("grandparentTitle"),
+         m.get("summary"), m.get("type"), section, db.js(genres), db.js(teams),
+         m.get("thumb") or m.get("grandparentThumb"), m.get("art"),
+         m.get("originallyAvailableAt"), m.get("year"), now),
+    )
+
+
+def _upsert_airings(c, m, now):
+    guid = m.get("guid")
+    for med in (m.get("Media") or []):
+        c.execute(
+            """INSERT INTO airings (id, program_guid, channel_vcn, channel_call_sign,
+                                    channel_identifier, channel_title, begins_at, ends_at,
+                                    premiere, resolution, drm, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET
+                 channel_vcn=excluded.channel_vcn, channel_call_sign=excluded.channel_call_sign,
+                 channel_identifier=excluded.channel_identifier,
+                 channel_title=excluded.channel_title, begins_at=excluded.begins_at,
+                 ends_at=excluded.ends_at, premiere=excluded.premiere,
+                 resolution=excluded.resolution, drm=excluded.drm,
+                 updated_at=excluded.updated_at""",
+            (_airing_id(guid, med), guid, med.get("channelVcn"), med.get("channelCallSign"),
+             med.get("channelIdentifier"), med.get("channelTitle"),
+             int(med.get("beginsAt") or 0) or None, int(med.get("endsAt") or 0) or None,
+             1 if str(med.get("premiere") or "0") == "1" else 0,
+             med.get("videoResolution"), 1 if med.get("drm") else 0, now),
+        )
+
+
+def sync_guide(plex, provider, shows, sports):
+    now = _now()
+    counts = {"programs": 0, "airings": 0}
+    with db.tx() as c:
+        for section, label in ((shows, "shows"), (sports, "sports")):
+            if not section:
+                continue
+            for m in plex.section_all(provider, section, type=4):
+                _upsert_program(c, m, label, now)
+                _upsert_airings(c, m, now)
+                counts["programs"] += 1
+                counts["airings"] += len(m.get("Media") or [])
+        # Drop anything that fell out of the guide window.
+        c.execute("DELETE FROM airings WHERE updated_at < ?", (now,))
+        c.execute("DELETE FROM programs WHERE guid NOT IN (SELECT program_guid FROM airings)")
+    return counts
+
+
+def enrich_sports(plex, provider):
+    """Fill in per-programme team tags for sports.
+
+    A bulk section listing does not carry the Team array, so each sports
+    programme is fetched once. Rows that already have teams are skipped, so
+    this costs a burst on first run and almost nothing afterwards.
+    """
+    rows = db.query(
+        "SELECT guid, rating_key FROM programs "
+        "WHERE section = 'sports' AND (teams IS NULL OR teams = '[]')")
+    now = _now()
+    done = 0
+    for r in rows:
+        if not r["rating_key"]:
+            continue
+        try:
+            m = plex.metadata(provider, r["rating_key"])
+        except Exception:
+            continue
+        if not m:
+            continue
+        teams = [{"id": t.get("id"), "name": t.get("tag")} for t in (m.get("Team") or [])]
+        if not teams:
+            continue
+        with db.tx() as c:
+            c.execute("UPDATE programs SET teams = ?, updated_at = ? WHERE guid = ?",
+                      (db.js(teams), now, r["guid"]))
+        done += 1
+    return done
+
+
+def sync_teams(plex, provider, sports):
+    if not sports:
+        return 0
+    now = _now()
+    rows = plex.teams(provider, sports)
+    with db.tx() as c:
+        for t in rows:
+            c.execute(
+                "INSERT INTO teams (id, name, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at",
+                (int(t.get("key")), t.get("title"), now),
+            )
+        c.execute("DELETE FROM teams WHERE updated_at < ?", (now,))
+    return len(rows)
+
+
+def sync_channels(plex, dvr_key=None):
+    now = _now()
+    n = 0
+    with db.tx() as c:
+        for dvr in plex.dvrs():
+            for dev in (dvr.get("Device") or []):
+                for ch in (dev.get("ChannelMapping") or []):
+                    c.execute(
+                        "INSERT INTO channels (vcn, call_sign, title, identifier, updated_at) "
+                        "VALUES (?,?,?,?,?) ON CONFLICT(vcn) DO UPDATE SET "
+                        "identifier=excluded.identifier, updated_at=excluded.updated_at",
+                        (ch.get("deviceIdentifier"), None, None, ch.get("channelKey"), now),
+                    )
+                    n += 1
+    return n
+
+
+def sync_recordings(plex):
+    """Mirror Plex's subscriptions and scheduled grabs.
+
+    Subscriptions include the recurring kind ("All new episodes of X", team
+    passes), which is what makes this view worth having.
+    """
+    now = _now()
+    subs = plex.subscriptions()
+    ours = {r["plex_subscription"] for r in db.query(
+        "SELECT DISTINCT plex_subscription FROM pass_actions WHERE plex_subscription IS NOT NULL")}
+    with db.tx() as c:
+        for s in subs:
+            key = str(s.get("key"))
+            detail = plex.subscription(key) or s
+            settings = {st.get("id"): st.get("value") for st in (detail.get("Setting") or [])}
+            c.execute(
+                """INSERT INTO plex_subscriptions (key, title, type, target_section, settings,
+                                                   created_at, updated_at, owned_by_us)
+                   VALUES (?,?,?,?,?,?,?,?)
+                   ON CONFLICT(key) DO UPDATE SET title=excluded.title, type=excluded.type,
+                     target_section=excluded.target_section, settings=excluded.settings,
+                     updated_at=excluded.updated_at, owned_by_us=excluded.owned_by_us""",
+                (key, s.get("title"), str(s.get("type")), str(s.get("targetLibrarySectionID")),
+                 db.js(settings), s.get("createdAt"), now, 1 if key in ours else 0),
+            )
+        c.execute("DELETE FROM plex_subscriptions WHERE updated_at < ?", (now,))
+
+        for op in plex.scheduled():
+            meta = op.get("Metadata") or op.get("Video") or {}
+            media = meta.get("Media")
+            if isinstance(media, dict):
+                media = [media]
+            # Plex returns mediaIndex as a string on some payloads and an int on
+            # others, so coerce before using it as an index.
+            try:
+                idx = int(op.get("mediaIndex") or 0)
+            except (TypeError, ValueError):
+                idx = 0
+            pool = media or [{}]
+            chosen = pool[idx] if 0 <= idx < len(pool) else pool[0]
+            c.execute(
+                """INSERT INTO plex_grabs (id, subscription, status, title, parent_title,
+                                           channel_vcn, begins_at, ends_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(id) DO UPDATE SET status=excluded.status,
+                     channel_vcn=excluded.channel_vcn, begins_at=excluded.begins_at,
+                     ends_at=excluded.ends_at, updated_at=excluded.updated_at""",
+                (op.get("id") or f"{meta.get('guid')}#{idx}",
+                 str(op.get("mediaSubscriptionID") or ""), op.get("status"),
+                 meta.get("title"), meta.get("grandparentTitle"),
+                 chosen.get("channelVcn"),
+                 int(chosen.get("beginsAt") or 0) or None,
+                 int(chosen.get("endsAt") or 0) or None, now),
+            )
+        c.execute("DELETE FROM plex_grabs WHERE updated_at < ?", (now,))
+    return len(subs)
+
+
+def full_sync():
+    """One pass over everything. Returns a short human-readable summary."""
+    started = _now()
+    detail = ""
+    ok = 0
+    try:
+        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+        provider, shows, sports = discover(plex)
+        db.set_setting("epg_provider", provider)
+        db.set_setting("shows_section", shows or "")
+        db.set_setting("sports_section", sports or "")
+
+        chans = sync_channels(plex)
+        teams = sync_teams(plex, provider, sports)
+        guide = sync_guide(plex, provider, shows, sports)
+        enriched = enrich_sports(plex, provider)
+        subs = sync_recordings(plex)
+
+        detail = (f"{guide['programs']} programs, {guide['airings']} airings, "
+                  f"{teams} teams, {enriched} sports enriched, "
+                  f"{chans} channels, {subs} subscriptions")
+        ok = 1
+    except Exception as e:
+        # Keep the frame that actually failed. A bare type+message sent me
+        # chasing the wrong module once already.
+        tb = traceback.extract_tb(e.__traceback__)
+        where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(tb[-4:]))
+        detail = f"{type(e).__name__}: {e} [{where}]"
+    with db.tx() as c:
+        c.execute("INSERT INTO sync_log (started_at, ended_at, ok, detail) VALUES (?,?,?,?)",
+                  (started, _now(), ok, detail))
+        c.execute("DELETE FROM sync_log WHERE id NOT IN "
+                  "(SELECT id FROM sync_log ORDER BY id DESC LIMIT 50)")
+    return ok, detail

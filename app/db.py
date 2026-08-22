@@ -1,0 +1,221 @@
+"""SQLite storage. One file, WAL, no ORM.
+
+The guide is a cache: it is re-fetched whole and upserted, so any row can be
+rebuilt from Plex at any time. The tables that matter are `passes` and
+`pass_actions`, because those are ours and cannot be recovered from Plex.
+"""
+import json
+import os
+import sqlite3
+import threading
+from contextlib import contextmanager
+
+DB_PATH = os.environ.get("SMARTPASS_DB", "/data/smartpass.db")
+_local = threading.local()
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS channels (
+    vcn        TEXT PRIMARY KEY,
+    call_sign  TEXT,
+    title      TEXT,
+    identifier TEXT,
+    updated_at INTEGER
+);
+
+-- One row per programme. Sports games are episodes of a parent like
+-- "NFL Football", so grandparent_title is the league and title is the matchup.
+CREATE TABLE IF NOT EXISTS programs (
+    guid                  TEXT PRIMARY KEY,
+    rating_key            TEXT,
+    title                 TEXT,
+    grandparent_title     TEXT,
+    summary               TEXT,
+    type                  TEXT,
+    section               TEXT,
+    genres                TEXT,
+    teams                 TEXT,
+    thumb                 TEXT,
+    art                   TEXT,
+    originally_available  TEXT,
+    year                  INTEGER,
+    updated_at            INTEGER
+);
+
+-- One row per BROADCAST. The same game appears here several times, once per
+-- channel and time. This distinction is the whole point of the project.
+CREATE TABLE IF NOT EXISTS airings (
+    id                 TEXT PRIMARY KEY,
+    program_guid       TEXT NOT NULL,
+    channel_vcn        TEXT,
+    channel_call_sign  TEXT,
+    channel_identifier TEXT,
+    channel_title      TEXT,
+    begins_at          INTEGER,
+    ends_at            INTEGER,
+    premiere           INTEGER DEFAULT 0,
+    resolution         TEXT,
+    drm                INTEGER DEFAULT 0,
+    updated_at         INTEGER,
+    FOREIGN KEY (program_guid) REFERENCES programs(guid)
+);
+CREATE INDEX IF NOT EXISTS idx_airings_begins ON airings(begins_at);
+CREATE INDEX IF NOT EXISTS idx_airings_program ON airings(program_guid);
+CREATE INDEX IF NOT EXISTS idx_airings_channel ON airings(channel_vcn, begins_at);
+
+CREATE TABLE IF NOT EXISTS teams (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT,
+    updated_at INTEGER
+);
+
+-- Mirror of what Plex itself has scheduled, so the UI can show recurring
+-- ("All new episodes of X") alongside one-off recordings.
+CREATE TABLE IF NOT EXISTS plex_subscriptions (
+    key             TEXT PRIMARY KEY,
+    title           TEXT,
+    type            TEXT,
+    target_section  TEXT,
+    settings        TEXT,
+    created_at      INTEGER,
+    updated_at      INTEGER,
+    owned_by_us     INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS plex_grabs (
+    id            TEXT PRIMARY KEY,
+    subscription  TEXT,
+    status        TEXT,
+    title         TEXT,
+    parent_title  TEXT,
+    channel_vcn   TEXT,
+    begins_at     INTEGER,
+    ends_at       INTEGER,
+    updated_at    INTEGER
+);
+
+-- Ours. A pass says "follow this team"; the scheduler turns it into pinned
+-- one-shot recordings on the airing we choose.
+CREATE TABLE IF NOT EXISTS passes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL DEFAULT 'team',
+    team_id     INTEGER,
+    team_name   TEXT,
+    enabled     INTEGER DEFAULT 1,
+    created_at  INTEGER
+);
+
+-- Audit trail. Every decision is written here, including the ones we skipped
+-- and why, so the UI can explain itself instead of being a black box.
+CREATE TABLE IF NOT EXISTS pass_actions (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    pass_id           INTEGER,
+    program_guid      TEXT,
+    airing_id         TEXT,
+    program_title     TEXT,
+    channel_vcn       TEXT,
+    begins_at         INTEGER,
+    action            TEXT,
+    reason            TEXT,
+    plex_subscription TEXT,
+    dry_run           INTEGER DEFAULT 0,
+    created_at        INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_actions_pass ON pass_actions(pass_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sync_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at INTEGER,
+    ended_at   INTEGER,
+    ok         INTEGER,
+    detail     TEXT
+);
+"""
+
+DEFAULTS = {
+    "plex_url": "",
+    "plex_token": "",
+    "timezone": "America/Chicago",
+    "sync_minutes": "60",
+    # Start in preview. Nothing is written to Plex until this is turned off,
+    # so the first run can be inspected before it is trusted.
+    "dry_run": "1",
+    "epg_provider": "",
+    "sports_section": "",
+    "shows_section": "",
+}
+
+
+def connect():
+    if not hasattr(_local, "conn"):
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        _local.conn = conn
+    return _local.conn
+
+
+@contextmanager
+def tx():
+    conn = connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def init():
+    conn = connect()
+    conn.executescript(SCHEMA)
+    for k, v in DEFAULTS.items():
+        conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+    conn.commit()
+
+
+def get_setting(key, default=None):
+    row = connect().execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else (default if default is not None else DEFAULTS.get(key))
+
+
+def all_settings():
+    rows = connect().execute("SELECT key, value FROM settings").fetchall()
+    out = dict(DEFAULTS)
+    out.update({r["key"]: r["value"] for r in rows})
+    return out
+
+
+def set_setting(key, value):
+    with tx() as c:
+        c.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
+
+
+def query(sql, params=()):
+    return connect().execute(sql, params).fetchall()
+
+
+def one(sql, params=()):
+    return connect().execute(sql, params).fetchone()
+
+
+def js(value):
+    return json.dumps(value, separators=(",", ":"))
+
+
+def unjs(value, default=None):
+    try:
+        return json.loads(value) if value else (default if default is not None else [])
+    except Exception:
+        return default if default is not None else []

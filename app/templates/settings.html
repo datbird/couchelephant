@@ -1,0 +1,86 @@
+{% extends "base.html" %}{% set nav='settings' %}
+{% block title %}Settings - SmartPass{% endblock %}
+{% block body %}
+<h1>Settings</h1>
+<div class="sub">Which Plex server this rides on, and how it reads time.</div>
+
+{% if tested %}
+  <div class="banner {{ 'ok' if tested.startswith('OK') else 'bad' }}">{{ tested }}</div>
+{% endif %}
+
+<div class="card">
+<form method="post" action="/settings">
+  <div class="field">
+    <label>Plex server</label>
+    <input name="plex_url" value="{{ settings.plex_url }}" placeholder="http://127.0.0.1:32400">
+    <span class="help">The server this drives. Use its address as seen from this container.</span>
+  </div>
+
+  <div class="field">
+    <label>Plex token</label>
+    <input name="plex_token" type="password"
+           value="{{ '*' * 12 if settings.plex_token else '' }}"
+           placeholder="X-Plex-Token">
+    <span class="help">Stored in the local database, never logged. Leave the dots alone to keep
+      the current token. On the server it is the <code>PlexOnlineToken</code> in Preferences.xml.</span>
+  </div>
+
+  <div class="field">
+    <label>Timezone</label>
+    <select name="timezone">
+      {% for z in zones %}<option value="{{ z }}" {{ 'selected' if z == settings.timezone }}>{{ z }}</option>{% endfor %}
+    </select>
+    <span class="help">Every time in this app is shown in this zone. Guide data itself is stored
+      as UTC timestamps, so changing this never moves a recording.</span>
+  </div>
+
+  <div class="field">
+    <label>Sync interval (minutes)</label>
+    <input name="sync_minutes" value="{{ settings.sync_minutes }}" style="max-width:120px">
+    <span class="help">How often the guide is refreshed and passes are re-evaluated.</span>
+  </div>
+
+  <div class="field">
+    <label>Preview mode</label>
+    <label class="row">
+      <input type="checkbox" name="dry_run" value="1" {{ 'checked' if settings.dry_run == '1' }}>
+      <span>Do not write anything to Plex</span>
+    </label>
+    <span class="help">On by default. Passes still work out which airing they would choose and
+      show it, but no recording is created. Turn this off once the choices look right.</span>
+  </div>
+
+  <div class="row">
+    <button class="primary">Save</button>
+  </div>
+</form>
+</div>
+
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Connection</h2>
+  <div class="sub">Checks the server answers and reports its DVR count.</div>
+  <form method="post" action="/settings/test"><button>Test connection</button></form>
+</div>
+
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Discovered from the server</h2>
+  <div class="sub">Found automatically. Nothing to configure.</div>
+  <table>
+    <tr><td class="dim">EPG provider</td><td><code>{{ settings.epg_provider or 'not discovered yet' }}</code></td></tr>
+    <tr><td class="dim">Shows section</td><td><code>{{ settings.shows_section or '-' }}</code></td></tr>
+    <tr><td class="dim">Sports section</td><td><code>{{ settings.sports_section or '-' }}</code></td></tr>
+  </table>
+</div>
+
+{% if last_sync %}
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Last sync</h2>
+  <table>
+    <tr><td class="dim">Finished</td><td>{{ last_sync.ended_at|fmt }}</td></tr>
+    <tr><td class="dim">Result</td>
+        <td>{% if last_sync.ok %}<span class="pill ok">ok</span>{% else %}<span class="pill bad">failed</span>{% endif %}</td></tr>
+    <tr><td class="dim">Detail</td><td class="tiny">{{ last_sync.detail }}</td></tr>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

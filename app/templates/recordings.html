@@ -1,0 +1,62 @@
+{% extends "base.html" %}{% set nav='recordings' %}
+{% block title %}Recordings - SmartPass{% endblock %}
+{% block body %}
+<h1>Recordings</h1>
+<div class="sub">Everything Plex is set up to record, read live from the server.</div>
+
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Rules</h2>
+  <div class="sub">Recurring subscriptions. These keep matching new airings on their own.</div>
+  {% if subs %}
+  <table>
+    <tr><th>Title</th><th>Airings</th><th>Limited to</th><th>Library</th><th>Source</th></tr>
+    {% for s in subs %}
+    {% set cfg = s.settings|unjs({}) %}
+    <tr>
+      <td><b>{{ s.title }}</b></td>
+      <td class="tiny dim">
+        {{ 'New only' if cfg.get('onlyNewAirings') == '1' else 'New and repeats' }}
+      </td>
+      <td class="tiny dim">
+        {% if cfg.get('lineupChannel') %}<span class="pill warn">one channel</span>{% endif %}
+        {% if cfg.get('startTimeslot') and cfg.get('startTimeslot') != '-1' %}
+          <span class="pill warn">one time</span>
+        {% endif %}
+        {% if not cfg.get('lineupChannel') and (not cfg.get('startTimeslot') or cfg.get('startTimeslot') == '-1') %}
+          <span class="dim">any</span>
+        {% endif %}
+      </td>
+      <td class="tiny dim">section {{ s.target_section }}</td>
+      <td>{% if s.owned_by_us %}<span class="pill ok">SmartPass</span>{% else %}<span class="pill">Plex</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">No recurring rules on the server.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Scheduled and recent</h2>
+  <div class="sub">Individual recordings Plex has queued, is running, or has finished.</div>
+  {% if grabs %}
+  <table>
+    <tr><th>When</th><th>Ch</th><th>Programme</th><th>Status</th></tr>
+    {% for g in grabs %}
+    <tr>
+      <td class="dim" style="white-space:nowrap">{{ g.begins_at|fmt if g.begins_at else '' }}</td>
+      <td class="dim">{{ g.channel_vcn or '' }}</td>
+      <td>
+        {% if g.parent_title %}<span class="dim tiny">{{ g.parent_title }}</span><br>{% endif %}
+        <b>{{ g.title }}</b>
+      </td>
+      <td>
+        {% if g.status == 'scheduled' %}<span class="pill">scheduled</span>
+        {% elif g.status == 'inprogress' %}<span class="pill live">recording</span>
+        {% elif g.status == 'complete' %}<span class="pill ok">complete</span>
+        {% else %}<span class="pill">{{ g.status }}</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">Nothing scheduled.</div>{% endif %}
+</div>
+{% endblock %}

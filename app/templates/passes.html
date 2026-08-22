@@ -1,0 +1,110 @@
+{% extends "base.html" %}{% set nav='passes' %}
+{% block title %}Sports Passes - SmartPass{% endblock %}
+{% block body %}
+<h1>Smart Sports Passes</h1>
+<div class="sub">Follow a team. Every game gets recorded from its live broadcast, not a rebroadcast.</div>
+
+{% if settings.dry_run == '1' %}
+<div class="banner warn">
+  <b>Preview mode.</b> Nothing is written to Plex. The table below shows exactly which
+  airing would be chosen for each game. Turn preview off in
+  <a href="/settings"><b>Settings</b></a> when you are satisfied it picks correctly.
+</div>
+{% endif %}
+
+<div class="card">
+  <form method="post" action="/passes/add" class="row">
+    <select name="team_id" required style="min-width:280px">
+      <option value="">Choose a team...</option>
+      {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+    </select>
+    <button class="primary">Follow team</button>
+    <span class="tiny dim">{{ teams|length }} teams in your guide</span>
+  </form>
+</div>
+
+{% if passes %}
+<div class="card" style="padding:0">
+<table>
+  <tr><th>Team</th><th>Status</th><th></th></tr>
+  {% for p in passes %}
+  <tr>
+    <td><b>{{ p.team_name }}</b></td>
+    <td>{% if p.enabled %}<span class="pill ok">active</span>{% else %}<span class="pill">paused</span>{% endif %}</td>
+    <td style="text-align:right">
+      <form method="post" action="/passes/{{ p.id }}/toggle" style="display:inline">
+        <button>{{ 'Pause' if p.enabled else 'Resume' }}</button></form>
+      <form method="post" action="/passes/{{ p.id }}/delete" style="display:inline">
+        <button class="danger">Remove</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <div>
+      <h2 style="font-size:15px;margin:0 0 4px">Upcoming games and the airing chosen</h2>
+      <div class="sub" style="margin:0">Why each one was picked, so nothing is a black box.</div>
+    </div>
+    <form method="post" action="/passes/run" style="margin:0"><button class="primary">Run now</button></form>
+  </div>
+  {% if upcoming %}
+  <table style="margin-top:14px">
+    <tr><th>Game</th><th>Chosen airing</th><th>Why</th><th>Status</th></tr>
+    {% for u in upcoming %}
+    <tr>
+      <td>
+        <span class="dim tiny">{{ u.grandparent }} &middot; {{ u.team }}</span><br>
+        <b>{{ u.title }}</b>
+      </td>
+      <td style="white-space:nowrap">
+        {{ u.begins_at|fmt }}<br>
+        <span class="dim tiny">{{ u.channel }}</span>
+      </td>
+      <td class="tiny dim">
+        {{ u.reason }}
+        {% if u.alternatives %}<br>{{ u.alternatives }} other airing(s) rejected{% endif %}
+      </td>
+      <td style="white-space:nowrap">
+        {% if u.blocked %}<span class="pill">{{ u.blocked }}</span>
+        {% elif settings.dry_run == '1' %}<span class="pill warn">would schedule</span>
+        {% else %}<span class="pill ok">will schedule</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <div class="empty">No upcoming games for the teams you follow.</div>
+  {% endif %}
+</div>
+{% else %}
+  <div class="card"><div class="empty">No passes yet. Choose a team above.</div></div>
+{% endif %}
+
+{% if actions %}
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Activity</h2>
+  <div class="sub">Every decision, including the ones it declined to make.</div>
+  <table>
+    <tr><th>When</th><th>Game</th><th>Airing</th><th>Action</th><th>Reason</th></tr>
+    {% for a in actions %}
+    <tr>
+      <td class="dim tiny" style="white-space:nowrap">{{ a.created_at|fmt('%b %-d %-I:%M %p') }}</td>
+      <td class="tiny">{{ a.program_title }}</td>
+      <td class="tiny dim" style="white-space:nowrap">
+        {{ a.channel_vcn }} &middot; {{ a.begins_at|fmt('%a %-I:%M %p') }}</td>
+      <td>
+        {% if a.action == 'scheduled' %}<span class="pill ok">scheduled</span>
+        {% elif a.action == 'would schedule' %}<span class="pill warn">preview</span>
+        {% elif a.action == 'failed' %}<span class="pill bad">failed</span>
+        {% else %}<span class="pill">{{ a.action }}</span>{% endif %}
+      </td>
+      <td class="tiny dim">{{ a.reason }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endblock %}

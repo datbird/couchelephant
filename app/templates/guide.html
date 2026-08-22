@@ -1,0 +1,57 @@
+{% extends "base.html" %}{% set nav='guide' %}
+{% block title %}Guide - SmartPass{% endblock %}
+{% block body %}
+<h1>Guide</h1>
+<div class="sub">{{ rows|length }} airings shown. Times in {{ settings.timezone }}.</div>
+
+<div class="daybar">
+  {% for d in days %}
+    <a href="/?day={{ d.key }}{% if channel %}&channel={{ channel }}{% endif %}{% if sports %}&sports=1{% endif %}"
+       class="{{ 'on' if d.key == day }}">{{ d.label }}</a>
+  {% endfor %}
+</div>
+
+<form method="get" action="/" class="row" style="margin-bottom:14px">
+  <input type="hidden" name="day" value="{{ day }}">
+  <select name="channel" onchange="this.form.submit()">
+    <option value="">All channels</option>
+    {% for c in channels %}
+      <option value="{{ c.vcn }}" {{ 'selected' if c.vcn == channel }}>{{ c.vcn }} {{ c.cs or '' }}</option>
+    {% endfor %}
+  </select>
+  <label class="row tiny dim">
+    <input type="checkbox" name="sports" value="1" {{ 'checked' if sports }} onchange="this.form.submit()">
+    Sports only
+  </label>
+</form>
+
+<div class="card" style="padding:0">
+{% if rows %}
+<table>
+  <tr><th>Time</th><th>Ch</th><th>Programme</th><th>Teams</th><th></th></tr>
+  {% for r in rows %}
+  <tr>
+    <td class="dim" style="white-space:nowrap">{{ r.begins_at|fmt('%-I:%M %p') }}</td>
+    <td class="dim" style="white-space:nowrap">{{ r.channel_vcn }} {{ r.channel_call_sign or '' }}</td>
+    <td>
+      {% if r.grandparent_title and r.grandparent_title != r.title %}
+        <span class="dim tiny">{{ r.grandparent_title }}</span><br>
+      {% endif %}
+      <b>{{ r.title }}</b>
+      {% if r.summary %}<div class="tiny dim">{{ r.summary[:110] }}</div>{% endif %}
+    </td>
+    <td class="tiny dim">
+      {% for t in r.teams|unjs %}{{ t.name }}{% if not loop.last %} vs {% endif %}{% endfor %}
+    </td>
+    <td style="white-space:nowrap">
+      {% if r.premiere %}<span class="pill live">LIVE</span>{% endif %}
+      {% if r.drm %}<span class="pill bad">DRM</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+  <div class="empty">Nothing in the guide for this day yet. Try <b>Sync now</b>.</div>
+{% endif %}
+</div>
+{% endblock %}
