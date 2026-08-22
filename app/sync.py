@@ -1,9 +1,13 @@
 """Pull the guide and the DVR state from Plex into SQLite."""
+import os
 import time
 import traceback
 
 from . import db
 from .plex import Plex, discover, PlexError
+
+
+LOGO_DIR = os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
 
 
 def _now():
@@ -41,9 +45,29 @@ def _upsert_program(c, m, section, now):
     )
 
 
+def _upsert_channel(c, med, now):
+    """Channel identity, including the Gracenote logo Plex points at."""
+    vcn = med.get("channelVcn")
+    if not vcn:
+        return
+    c.execute(
+        """INSERT INTO channels (vcn, call_sign, title, identifier, thumb_url, updated_at)
+           VALUES (?,?,?,?,?,?)
+           ON CONFLICT(vcn) DO UPDATE SET
+             call_sign=COALESCE(excluded.call_sign, channels.call_sign),
+             title=COALESCE(excluded.title, channels.title),
+             identifier=COALESCE(excluded.identifier, channels.identifier),
+             thumb_url=COALESCE(excluded.thumb_url, channels.thumb_url),
+             updated_at=excluded.updated_at""",
+        (vcn, med.get("channelCallSign"), med.get("channelTitle"),
+         med.get("channelIdentifier"), med.get("channelThumb"), now),
+    )
+
+
 def _upsert_airings(c, m, now):
     guid = m.get("guid")
     for med in (m.get("Media") or []):
+        _upsert_channel(c, med, now)
         c.execute(
             """INSERT INTO airings (id, program_guid, channel_vcn, channel_call_sign,
                                     channel_identifier, channel_title, begins_at, ends_at,
@@ -80,6 +104,36 @@ def sync_guide(plex, provider, shows, sports):
         c.execute("DELETE FROM airings WHERE updated_at < ?", (now,))
         c.execute("DELETE FROM programs WHERE guid NOT IN (SELECT program_guid FROM airings)")
     return counts
+
+
+def cache_logos():
+    """Download channel logos once and serve them locally.
+
+    They live on Plex's CDN, which works but makes every guide page depend on
+    an external host. Fetching them once keeps the guide self-contained.
+    """
+    import httpx
+    os.makedirs(LOGO_DIR, exist_ok=True)
+    rows = db.query(
+        "SELECT vcn, thumb_url FROM channels "
+        "WHERE thumb_url IS NOT NULL AND (logo_path IS NULL OR logo_path = '')")
+    done = 0
+    with httpx.Client(timeout=30.0, follow_redirects=True) as c:
+        for r in rows:
+            safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in r["vcn"])
+            path = os.path.join(LOGO_DIR, f"{safe}.png")
+            try:
+                resp = c.get(r["thumb_url"])
+                if resp.status_code != 200 or not resp.content:
+                    continue
+                with open(path, "wb") as fh:
+                    fh.write(resp.content)
+            except Exception:
+                continue
+            with db.tx() as conn:
+                conn.execute("UPDATE channels SET logo_path = ? WHERE vcn = ?", (path, r["vcn"]))
+            done += 1
+    return done
 
 
 def enrich_sports(plex, provider):
@@ -130,18 +184,22 @@ def sync_teams(plex, provider, sports):
 
 
 def sync_channels(plex, dvr_key=None):
+    """Kept for the DVR's channel identifiers. Names and logos come from the
+    guide, which carries better data than the tuner's channel mapping."""
     now = _now()
     n = 0
     with db.tx() as c:
         for dvr in plex.dvrs():
             for dev in (dvr.get("Device") or []):
                 for ch in (dev.get("ChannelMapping") or []):
+                    vcn = ch.get("deviceIdentifier")
+                    if not vcn:
+                        continue
                     c.execute(
-                        "INSERT INTO channels (vcn, call_sign, title, identifier, updated_at) "
-                        "VALUES (?,?,?,?,?) ON CONFLICT(vcn) DO UPDATE SET "
+                        "INSERT INTO channels (vcn, identifier, updated_at) VALUES (?,?,?) "
+                        "ON CONFLICT(vcn) DO UPDATE SET "
                         "identifier=excluded.identifier, updated_at=excluded.updated_at",
-                        (ch.get("deviceIdentifier"), None, None, ch.get("channelKey"), now),
-                    )
+                        (vcn, ch.get("channelKey"), now))
                     n += 1
     return n
 
@@ -220,11 +278,13 @@ def full_sync():
         teams = sync_teams(plex, provider, sports)
         guide = sync_guide(plex, provider, shows, sports)
         enriched = enrich_sports(plex, provider)
+        logos = cache_logos()
         subs = sync_recordings(plex)
 
+        nch = db.one("SELECT COUNT(*) n FROM channels")["n"]
         detail = (f"{guide['programs']} programs, {guide['airings']} airings, "
                   f"{teams} teams, {enriched} sports enriched, "
-                  f"{chans} channels, {subs} subscriptions")
+                  f"{nch} channels, {logos} logos fetched, {subs} subscriptions")
         ok = 1
     except Exception as e:
         # Keep the frame that actually failed. A bare type+message sent me

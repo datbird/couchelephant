@@ -6,7 +6,7 @@ import time
 import zoneinfo
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -43,6 +43,18 @@ def fmt_day(ts):
 templates.env.filters["fmt"] = fmt
 templates.env.filters["fmt_day"] = fmt_day
 templates.env.filters["unjs"] = db.unjs
+
+
+def _channel_list():
+    return db.query(
+        "SELECT vcn, call_sign AS cs FROM channels WHERE vcn IS NOT NULL "
+        "ORDER BY CAST(vcn AS REAL)")
+
+
+def _logo_map():
+    """vcn -> True when a logo is cached, so the template can skip the <img>."""
+    return {r["vcn"]: True for r in db.query(
+        "SELECT vcn FROM channels WHERE logo_path IS NOT NULL AND logo_path != ''")}
 
 
 def page(request, name, **ctx):
@@ -102,11 +114,10 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q
             sql.append("AND p.section = 'sports'")
         sql.append("ORDER BY a.begins_at LIMIT 400")
         rows = db.query(" ".join(sql), tuple(args))
-        channels = db.query(
-            "SELECT DISTINCT channel_vcn AS vcn, channel_call_sign AS cs FROM airings "
-            "WHERE channel_vcn IS NOT NULL ORDER BY CAST(channel_vcn AS REAL)")
+        channels = _channel_list()
         return page(request, "guide.html", rows=rows, days=[], day="",
-                    channels=channels, channel=channel, sports=sports, q=q)
+                    channels=channels, channel=channel, sports=sports, q=q,
+                    logos=_logo_map())
 
     start = now
     if day:
@@ -136,11 +147,10 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q
         days.append({"key": d.strftime("%Y-%m-%d"),
                      "label": "Today" if i == 0 else d.strftime("%a %-d")})
 
-    channels = db.query(
-        "SELECT DISTINCT channel_vcn AS vcn, channel_call_sign AS cs FROM airings "
-        "WHERE channel_vcn IS NOT NULL ORDER BY CAST(channel_vcn AS REAL)")
+    channels = _channel_list()
     return page(request, "guide.html", rows=rows, days=days, day=day or days[0]["key"],
-                channels=channels, channel=channel, sports=sports, q="")
+                channels=channels, channel=channel, sports=sports, q="",
+                logos=_logo_map())
 
 
 @app.get("/search")
@@ -257,6 +267,26 @@ async def sync_now():
     await asyncio.to_thread(sync.full_sync)
     await asyncio.to_thread(passes.run_passes)
     return RedirectResponse("/", status_code=303)
+
+
+# A 1x1 transparent PNG, so a missing logo renders as empty space rather than
+# a broken-image glyph.
+_BLANK = bytes.fromhex(
+    "89504e470d0a1a0a0000000d494844520000000100000001080600000"
+    "01f15c4890000000a49444154789c6360000002000100ffff03000006000557bfabd4"
+    "0000000049454e44ae426082")
+
+
+@app.get("/logo/{vcn}")
+def logo(vcn: str):
+    """Channel logo, served from the local cache."""
+    row = db.one("SELECT logo_path FROM channels WHERE vcn = ?", (vcn,))
+    path = row["logo_path"] if row else None
+    if path and os.path.exists(path):
+        return FileResponse(path, media_type="image/png",
+                            headers={"Cache-Control": "public, max-age=604800"})
+    return Response(_BLANK, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=3600"})
 
 
 @app.get("/healthz")

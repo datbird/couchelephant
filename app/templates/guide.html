@@ -60,7 +60,13 @@
   <tr>
     <td class="dim" style="white-space:nowrap">
       {{ r.begins_at|fmt if q else r.begins_at|fmt('%-I:%M %p') }}</td>
-    <td class="dim" style="white-space:nowrap">{{ r.channel_vcn }} {{ r.channel_call_sign or '' }}</td>
+    <td class="chcell">
+      {% if logos.get(r.channel_vcn) %}
+        <img src="/logo/{{ r.channel_vcn }}" alt="" class="chlogo"
+             title="{{ r.channel_vcn }} {{ r.channel_call_sign or '' }}" loading="lazy">
+      {% endif %}
+      <span class="chtext">{{ r.channel_vcn }}<br><span class="tiny">{{ r.channel_call_sign or '' }}</span></span>
+    </td>
     <td>
       {% if r.grandparent_title and r.grandparent_title != r.title %}
         <span class="dim tiny">{{ r.grandparent_title }}</span><br>

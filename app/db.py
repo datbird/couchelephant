@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS channels (
     call_sign  TEXT,
     title      TEXT,
     identifier TEXT,
+    thumb_url  TEXT,
+    logo_path  TEXT,
     updated_at INTEGER
 );
 
@@ -173,9 +175,25 @@ def tx():
         raise
 
 
+# Columns added after the first release. CREATE TABLE IF NOT EXISTS will not
+# add them to a database that already exists, so they are applied by hand.
+MIGRATIONS = [
+    ("channels", "thumb_url", "TEXT"),
+    ("channels", "logo_path", "TEXT"),
+]
+
+
+def _migrate(conn):
+    for table, column, decl in MIGRATIONS:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def init():
     conn = connect()
     conn.executescript(SCHEMA)
+    _migrate(conn)
     for k, v in DEFAULTS.items():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     conn.commit()
