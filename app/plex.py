@@ -134,7 +134,10 @@ def discover(plex: Plex):
     """Work out the EPG provider id and which sections hold Shows and Sports.
 
     These are per-DVR and per-server, so they are discovered rather than
-    configured. Returns (provider, shows_section, sports_section).
+    configured. Returns (provider, shows, sports, movies).
+
+    Movies matter: a channel showing films has NO entries in the Shows section,
+    so leaving it out makes those channels look blank in the guide.
     """
     dvrs = plex.dvrs()
     if not dvrs:
@@ -142,11 +145,13 @@ def discover(plex: Plex):
     provider = dvrs[0].get("epgIdentifier")
     if not provider:
         raise PlexError("the DVR has no EPG identifier")
-    shows = sports = None
+    shows = sports = movies = None
     for d in plex.epg_sections(provider):
         title = (d.get("title") or "").lower()
         if title == "sports":
             sports = d.get("key")
         elif title == "shows":
             shows = d.get("key")
-    return provider, shows, sports
+        elif title == "movies":
+            movies = d.get("key")
+    return provider, shows, sports, movies

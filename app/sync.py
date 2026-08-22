@@ -88,14 +88,18 @@ def _upsert_airings(c, m, now):
         )
 
 
-def sync_guide(plex, provider, shows, sports):
+def sync_guide(plex, provider, shows, sports, movies=None):
+    """Pull every section. Each has its own item type: shows and sports are
+    episodes (type 4), movies are type 1. Query a section with the wrong type
+    and it returns nothing, which is how 16 channels came to look empty."""
     now = _now()
     counts = {"programs": 0, "airings": 0}
     with db.tx() as c:
-        for section, label in ((shows, "shows"), (sports, "sports")):
+        for section, label, itype in ((shows, "shows", 4), (sports, "sports", 4),
+                                      (movies, "movies", 1)):
             if not section:
                 continue
-            for m in plex.section_all(provider, section, type=4):
+            for m in plex.section_all(provider, section, type=itype):
                 _upsert_program(c, m, label, now)
                 _upsert_airings(c, m, now)
                 counts["programs"] += 1
@@ -317,14 +321,15 @@ def full_sync():
     ok = 0
     try:
         plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        provider, shows, sports = discover(plex)
+        provider, shows, sports, movies = discover(plex)
         db.set_setting("epg_provider", provider)
         db.set_setting("shows_section", shows or "")
         db.set_setting("sports_section", sports or "")
+        db.set_setting("movies_section", movies or "")
 
         chans = sync_channels(plex)
         teams = sync_teams(plex, provider, sports)
-        guide = sync_guide(plex, provider, shows, sports)
+        guide = sync_guide(plex, provider, shows, sports, movies)
         enriched = enrich_sports(plex, provider)
         got, bad, tried = cache_logos()
         subs = sync_recordings(plex)

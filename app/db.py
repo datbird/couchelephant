@@ -165,6 +165,7 @@ DEFAULTS = {
     "epg_provider": "",
     "sports_section": "",
     "shows_section": "",
+    "movies_section": "",
 }
 
 
