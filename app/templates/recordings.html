@@ -21,8 +21,17 @@
 {%- endmacro %}
 
 {% block body %}
-<h1>Recordings</h1>
-<div class="sub">Every schedule on this server, whichever of us created it.</div>
+<div class="pagehead">
+  <div>
+    <h1>Recordings</h1>
+    <div class="sub" style="margin:0">Every schedule on this server, whichever of us created it.</div>
+  </div>
+  <button type="button" class="addbtn" id="addrule"
+          title="Add a recording schedule" aria-label="Add a recording schedule">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+</div>
 {# The same two colours the record options use, so the pages teach one thing. #}
 <div class="legend">
   <span><i class="ce"></i> CouchElephant keeps the rule and books each airing</span>
@@ -62,16 +71,9 @@
     </tr>
     {% endfor %}
   </table>
-  {% else %}<div class="empty">No rules yet. Follow a team below, or press record on a programme in the guide.</div>{% endif %}
+  {% else %}<div class="empty">No rules yet. Press <b>+</b> above to follow a team or a
+    programme, or press record on something in the guide.</div>{% endif %}
 
-  <form method="post" action="/passes/add" class="row" style="margin-top:14px">
-    <select name="team_id" required>
-      <option value="">Follow a team...</option>
-      {% for t in teams %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
-    </select>
-    <button class="primary">Follow</button>
-    <span class="note">{{ teams|length }} teams appear in your guide.</span>
-  </form>
 </div>
 
 {% if upcoming %}
@@ -147,4 +149,258 @@
   </table>
 </details>
 {% endif %}
+
+<script>
+// Add a schedule. Both kinds are CouchElephant's own: it picks the airing and
+// pins it. The source limit is here too, because a rule that may only use
+// certain networks is the reason someone would make one here rather than in
+// Plex.
+(function () {
+  var open = document.getElementById('addrule');
+  var ovl = document.getElementById('ovl'), box = document.getElementById('ovlbox');
+  if (!open || !ovl || !box) return;
+
+  var st = {kind: 'team', team: null, series: null, nets: [], chans: [], src: null};
+
+  function esc(t) {
+    return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+    });
+  }
+  function shut() { ovl.classList.remove('show'); box.innerHTML = ''; }
+  ovl.addEventListener('click', function (e) { if (e.target === ovl) shut(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && ovl.classList.contains('show')) shut();
+  });
+
+  function summary() {
+    var p = st.nets.concat(st.chans);
+    return !p.length ? 'Anywhere' : p.length <= 2 ? p.join(', ') : p.length + ' selected';
+  }
+
+  function paint() {
+    var pickedLabel = st.kind === 'team'
+      ? (st.team ? st.team.name : 'No team chosen yet')
+      : (st.series ? st.series : 'No programme chosen yet');
+    var lbl = document.getElementById('rpick');
+    if (lbl) {
+      lbl.textContent = pickedLabel;
+      lbl.classList.toggle('set', !!(st.kind === 'team' ? st.team : st.series));
+    }
+    var sum = document.getElementById('multisum');
+    if (sum) sum.textContent = summary();
+    var btn = document.getElementById('multibtn');
+    if (btn) btn.classList.toggle('set', !!(st.nets.length || st.chans.length));
+    var go = document.getElementById('rgo');
+    if (go) go.disabled = !(st.kind === 'team' ? st.team : st.series);
+  }
+
+  function render() {
+    var h = '';
+    h += '<div class="ovlhead"><div class="ovlmeta">' +
+         '<div class="parent">Add</div><h2>A recording schedule</h2>' +
+         '</div><button class="ovlclose" id="rx" aria-label="Close">&times;</button></div>';
+
+    h += '<div class="optbar ce"><i class="own ce"></i><span><b>CouchElephant ' +
+         'schedule.</b> It watches the guide and books each airing itself, always ' +
+         'from the live broadcast.</span></div>';
+
+    h += '<div class="ovlsec"><h3>What to follow</h3>';
+    [['team', 'A team', 'every game it plays'],
+     ['series', 'A programme', 'every episode the guide carries']].forEach(function (k) {
+      h += '<label class="pickrow' + (st.kind === k[0] ? ' on' : '') + '">' +
+           '<input type="radio" name="rkind" value="' + k[0] + '"' +
+           (st.kind === k[0] ? ' checked' : '') + '>' +
+           '<span>' + k[1] + '</span><span class="note">' + k[2] + '</span></label>';
+    });
+    h += '</div>';
+
+    h += '<div class="ovlsec"><h3 id="rhead">' +
+         (st.kind === 'team' ? 'Which team' : 'Which programme') + '</h3>' +
+         '<div class="rpicked">Following: <b id="rpick">nothing yet</b></div>' +
+         '<input class="fsearch rq" id="rq" autocomplete="off" placeholder="' +
+         (st.kind === 'team' ? 'Search teams...' : 'Search programmes in the guide...') +
+         '">' +
+         '<div class="rlist" id="rlist"></div></div>';
+
+    h += '<div class="ovlsec"><h3>Options</h3>' +
+         '<div class="ownkey"><span><i class="own ce"></i>CouchElephant</span></div>' +
+         '<div class="optgrid"><label class="optrow wide" for="multibtn">' +
+         '<i class="own ce" title="CouchElephant feature"></i>' +
+         '<span class="optlabel">Limit to networks or channels' +
+         '<span class="opthint">Plex takes one channel. This takes as many as you like.' +
+         '</span></span>' +
+         '<span class="multi" id="multi"><button type="button" class="multibtn" id="multibtn">' +
+         '<span id="multisum">Anywhere</span>' +
+         '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" ' +
+         'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' +
+         '<path d="M6 9l6 6 6-6"/></svg></button>' +
+         '<span class="multimenu" id="multimenu">' +
+         '<input class="multiq" id="multiq" placeholder="Search..." autocomplete="off">' +
+         '<span class="multibody" id="multibody"></span></span></span></label></div></div>';
+
+    h += '<div class="ovlfoot"><button class="primary" id="rgo" disabled>Create schedule</button>' +
+         '<button id="rcancel">Cancel</button>' +
+         '<span class="note" id="ovlmsg"></span></div>';
+    box.innerHTML = h;
+
+    document.getElementById('rx').addEventListener('click', shut);
+    document.getElementById('rcancel').addEventListener('click', shut);
+    box.querySelectorAll('input[name=rkind]').forEach(function (r) {
+      r.addEventListener('change', function () {
+        st.kind = r.value; st.team = null; st.series = null; render();
+      });
+    });
+    var q = document.getElementById('rq');
+    q.addEventListener('input', function () { search(q.value); });
+    search('');
+    wireMulti();
+    document.getElementById('rgo').addEventListener('click', create);
+    paint();
+  }
+
+  var timer = null;
+  function search(term) {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      var url = st.kind === 'team'
+        ? '/api/teams?q=' + encodeURIComponent(term)
+        : '/api/series?q=' + encodeURIComponent(term);
+      fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+        var list = document.getElementById('rlist');
+        if (!list) return;
+        var h = '', rows = st.kind === 'team' ? (d.teams || []) : (d.series || []);
+        if (!rows.length) { list.innerHTML = '<div class="fempty">Nothing matches.</div>'; return; }
+        rows.forEach(function (r2) {
+          if (st.kind === 'team') {
+            h += '<button type="button" class="rrow" data-team="' + r2.id + '" data-name="' +
+                 esc(r2.name) + '"><span class="rt">' + esc(r2.name) + '</span>' +
+                 (r2.followed ? '<span class="pill ok">following</span>' : '') + '</button>';
+          } else {
+            h += '<button type="button" class="rrow" data-series="' + esc(r2.name) +
+                 '"><span class="rt">' + esc(r2.name) + '</span>' +
+                 '<span class="rn">' + r2.airings + ' upcoming</span></button>';
+          }
+        });
+        list.innerHTML = h;
+        list.querySelectorAll('[data-team]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            st.team = {id: b.dataset.team, name: b.dataset.name};
+            list.querySelectorAll('.rrow').forEach(function (x) { x.classList.remove('on'); });
+            b.classList.add('on'); paint();
+          });
+        });
+        list.querySelectorAll('[data-series]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            st.series = b.dataset.series;
+            list.querySelectorAll('.rrow').forEach(function (x) { x.classList.remove('on'); });
+            b.classList.add('on'); paint();
+          });
+        });
+      });
+    }, 180);
+  }
+
+  function wireMulti() {
+    var btn = document.getElementById('multibtn'), menu = document.getElementById('multimenu'),
+        mq = document.getElementById('multiq');
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (menu.classList.toggle('open')) {
+        if (!st.src) {
+          fetch('/api/sources').then(function (r) { return r.json(); })
+            .then(function (d) { st.src = d; renderMulti(); placeMenu(btn, menu); });
+        } else { renderMulti(); placeMenu(btn, menu); }
+      }
+    });
+    mq.addEventListener('input', function () { renderMulti(); placeMenu(btn, menu); });
+    menu.addEventListener('click', function (e) { e.stopPropagation(); });
+    document.addEventListener('click', function (e) {
+      var m = document.getElementById('multi');
+      if (m && !m.contains(e.target)) menu.classList.remove('open');
+    });
+  }
+
+  // Open upward when the panel has no room below. The menu sits in a scrolling
+  // box, so a menu that overflows is clipped rather than scrolled to.
+  function placeMenu(btn, menu) {
+    // After the next frame, so the menu is measured at the height it actually
+    // rendered. Measuring in the same tick reads the empty box and never flips.
+    requestAnimationFrame(function () {
+      menu.classList.remove('up');
+      var panel = menu.closest('.ovlbox') || document.documentElement;
+      var room = panel.getBoundingClientRect().bottom - btn.getBoundingClientRect().bottom;
+      if (room < menu.offsetHeight + 16) menu.classList.add('up');
+    });
+  }
+
+  function renderMulti() {
+    var body = document.getElementById('multibody');
+    if (!body || !st.src) return;
+    var q = ((document.getElementById('multiq') || {}).value || '').toLowerCase(), h = '';
+    function item(kind, value, label, note, on) {
+      return '<label class="multirow"><input type="checkbox" data-' + kind + '="' +
+        esc(value) + '"' + (on ? ' checked' : '') + '><span class="mt">' + esc(label) +
+        '</span>' + (note ? '<span class="mn">' + esc(note) + '</span>' : '') + '</label>';
+    }
+    var nets = st.src.networks.filter(function (n) {
+      return !q || n.name.toLowerCase().indexOf(q) !== -1; });
+    if (nets.length) {
+      h += '<span class="multisec">Networks</span>';
+      nets.forEach(function (n) {
+        h += item('net', n.name, n.name, n.channels.join(', '),
+                  st.nets.indexOf(n.name) !== -1); });
+    }
+    var chans = st.src.channels.filter(function (c) {
+      return !q || (c.vcn + ' ' + c.call_sign + ' ' + c.network).toLowerCase().indexOf(q) !== -1; });
+    if (chans.length) {
+      h += '<span class="multisec">Channels</span>';
+      chans.forEach(function (c) {
+        h += item('ch', c.vcn, c.vcn + ' ' + c.call_sign, c.network,
+                  st.chans.indexOf(c.vcn) !== -1); });
+    }
+    body.innerHTML = h || '<span class="multinone">Nothing matches.</span>';
+    body.querySelectorAll('[data-net]').forEach(function (cb) {
+      cb.addEventListener('change', function () { flip(st.nets, cb.dataset.net); }); });
+    body.querySelectorAll('[data-ch]').forEach(function (cb) {
+      cb.addEventListener('change', function () { flip(st.chans, cb.dataset.ch); }); });
+  }
+
+  function flip(list, v) {
+    var i = list.indexOf(v);
+    if (i === -1) list.push(v); else list.splice(i, 1);
+    paint();
+  }
+
+  function create(e) {
+    var btn = e.target, msg = document.getElementById('ovlmsg');
+    btn.disabled = true; btn.textContent = 'Working...';
+    var body = new URLSearchParams({
+      kind: st.kind,
+      team_id: st.team ? st.team.id : '',
+      series: st.series || '',
+      networks: JSON.stringify(st.nets),
+      channels: JSON.stringify(st.chans)
+    });
+    fetch('/api/rules', {method: 'POST', body: body})
+      .then(function (r) { return r.text().then(function (t) {
+        var j; try { j = JSON.parse(t); }
+        catch (err) { j = {ok: false, error: 'HTTP ' + r.status + ': ' + t.slice(0, 200)}; }
+        return j; }); })
+      .then(function (j) {
+        msg.className = 'note said ' + (j.ok ? 'ok' : 'bad');
+        msg.textContent = j.message || j.error || '';
+        if (j.ok) { btn.textContent = 'Done'; setTimeout(function () { location.reload(); }, 900); }
+        else { btn.disabled = false; btn.textContent = 'Create schedule'; }
+      })
+      .catch(function (err) {
+        msg.className = 'note said bad';
+        msg.textContent = 'Could not reach CouchElephant: ' + err;
+        btn.disabled = false; btn.textContent = 'Create schedule';
+      });
+  }
+
+  open.addEventListener('click', function () { ovl.classList.add('show'); render(); });
+})();
+</script>
 {% endblock %}

@@ -779,6 +779,101 @@ def passes_redirect():
     return RedirectResponse("/recordings", status_code=301)
 
 
+@app.get("/api/series")
+def api_series(q: str = ""):
+    """Programmes in the guide that a rule could follow.
+
+    Grouped by the show rather than the episode, because a rule follows the
+    series. Only what is actually coming up, so the list cannot offer something
+    the guide can no longer record.
+    """
+    q = (q or "").strip()
+    like = f"%{q}%"
+    rows = db.query(
+        """SELECT COALESCE(NULLIF(p.grandparent_title,''), p.title) AS name,
+                  COUNT(DISTINCT a.id) AS airings,
+                  MIN(a.begins_at) AS next_at
+           FROM airings a JOIN programs p ON p.guid = a.program_guid
+           WHERE a.begins_at > ? AND (? = '' OR name LIKE ? COLLATE NOCASE)
+           GROUP BY name ORDER BY airings DESC, name LIMIT 40""",
+        (int(time.time()), q, like))
+    return JSONResponse({"ok": True, "series": [dict(r) for r in rows]})
+
+
+@app.get("/api/teams")
+def api_teams(q: str = ""):
+    q = (q or "").strip()
+    rows = db.query(
+        "SELECT t.id, t.name, EXISTS(SELECT 1 FROM passes p WHERE p.team_id = t.id) "
+        "AS followed FROM teams t WHERE ? = '' OR t.name LIKE ? COLLATE NOCASE "
+        "ORDER BY t.name LIMIT 60", (q, f"%{q}%"))
+    return JSONResponse({"ok": True, "teams": [dict(r) for r in rows]})
+
+
+@app.get("/api/sources")
+def api_sources():
+    """Networks and channels a rule can be limited to."""
+    nets = {}
+    chans = []
+    for c in db.query("SELECT vcn, call_sign, network FROM channels "
+                      "ORDER BY CAST(vcn AS REAL)"):
+        if c["network"]:
+            nets.setdefault(c["network"], []).append(c["vcn"])
+        chans.append({"vcn": c["vcn"], "call_sign": c["call_sign"] or "",
+                      "network": c["network"] or ""})
+    return JSONResponse({
+        "ok": True,
+        "networks": [{"name": n, "channels": v} for n, v in
+                     sorted(nets.items(), key=lambda kv: kv[0].lower())],
+        "channels": chans,
+    })
+
+
+@app.post("/api/rules")
+async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
+                          series: str = Form(""), networks: str = Form(""),
+                          channels: str = Form("")):
+    """Create a schedule that keeps matching new airings.
+
+    Both kinds are CouchElephant's own: it picks the airing and pins it, which
+    is the whole reason this app exists.
+    """
+    nets = db.unjs(networks, []) or []
+    chans = db.unjs(channels, []) or []
+    if kind == "team":
+        t = db.one("SELECT * FROM teams WHERE id = ?", (team_id or 0,))
+        if not t:
+            return JSONResponse({"ok": False, "error": "pick a team"}, status_code=400)
+        if db.one("SELECT 1 FROM passes WHERE kind='team' AND team_id = ?", (t["id"],)):
+            return JSONResponse({"ok": False,
+                                 "error": f"You already follow {t['name']}."}, status_code=409)
+        with db.tx() as c:
+            c.execute("INSERT INTO passes (kind, team_id, team_name, networks, channels, "
+                      "enabled, created_at) VALUES ('team',?,?,?,?,1,?)",
+                      (t["id"], t["name"], db.js(nets), db.js(chans), int(time.time())))
+        label = t["name"]
+    else:
+        name = (series or "").strip()
+        if not name:
+            return JSONResponse({"ok": False, "error": "pick a programme"}, status_code=400)
+        if db.one("SELECT 1 FROM passes WHERE kind='series' AND series_title = ?", (name,)):
+            return JSONResponse({"ok": False,
+                                 "error": f"You already follow {name}."}, status_code=409)
+        with db.tx() as c:
+            c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
+                      "channels, enabled, created_at) VALUES ('series',?,?,?,?,1,?)",
+                      (name, name, db.js(nets), db.js(chans), int(time.time())))
+        label = name
+
+    done = await asyncio.to_thread(passes.run_passes)
+    made = len([d for d in done if d["action"] == "scheduled"])
+    where = " or ".join(nets + chans)
+    return JSONResponse({"ok": True, "message":
+                         f"Following {label}"
+                         + (f", only from {where}" if where else "")
+                         + f". {made} upcoming airing(s) scheduled."})
+
+
 @app.post("/passes/add")
 def pass_add(team_id: int = Form(...)):
     t = db.one("SELECT * FROM teams WHERE id = ?", (team_id,))

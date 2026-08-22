@@ -784,6 +784,19 @@
                'wide');
   }
 
+  // Open upward when the panel has no room below. The menu is inside a
+  // scrolling box, so a menu that overflows is clipped, not scrolled to.
+  function placeMenu(btn, menu) {
+    // After the next frame, so the menu is measured at the height it actually
+    // rendered. Measuring in the same tick reads the empty box and never flips.
+    requestAnimationFrame(function () {
+      menu.classList.remove('up');
+      var panel = menu.closest('.ovlbox') || document.documentElement;
+      var room = panel.getBoundingClientRect().bottom - btn.getBoundingClientRect().bottom;
+      if (room < menu.offsetHeight + 16) menu.classList.add('up');
+    });
+  }
+
   function renderMulti() {
     var body = document.getElementById('multibody');
     if (!body) return;
@@ -920,9 +933,9 @@
       mbtn.addEventListener('click', function (e) {
         e.preventDefault();
         var open = menu.classList.toggle('open');
-        if (open) { renderMulti(); if (!coarse()) mq.focus(); }
+        if (open) { renderMulti(); placeMenu(mbtn, menu); if (!coarse()) mq.focus(); }
       });
-      mq.addEventListener('input', renderMulti);
+      mq.addEventListener('input', function () { renderMulti(); placeMenu(mbtn, menu); });
       // A label wraps the row, so a click inside the menu would re-fire the
       // button it is labelled by and close the menu on every tick.
       menu.addEventListener('click', function (e) { e.stopPropagation(); });

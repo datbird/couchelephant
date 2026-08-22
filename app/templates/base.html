@@ -433,6 +433,9 @@ tr:hover td{background:var(--panel2)}
   width:300px;max-width:78vw;background:var(--panel);border:1px solid var(--line);
   border-radius:8px;box-shadow:var(--shadow-lg);padding:8px}
 .multimenu.open{display:block}
+/* Opened from the last section of a panel there is no room below, and the menu
+   was cut off by the panel's own scroll edge. */
+.multimenu.up{top:auto;bottom:calc(100% + 5px)}
 .multiq{width:100%;margin-bottom:6px;padding:6px 8px;font-size:13px}
 .multibody{display:block;max-height:250px;overflow:auto}
 .multisec{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;
@@ -446,6 +449,33 @@ tr:hover td{background:var(--panel2)}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
 .multinone{display:block;padding:16px;text-align:center;color:var(--dim);font-size:13px}
 .opthint{display:block;font-size:11px;opacity:.75;margin-top:1px}
+
+/* Page heading with an action beside it. The plus is the only way to start a
+   schedule from here, so it sits with the title rather than buried in a card. */
+.pagehead{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:16px;margin-bottom:18px}
+.addbtn{display:inline-flex;align-items:center;justify-content:center;
+  width:38px;height:38px;flex:0 0 38px;border-radius:9px;cursor:pointer;
+  background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);
+  padding:0;line-height:0}
+.addbtn:hover{filter:brightness(1.08)}
+
+/* Picking what a new schedule follows. */
+.rpicked{font-size:13px;color:var(--dim);margin-bottom:9px}
+.rpicked b{color:var(--dim)}
+.rpicked b.set{color:var(--accent-ink)}
+.rq{width:100%;margin-bottom:8px}
+.rlist{max-height:230px;overflow:auto;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel2)}
+.rrow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  background:none;border:none;border-bottom:1px solid var(--line);color:var(--text);
+  font:inherit;font-size:13px;padding:8px 10px;cursor:pointer}
+.rrow:last-child{border-bottom:none}
+.rrow:hover{background:var(--hover)}
+.rrow.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.rrow .rt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rrow .rn{margin-left:auto;color:var(--dim);font-size:11px;white-space:nowrap;
+  padding-left:10px}
 /* The source limit gets the full width. Its label carries a second line of
    explanation, and in a half-width cell that line was clipped. */
 .optrow.wide{grid-column:1/-1}
