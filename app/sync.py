@@ -106,34 +106,82 @@ def sync_guide(plex, provider, shows, sports):
     return counts
 
 
-def cache_logos():
-    """Download channel logos once and serve them locally.
+LOGO_MAX_AGE = 30 * 86400   # re-check a logo roughly monthly
+LOGO_MAX_TRIES = 5          # give up on a persistently broken URL, but retry after MAX_AGE
 
-    They live on Plex's CDN, which works but makes every guide page depend on
-    an external host. Fetching them once keeps the guide self-contained.
+
+def cache_logos(force=False):
+    """Keep a local logo for every channel, and keep it correct.
+
+    Runs on every sync, not once. A channel is re-fetched when any of these
+    is true, so the cache repairs itself rather than going stale:
+      - it has never been fetched
+      - the file has gone missing from disk
+      - Plex now points at a different URL than the one we stored
+      - the copy is older than LOGO_MAX_AGE
     """
     import httpx
     os.makedirs(LOGO_DIR, exist_ok=True)
-    rows = db.query(
-        "SELECT vcn, thumb_url FROM channels "
-        "WHERE thumb_url IS NOT NULL AND (logo_path IS NULL OR logo_path = '')")
-    done = 0
+    now = _now()
+    rows = db.query("SELECT * FROM channels WHERE thumb_url IS NOT NULL AND thumb_url != ''")
+
+    todo = []
+    for r in rows:
+        path = r["logo_path"]
+        reason = None
+        if force:
+            reason = "forced"
+        elif not path:
+            reason = "never fetched"
+        elif not os.path.exists(path):
+            reason = "file missing"
+        elif (r["logo_source"] or "") != r["thumb_url"]:
+            reason = "upstream url changed"
+        elif now - (r["logo_fetched_at"] or 0) > LOGO_MAX_AGE:
+            reason = "stale"
+        if not reason:
+            continue
+        # Back off a URL that keeps failing, but let the age check retry it later.
+        if (r["logo_attempts"] or 0) >= LOGO_MAX_TRIES and reason == "never fetched":
+            continue
+        todo.append((r, reason))
+
+    fetched = failed = 0
     with httpx.Client(timeout=30.0, follow_redirects=True) as c:
-        for r in rows:
+        for r, reason in todo:
             safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in r["vcn"])
             path = os.path.join(LOGO_DIR, f"{safe}.png")
             try:
                 resp = c.get(r["thumb_url"])
                 if resp.status_code != 200 or not resp.content:
-                    continue
-                with open(path, "wb") as fh:
+                    raise ValueError(f"HTTP {resp.status_code}")
+                tmp = path + ".part"
+                with open(tmp, "wb") as fh:
                     fh.write(resp.content)
+                os.replace(tmp, path)   # never leave a half-written logo in place
             except Exception:
+                failed += 1
+                with db.tx() as conn:
+                    conn.execute(
+                        "UPDATE channels SET logo_attempts = COALESCE(logo_attempts,0) + 1 "
+                        "WHERE vcn = ?", (r["vcn"],))
                 continue
+            fetched += 1
             with db.tx() as conn:
-                conn.execute("UPDATE channels SET logo_path = ? WHERE vcn = ?", (path, r["vcn"]))
-            done += 1
-    return done
+                conn.execute(
+                    "UPDATE channels SET logo_path = ?, logo_source = ?, "
+                    "logo_fetched_at = ?, logo_attempts = 0 WHERE vcn = ?",
+                    (path, r["thumb_url"], now, r["vcn"]))
+    return fetched, failed, len(todo)
+
+
+def logo_coverage():
+    total = db.one("SELECT COUNT(*) n FROM channels")["n"]
+    have = db.one("SELECT COUNT(*) n FROM channels "
+                  "WHERE logo_path IS NOT NULL AND logo_path != ''")["n"]
+    none_offered = db.one("SELECT COUNT(*) n FROM channels "
+                          "WHERE thumb_url IS NULL OR thumb_url = ''")["n"]
+    return {"channels": total, "with_logo": have, "no_logo_upstream": none_offered}
 
 
 def enrich_sports(plex, provider):
@@ -278,13 +326,17 @@ def full_sync():
         teams = sync_teams(plex, provider, sports)
         guide = sync_guide(plex, provider, shows, sports)
         enriched = enrich_sports(plex, provider)
-        logos = cache_logos()
+        got, bad, tried = cache_logos()
         subs = sync_recordings(plex)
 
-        nch = db.one("SELECT COUNT(*) n FROM channels")["n"]
+        cov = logo_coverage()
+        nch = cov["channels"]
         detail = (f"{guide['programs']} programs, {guide['airings']} airings, "
                   f"{teams} teams, {enriched} sports enriched, "
-                  f"{nch} channels, {logos} logos fetched, {subs} subscriptions")
+                  f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
+                  + (f" (+{got} fetched)" if got else "")
+                  + (f" ({bad} failed)" if bad else "")
+                  + f", {subs} subscriptions")
         ok = 1
     except Exception as e:
         # Keep the frame that actually failed. A bare type+message sent me

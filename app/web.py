@@ -233,7 +233,8 @@ async def passes_run():
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, tested: str = ""):
     zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
-    return page(request, "settings.html", zones=zones, tested=tested)
+    return page(request, "settings.html", zones=zones, tested=tested,
+                logos=sync.logo_coverage())
 
 
 @app.post("/settings")
@@ -260,6 +261,13 @@ def settings_test():
     except Exception as e:
         msg = f"FAILED: {type(e).__name__}: {e}"
     return RedirectResponse(f"/settings?tested={msg}", status_code=303)
+
+
+@app.post("/settings/logos")
+async def refetch_logos():
+    """Force every channel logo to be downloaded again."""
+    await asyncio.to_thread(sync.cache_logos, True)
+    return RedirectResponse("/settings", status_code=303)
 
 
 @app.post("/sync")
@@ -299,4 +307,5 @@ def healthz():
         "last_sync": dict(last) if last else None,
         "airings": db.one("SELECT COUNT(*) n FROM airings")["n"],
         "passes": db.one("SELECT COUNT(*) n FROM passes")["n"],
+        "logos": sync.logo_coverage(),
     })

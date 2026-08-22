@@ -72,6 +72,20 @@
   </table>
 </div>
 
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Channel logos</h2>
+  <div class="sub">Fetched from the guide on every sync and re-fetched if a URL changes,
+    a file goes missing, or a copy passes 30 days old.</div>
+  <table>
+    <tr><td class="dim">Channels</td><td>{{ logos.channels }}</td></tr>
+    <tr><td class="dim">With a logo</td><td>{{ logos.with_logo }}</td></tr>
+    <tr><td class="dim">No logo offered upstream</td><td>{{ logos.no_logo_upstream }}</td></tr>
+  </table>
+  <form method="post" action="/settings/logos" style="margin-top:12px">
+    <button>Re-fetch all logos</button>
+  </form>
+</div>
+
 {% if last_sync %}
 <div class="card">
   <h2 style="font-size:15px;margin:0 0 4px">Last sync</h2>

@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS channels (
     identifier TEXT,
     thumb_url  TEXT,
     logo_path  TEXT,
+    logo_source TEXT,
+    logo_fetched_at INTEGER,
+    logo_attempts INTEGER DEFAULT 0,
     updated_at INTEGER
 );
 
@@ -180,6 +183,10 @@ def tx():
 MIGRATIONS = [
     ("channels", "thumb_url", "TEXT"),
     ("channels", "logo_path", "TEXT"),
+    # What we actually fetched, so a changed upstream URL triggers a re-fetch.
+    ("channels", "logo_source", "TEXT"),
+    ("channels", "logo_fetched_at", "INTEGER"),
+    ("channels", "logo_attempts", "INTEGER DEFAULT 0"),
 ]
 
 
