@@ -145,7 +145,9 @@ tr:hover td{background:var(--panel2)}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spin{animation-duration:2s}}
 .gnow{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);z-index:1;
-  pointer-events:none}
+  pointer-events:none;box-shadow:0 0 6px rgba(243,163,11,.55)}
+.gnow::before{content:'';position:absolute;top:0;left:-4px;width:10px;height:10px;
+  border-radius:50%;background:var(--accent)}
 :root{--chw:92px;--rowh:62px}
 
 /* ---- programme overlay ---- */

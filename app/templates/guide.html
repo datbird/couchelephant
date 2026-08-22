@@ -184,15 +184,18 @@
       channel = wrap.dataset.channel || '',
       day     = wrap.dataset.day || '';
 
-  // Anchor on the selected day, or on the current half hour for today.
+  // Start half an hour before now, not on the current half hour. That shows
+  // the programme already running from its beginning, and keeps the "now" line
+  // clear of the channel column instead of hidden behind it.
   var anchor;
+  var nowTs = Math.floor(Date.now() / 1000);
+  function backOne(ts) { return ts - (ts % SLOT) - SLOT; }
   if (day) {
     var p = day.split('-');
     anchor = Math.floor(new Date(+p[0], +p[1] - 1, +p[2], 0, 0, 0).getTime() / 1000);
-    var nowTs = Math.floor(Date.now() / 1000);
-    if (nowTs > anchor && nowTs < anchor + 86400) anchor = nowTs - (nowTs % SLOT);
+    if (nowTs > anchor && nowTs < anchor + 86400) anchor = backOne(nowTs);
   } else {
-    anchor = Math.floor(Date.now() / 1000); anchor -= anchor % SLOT;
+    anchor = backOne(nowTs);
   }
 
   var startTs = anchor, endTs = anchor,
@@ -278,8 +281,11 @@
     var el = document.createElement('div');
     el.id = 'nowline'; el.className = 'gnow';
     el.style.left = x(n) + 'px';
+    el.title = 'Now';
     rowsEl.appendChild(el);
   }
+  // Keep it moving without a reload.
+  setInterval(marker, 60000);
 
   function fetchWindow(s, e, off, limit) {
     var u = '/api/grid?start=' + s + '&end=' + e + '&choffset=' + off + '&chlimit=' + limit +
@@ -330,8 +336,9 @@
 
   // Keep every visible title inside the visible part of its block. Reads only
   // cached numbers, so it stays cheap with hundreds of blocks on screen.
-  var chw = parseFloat(getComputedStyle(document.documentElement)
-              .getPropertyValue('--chw')) || 92;
+  // No channel-column offset here. The column is a flex item inside each row,
+  // so lane coordinates already begin after it: lane x 0 is the column's right
+  // edge. Adding chw again pushed every label a column-width too far right.
   var pending = false;
 
   function pinOverlays() {
@@ -353,7 +360,7 @@
   function nudge() {
     pending = false;
     pinOverlays();
-    var sl = wrap.scrollLeft, vis = sl + wrap.clientWidth, edge = sl + chw + 10;
+    var sl = wrap.scrollLeft, vis = sl + wrap.clientWidth, edge = sl + 10;
     var blocks = rowsEl.querySelectorAll('.gprog');
     for (var i = 0; i < blocks.length; i++) {
       var el = blocks[i], bx = +el.dataset.x, bw = +el.dataset.w;
@@ -364,7 +371,11 @@
       // so the text keeps ellipsising against the block's real right edge.
       var want = edge - bx;
       if (want < 0) want = 0;
-      var max = bw - 40;                 // always leave room for a few characters
+      // A block whose tail is behind the channel column has no room worth
+      // using. Leave its label at the start, where the column hides it, rather
+      // than squeezing an unreadable stub against its right edge.
+      if (bx + bw < sl + 46) want = 0;
+      var max = bw - 46;
       if (max < 0) max = 0;
       if (want > max) want = max;
       var cur = +(el.dataset.off || -1);
