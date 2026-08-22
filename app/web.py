@@ -353,25 +353,63 @@ def search_redirect(q: str = ""):
 
 @app.get("/recordings", response_class=HTMLResponse)
 def recordings(request: Request):
-    subs = db.query("SELECT * FROM plex_subscriptions ORDER BY title")
-    grabs = db.query("SELECT * FROM plex_grabs ORDER BY COALESCE(begins_at, 0)")
-    return page(request, "recordings.html", subs=subs, grabs=grabs)
+    """One page for everything that is set to record.
 
+    A schedule is a schedule whether a team pass, a Plex series rule or a
+    single game made it. Splitting them across two tabs asked the user to know
+    which machine created a recording before they could find it.
+    """
+    rules = []
 
-# ---------- passes ----------
+    # Our own team passes. These are rules in the same sense: they keep
+    # matching new games without being asked again.
+    for p in db.query("SELECT * FROM passes ORDER BY team_name"):
+        rules.append({
+            "kind": "sports", "source": "ce", "pass_id": p["id"],
+            "enabled": p["enabled"], "title": p["team_name"],
+            "detail": "Every game, always from the live broadcast",
+        })
 
-@app.get("/passes", response_class=HTMLResponse)
-def passes_page(request: Request):
-    rows = db.query("SELECT * FROM passes ORDER BY team_name")
-    teams = db.query("SELECT * FROM teams ORDER BY name")
-    actions = db.query(
-        "SELECT a.*, p.team_name FROM pass_actions a LEFT JOIN passes p ON p.id = a.pass_id "
-        "ORDER BY a.id DESC LIMIT 100")
-    upcoming = []
-    for p in rows:
-        if not p["enabled"]:
+    # Plex's own rules. A one-shot is a single recording rather than a rule, so
+    # it belongs in the list below, not here.
+    for s_ in db.query("SELECT * FROM plex_subscriptions ORDER BY title"):
+        cfg = db.unjs(s_["settings"], {}) or {}
+        if str(cfg.get("oneShot", "")).lower() in ("1", "true", "yes"):
             continue
-        for guid, airings in passes.group_by_game(passes.candidate_airings(p["team_id"])).items():
+        bits = []
+        bits.append("New only" if cfg.get("onlyNewAirings") == "1" else "New and repeats")
+        if cfg.get("lineupChannel"):
+            bits.append("one channel")
+        if cfg.get("startTimeslot") and cfg.get("startTimeslot") != "-1":
+            bits.append("one time")
+        rules.append({
+            # Plex marks a team pass type 15. Anything else is a series rule.
+            "kind": "sports" if str(s_["type"]) == "15" else "series",
+            "source": "ce" if s_["owned_by_us"] else "plex",
+            "pass_id": None, "enabled": 1, "title": s_["title"],
+            "detail": ", ".join(bits),
+        })
+
+    # Individual recordings. A grab counts as sport when the programme it comes
+    # from carries team tags, which is the same signal the passes work from.
+    sports_titles = {r["title"] for r in db.query(
+        "SELECT DISTINCT title FROM programs WHERE teams IS NOT NULL AND teams != '[]'")}
+    ours = {(g["channel_vcn"], g["begins_at"]) for g in db.query(
+        "SELECT channel_vcn, begins_at FROM our_grabs")}
+    grabs = []
+    for g in db.query("SELECT * FROM plex_grabs ORDER BY COALESCE(begins_at, 0)"):
+        d = dict(g)
+        d["kind"] = "sports" if g["title"] in sports_titles else "series"
+        d["source"] = "ce" if (g["channel_vcn"], g["begins_at"]) in ours else "plex"
+        grabs.append(d)
+
+    # What each active pass would do next, and why. This is the part that has
+    # to stay visible: a pass that silently picks the wrong broadcast is the
+    # bug the whole app exists to fix.
+    upcoming = []
+    for p in db.query("SELECT * FROM passes WHERE enabled = 1"):
+        for guid, airings in passes.group_by_game(
+                passes.candidate_airings(p["team_id"])).items():
             pick, reason = passes.choose_airing(airings)
             if not pick:
                 continue
@@ -384,8 +422,21 @@ def passes_page(request: Request):
                 "blocked": passes.already_handled(guid, pick["id"]),
             })
     upcoming.sort(key=lambda x: x["begins_at"])
-    return page(request, "passes.html", passes=rows, teams=teams, actions=actions,
-                upcoming=upcoming)
+
+    teams = db.query("SELECT * FROM teams ORDER BY name")
+    actions = db.query(
+        "SELECT a.*, p.team_name FROM pass_actions a LEFT JOIN passes p ON p.id = a.pass_id "
+        "ORDER BY a.id DESC LIMIT 60")
+    return page(request, "recordings.html", rules=rules, grabs=grabs,
+                upcoming=upcoming, teams=teams, actions=actions)
+
+
+# ---------- passes ----------
+
+@app.get("/passes")
+def passes_redirect():
+    """Sports passes are no longer a page of their own."""
+    return RedirectResponse("/recordings", status_code=301)
 
 
 @app.post("/passes/add")
@@ -395,27 +446,27 @@ def pass_add(team_id: int = Form(...)):
         with db.tx() as c:
             c.execute("INSERT INTO passes (kind, team_id, team_name, enabled, created_at) "
                       "VALUES ('team', ?, ?, 1, ?)", (t["id"], t["name"], int(time.time())))
-    return RedirectResponse("/passes", status_code=303)
+    return RedirectResponse("/recordings", status_code=303)
 
 
 @app.post("/passes/{pass_id}/delete")
 def pass_delete(pass_id: int):
     with db.tx() as c:
         c.execute("DELETE FROM passes WHERE id = ?", (pass_id,))
-    return RedirectResponse("/passes", status_code=303)
+    return RedirectResponse("/recordings", status_code=303)
 
 
 @app.post("/passes/{pass_id}/toggle")
 def pass_toggle(pass_id: int):
     with db.tx() as c:
         c.execute("UPDATE passes SET enabled = 1 - enabled WHERE id = ?", (pass_id,))
-    return RedirectResponse("/passes", status_code=303)
+    return RedirectResponse("/recordings", status_code=303)
 
 
 @app.post("/passes/run")
 async def passes_run():
     await asyncio.to_thread(passes.run_passes)
-    return RedirectResponse("/passes", status_code=303)
+    return RedirectResponse("/recordings", status_code=303)
 
 
 # ---------- settings ----------

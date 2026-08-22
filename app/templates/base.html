@@ -103,7 +103,12 @@ header nav{display:flex;gap:18px}
 header nav a{color:var(--dim);padding:4px 0;border-bottom:2px solid transparent;
   white-space:nowrap}
 header nav a.on,header nav a:hover{color:var(--text);border-bottom-color:var(--accent)}
-header .right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px;color:var(--dim)}
+header .right{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dim)}
+/* The gear is a nav destination as well as a button, so it shows the same
+   "you are here" state the text tabs do. */
+.iconbtn.on{color:var(--accent-ink);background:var(--panel2)}
+/* A sync in flight, so the icon is not a button that appears to do nothing. */
+.iconbtn.spinning svg{animation:spin .9s linear infinite}
 
 /* The theme switch. One button, both glyphs drawn, the irrelevant one hidden,
    so there is no icon swap flicker and no second request. */
@@ -321,6 +326,20 @@ tr:hover td{background:var(--panel2)}
 .ovlnote .row{margin-top:8px}
 
 .tiny{font-size:12px}
+/* What made this schedule: a followed team, or an ordinary programme. Colour
+   carries the same split as the guide, so the two pages agree. */
+.kind{display:inline-flex;align-items:center;justify-content:center;
+  width:24px;height:24px;border-radius:6px;border:1px solid var(--line);
+  background:var(--panel2)}
+.kind.sports{color:var(--accent-ink);border-color:var(--accent-bd);
+  background:var(--accent-soft)}
+.kind.series{color:var(--dim)}
+tr.off td{opacity:.55}
+button.tiny{padding:3px 9px;font-size:12px}
+details.card>summary{list-style:none}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary::before{content:'\25B8 ';color:var(--dim)}
+details.card[open]>summary::before{content:'\25BE '}
 input,select,button{font:inherit;background:var(--panel2);color:var(--text);
   border:1px solid var(--line);border-radius:6px;padding:7px 10px}
 input:focus,select:focus{outline:1px solid var(--accent)}
@@ -375,8 +394,7 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   header .brand{height:52px;order:1}
   header .mark{height:44px;align-self:center}
   header .wordmark{height:19px}
-  header .right{order:2;gap:8px;height:52px}
-  header .right .synced{display:none}
+  header .right{order:2;gap:4px;height:52px}
   header nav{order:3;flex-basis:100%;gap:16px;overflow-x:auto;padding:0 0 8px;
     -webkit-overflow-scrolling:touch;scrollbar-width:none}
   header nav::-webkit-scrollbar{display:none}
@@ -437,6 +455,23 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   .fcell{padding:9px 0}
   .fbox{width:20px;height:20px}
 
+  /* A six column table in 390px is unreadable, and scrolling each card
+     sideways to find a title is worse. Each row becomes a block instead: the
+     icon holds a left rail, everything else stacks down the right of it. */
+  table.stack,table.stack tbody{display:block}
+  table.stack tr:first-child{display:none}      /* the header row */
+  table.stack tr{display:grid;grid-template-columns:26px 1fr;gap:3px 10px;
+    padding:11px 2px;border-bottom:1px solid var(--line);align-items:start}
+  table.stack tr:last-child{border-bottom:none}
+  table.stack td{display:block;padding:0;border:none;white-space:normal !important;
+    grid-column:2}
+  /* Row 1 of the left rail. Spanning a fixed count instead reserved that many
+     grid rows and left a block of dead space under every row. */
+  table.stack td:first-child{grid-column:1;grid-row:1}
+  table.stack td:empty{display:none}
+  table.stack tr:hover td{background:none}
+  table.stack td[style*="text-align:right"]{text-align:left !important}
+
   .searchbox{flex:1;min-width:0}
   .searchbox.open{flex:1}
   .searchbox.open input{width:100%;min-width:0}
@@ -483,17 +518,24 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   <nav>
     <a href="/" class="{{ 'on' if nav=='guide' }}">Guide</a>
     <a href="/recordings" class="{{ 'on' if nav=='recordings' }}">Recordings</a>
-    <a href="/passes" class="{{ 'on' if nav=='passes' }}">Sports Passes</a>
-    <a href="/settings" class="{{ 'on' if nav=='settings' }}">Settings</a>
   </nav>
   <div class="right">
     {% if settings.dry_run == '1' %}<span class="pill warn">PREVIEW MODE</span>{% endif %}
-    {% if last_sync %}
-      <span class="synced" title="{{ last_sync.detail }}">
-        synced {{ last_sync.ended_at|fmt('%-I:%M %p') }}
-        {% if not last_sync.ok %}<span class="pill bad">failed</span>{% endif %}
-      </span>
-    {% endif %}
+    {% if last_sync and not last_sync.ok %}<span class="pill bad">sync failed</span>{% endif %}
+
+    {# The last sync time is reference, not news. It belongs on the control it
+       describes, not taking up a slot in the bar. #}
+    <form method="post" action="/sync" style="margin:0">
+      <button type="submit" class="iconbtn" title="{% if last_sync %}Last synced {{ last_sync.ended_at|fmt('%-I:%M %p') }}{% if not last_sync.ok %} and it failed{% endif %}. {{ last_sync.detail }}{% else %}Never synced yet{% endif %}
+Click to sync the guide now." aria-label="Sync the guide now">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.5-4"/>
+          <path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.5 4"/>
+          <path d="M19.5 3v4h-4"/><path d="M4.5 21v-4h4"/></svg>
+      </button>
+    </form>
+
     <button type="button" class="iconbtn themebtn" id="themebtn"
             title="Switch theme" aria-label="Switch between light and dark">
       <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -505,7 +547,14 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
         <path d="M12 2.4v2.2M12 19.4v2.2M2.4 12h2.2M19.4 12h2.2
                  M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>
     </button>
-    <form method="post" action="/sync" style="margin:0"><button>Sync now</button></form>
+
+    <a href="/settings" class="iconbtn {{ 'on' if nav=='settings' }}"
+       title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </a>
   </div>
 </header>
 <div class="ovl" id="ovl"><div class="ovlbox" id="ovlbox"></div></div>
@@ -557,6 +606,17 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
       paintChrome(); label();
     });
   } catch (e) {}
+})();
+
+// Spin the sync icon while the request is in flight. A full page reload
+// follows, so this only has to survive until the server answers.
+(function () {
+  var f = document.querySelector('form[action="/sync"]');
+  if (!f) return;
+  f.addEventListener('submit', function () {
+    var b = f.querySelector('button');
+    if (b) { b.classList.add('spinning'); b.disabled = true; }
+  });
 })();
 </script>
 </body>

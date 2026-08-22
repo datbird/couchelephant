@@ -311,6 +311,18 @@ def sync_recordings(plex):
                  int(chosen.get("endsAt") or 0) or None, now),
             )
         c.execute("DELETE FROM plex_grabs WHERE updated_at < ?", (now,))
+
+        # Attribution. Matching on the pass_actions subscription key alone
+        # missed every recording, because the key Plex mints on create was
+        # never captured. our_grabs is the reliable record: it holds the exact
+        # channel and start time we asked for, and that pair identifies one
+        # broadcast.
+        c.execute(
+            """UPDATE plex_subscriptions SET owned_by_us = 1 WHERE key IN (
+                   SELECT g.subscription FROM plex_grabs g
+                   JOIN our_grabs o ON o.begins_at = g.begins_at
+                                   AND o.channel_vcn = g.channel_vcn
+                   WHERE g.subscription IS NOT NULL AND g.subscription != '')""")
     return len(subs)
 
 

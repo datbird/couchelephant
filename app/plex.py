@@ -9,6 +9,8 @@ Two quirks worth knowing:
   - Creating a recording needs the template's own `parameters` string PLUS
     targetLibrarySectionID and type. Posting the template params alone is a 400.
 """
+import urllib.parse
+
 import httpx
 
 TIMEOUT = httpx.Timeout(120.0, connect=15.0)
@@ -96,9 +98,16 @@ class Plex:
     def scheduled(self):
         return self._get("/media/subscriptions/scheduled").get("MediaGrabOperation", []) or []
 
-    def template(self, rating_key):
-        """Recording options for a programme, including the parameters blob."""
-        c = self._get("/media/subscriptions/template", {"guid": rating_key})
+    def template(self, guid):
+        """Recording options for a programme, including the parameters blob.
+
+        Callers hold the guid in either form: some rows keep it already
+        percent-encoded. httpx encodes params itself, so an encoded value
+        reaches Plex encoded twice and the server answers 400. Normalise here,
+        where every caller benefits, rather than at each call site.
+        """
+        c = self._get("/media/subscriptions/template",
+                      {"guid": urllib.parse.unquote(guid)})
         return c.get("SubscriptionTemplate", []) or []
 
     def create_recording(self, parameters: str, target_section: int, type_: int,
