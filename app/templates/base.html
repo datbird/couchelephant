@@ -24,11 +24,10 @@ body{margin:0;background:var(--bg);color:var(--text);
 a{color:inherit;text-decoration:none}
 header{display:flex;align-items:center;gap:22px;padding:0 22px;height:56px;
   background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
-header .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:.2px;
-  font-size:17px;white-space:nowrap}
-header .mark{height:30px;width:auto;display:block}
-header .brand-a{color:var(--wordmark)}
-header .brand-b{color:var(--wordmark-dim)}
+header .brand{display:flex;align-items:center;gap:9px}
+header .mark{height:32px;width:auto;display:block}
+header .wordmark{height:22px;width:auto;display:block}
+@media (max-width:760px){header .wordmark{display:none}}
 header nav{display:flex;gap:18px}
 header nav a{color:var(--dim);padding:4px 0;border-bottom:2px solid transparent}
 header nav a.on,header nav a:hover{color:var(--text);border-bottom-color:var(--accent)}
@@ -88,15 +87,16 @@ button.danger{background:transparent;color:#ff8b8e;border-color:#e5484d55}
 .iconbtn:hover{color:var(--text);background:var(--panel2)}
 .iconbtn svg{display:block}
 @media (max-width:700px){.searchbox.open input{width:150px}}
-footer{margin:34px 0 10px;text-align:center;font-size:12px;letter-spacing:1.6px;
-  text-transform:uppercase;color:var(--dim);opacity:.65}
+footer{margin:38px 0 14px;text-align:center;font-size:12px;letter-spacing:1.6px;
+  text-transform:uppercase;color:var(--dim);opacity:.7}
+footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 </style>
 </head>
 <body>
 <header>
   <a class="brand" href="/" title="A CouchElephant never forgets.">
     <img src="/static/mark.png" alt="" class="mark">
-    <span class="brand-a">Couch</span><span class="brand-b">Elephant</span>
+    <img src="/static/wordmark.png" alt="CouchElephant" class="wordmark">
   </a>
   <nav>
     <a href="/" class="{{ 'on' if nav=='guide' }}">Guide</a>
@@ -123,7 +123,10 @@ footer{margin:34px 0 10px;text-align:center;font-size:12px;letter-spacing:1.6px;
   <div class="banner bad">Last sync failed: {{ last_sync.detail }}</div>
 {% endif %}
 {% block body %}{% endblock %}
-<footer>A CouchElephant never forgets.</footer>
+<footer>
+  <img src="/static/divider.png" alt="" class="divider">
+  <div>A CouchElephant never forgets.</div>
+</footer>
 </main>
 </body>
 </html>
