@@ -1,9 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/logo-light.png">
-    <img src="docs/images/logo-dark.png" alt="CouchElephant" width="560">
-  </picture>
+  <img src="docs/images/logo.png" alt="CouchElephant" width="520">
 </p>
 
 <h1 align="center">CouchElephant</h1>
