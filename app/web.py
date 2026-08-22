@@ -131,6 +131,66 @@ def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, lim
     return db.query(" ".join(sql), tuple(args))
 
 
+@app.get("/api/grid")
+def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
+             sports: int = 0, channel: str = ""):
+    """A window of the guide grid: some channels, over some span of time.
+
+    The client asks for more channels when it scrolls down and for more time
+    when it scrolls right, so both axes page independently against the same
+    endpoint.
+    """
+    csql = ["SELECT vcn, call_sign, logo_path FROM channels WHERE vcn IS NOT NULL"]
+    cargs = []
+    if channel:
+        csql.append("AND vcn = ?")
+        cargs.append(channel)
+    if sports:
+        # Only channels that actually carry sport in the loaded window.
+        csql.append("""AND vcn IN (SELECT a.channel_vcn FROM airings a
+                                   JOIN programs p ON p.guid = a.program_guid
+                                   WHERE p.section = 'sports')""")
+    csql.append("ORDER BY CAST(vcn AS REAL) LIMIT ? OFFSET ?")
+    cargs += [chlimit + 1, choffset]
+    crows = db.query(" ".join(csql), tuple(cargs))
+
+    more_channels = len(crows) > chlimit
+    crows = crows[:chlimit]
+    vcns = [r["vcn"] for r in crows]
+    channels = [{"vcn": r["vcn"], "call_sign": r["call_sign"] or "",
+                 "logo": bool(r["logo_path"])} for r in crows]
+
+    airings = []
+    if vcns:
+        marks = ",".join("?" for _ in vcns)
+        rows = db.query(
+            f"""SELECT a.id, a.channel_vcn, a.begins_at, a.ends_at, a.premiere, a.drm,
+                       p.title, p.grandparent_title, p.summary, p.section
+                FROM airings a JOIN programs p ON p.guid = a.program_guid
+                WHERE a.channel_vcn IN ({marks}) AND a.begins_at < ? AND a.ends_at > ?
+                ORDER BY a.channel_vcn, a.begins_at, a.id""",
+            tuple(vcns) + (end, start))
+        for r in rows:
+            if sports and r["section"] != "sports":
+                continue
+            airings.append({
+                "id": r["id"], "vcn": r["channel_vcn"],
+                "b": r["begins_at"], "e": r["ends_at"],
+                "premiere": bool(r["premiere"]), "drm": bool(r["drm"]),
+                "title": r["title"] or "", "parent": r["grandparent_title"] or "",
+                "summary": (r["summary"] or "")[:140],
+            })
+
+    # How far the guide itself runs, so the client knows when to stop asking.
+    span = db.one("SELECT MIN(begins_at) lo, MAX(ends_at) hi FROM airings")
+    return JSONResponse({
+        "channels": channels, "airings": airings,
+        "more_channels": more_channels,
+        "guide_start": span["lo"], "guide_end": span["hi"],
+        "start": start, "end": end,
+    })
+
+
 @app.get("/partial/airings", response_class=HTMLResponse)
 def airings_partial(request: Request, day: str = "", channel: str = "", sports: int = 0,
                     q: str = "", offset: int = 0):

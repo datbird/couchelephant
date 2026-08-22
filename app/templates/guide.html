@@ -7,7 +7,7 @@
   {% if q %}
     {{ rows|length }} match{{ '' if rows|length == 1 else 'es' }} for "{{ q }}" across the whole guide
   {% else %}
-    {{ rows|length }} airings. Times in {{ settings.timezone }}.
+    Scroll down for more channels, right for more time. Times in {{ settings.timezone }}.
   {% endif %}
 </div>
 
@@ -52,26 +52,37 @@
   </label>
 </form>
 
+{% if q %}
 <div class="card" style="padding:0">
 {% if rows %}
 <table id="grid">
   <thead>
-    <tr><th>{{ 'When' if q else 'Time' }}</th><th>Ch</th><th>Programme</th><th>Teams</th><th></th></tr>
+    <tr><th>When</th><th>Ch</th><th>Programme</th><th>Teams</th><th></th></tr>
   </thead>
-  <tbody id="gridbody">
-    {% include "_rows.html" %}
-  </tbody>
+  <tbody id="gridbody">{% include "_rows.html" %}</tbody>
 </table>
 <div id="sentinel"></div>
 <div id="loadmore" class="empty tiny" style="display:none">Loading more...</div>
-<div id="allloaded" class="empty tiny" style="display:none">That is the whole {{ 'result' if q else 'day' }}.</div>
+<div id="allloaded" class="empty tiny" style="display:none">That is the whole result.</div>
 {% else %}
-  <div class="empty">
-    {% if q %}Nothing in the guide matches "{{ q }}".
-    {% else %}Nothing in the guide for this day yet. Try <b>Sync now</b>.{% endif %}
-  </div>
+  <div class="empty">Nothing in the guide matches "{{ q }}".</div>
 {% endif %}
 </div>
+{% else %}
+{# Grid guide: channels down, time across. Both axes load more as you reach
+   the edge, and stop when the data runs out. #}
+<div class="gridwrap" id="gw" data-day="{{ day }}"
+     data-sports="{{ 1 if sports else 0 }}" data-channel="{{ channel }}">
+  <div class="gridinner" id="gi">
+    <div class="ghead" id="ghead">
+      <div class="gcorner">Channel</div>
+      <div class="gtimes" id="gtimes"></div>
+    </div>
+    <div class="grows" id="grows"></div>
+  </div>
+</div>
+<div id="gstatus" class="empty tiny">Loading guide...</div>
+{% endif %}
 
 <script>
 // The form and the box are different elements: the class that expands the input
@@ -106,44 +117,197 @@
   });
 })();
 
-// Infinite scroll. Rows come back as HTML from the same template the first
-// page used, so the two can never render differently.
+// ---- flat list paging (search results only) ----
 (function () {
   var body = document.getElementById('gridbody'),
       sentinel = document.getElementById('sentinel'),
       spinner = document.getElementById('loadmore'),
       done = document.getElementById('allloaded');
   if (!body || !sentinel) return;
-
-  var offset = body.querySelectorAll('tr').length,
-      busy = false, finished = false,
+  var offset = body.querySelectorAll('tr').length, busy = false, finished = false,
       params = new URLSearchParams(window.location.search);
-
   function load() {
     if (busy || finished) return;
-    busy = true;
-    spinner.style.display = 'block';
+    busy = true; spinner.style.display = 'block';
     params.set('offset', offset);
-    fetch('/partial/airings?' + params.toString(), {headers: {'X-Requested-With': 'fetch'}})
+    fetch('/partial/airings?' + params.toString())
       .then(function (r) { return r.text(); })
       .then(function (html) {
-        var trimmed = html.trim();
-        if (!trimmed) {
-          finished = true;
-          done.style.display = 'block';
-        } else {
-          body.insertAdjacentHTML('beforeend', trimmed);
-          offset = body.querySelectorAll('tr').length;
-        }
+        var t = html.trim();
+        if (!t) { finished = true; done.style.display = 'block'; }
+        else { body.insertAdjacentHTML('beforeend', t); offset = body.querySelectorAll('tr').length; }
       })
       .catch(function () { finished = true; })
       .finally(function () { busy = false; spinner.style.display = 'none'; });
   }
+  new IntersectionObserver(function (e) { if (e[0].isIntersecting) load(); },
+    {rootMargin: '600px'}).observe(sentinel);
+})();
 
-  // Start fetching a little before the sentinel is actually on screen.
-  new IntersectionObserver(function (entries) {
-    if (entries[0].isIntersecting) load();
-  }, {rootMargin: '600px'}).observe(sentinel);
+// ---- grid guide ----
+// Vertical scrolling walks the channel list, horizontal scrolling walks time.
+// Each axis pages independently and stops at the end of its own data.
+(function () {
+  var wrap = document.getElementById('gw');
+  if (!wrap) return;
+  var timesEl = document.getElementById('gtimes'),
+      rowsEl = document.getElementById('grows'),
+      status = document.getElementById('gstatus');
+
+  var PX_PER_MIN = 5,          // 30 minutes = 150px
+      SLOT = 30 * 60,          // tick every half hour
+      CHUNK = 4 * 3600,        // fetch four hours at a time
+      CH_PAGE = 10,            // ten channels at a time
+      ROW_H = 62;
+
+  var sports  = wrap.dataset.sports === '1',
+      channel = wrap.dataset.channel || '',
+      day     = wrap.dataset.day || '';
+
+  // Anchor on the selected day, or on the current half hour for today.
+  var anchor;
+  if (day) {
+    var p = day.split('-');
+    anchor = Math.floor(new Date(+p[0], +p[1] - 1, +p[2], 0, 0, 0).getTime() / 1000);
+    var nowTs = Math.floor(Date.now() / 1000);
+    if (nowTs > anchor && nowTs < anchor + 86400) anchor = nowTs - (nowTs % SLOT);
+  } else {
+    anchor = Math.floor(Date.now() / 1000); anchor -= anchor % SLOT;
+  }
+
+  var startTs = anchor, endTs = anchor,
+      chOffset = 0, moreChannels = true, moreTime = true,
+      guideEnd = null, busy = false,
+      channels = [],                 // in display order
+      rowByVcn = {}, seen = {};      // lane elements, and airing ids already drawn
+
+  function x(ts) { return ((ts - startTs) / 60) * PX_PER_MIN; }
+
+  function drawTicks(fromTs, toTs) {
+    for (var t = Math.ceil(fromTs / SLOT) * SLOT; t < toTs; t += SLOT) {
+      var d = new Date(t * 1000),
+          h = d.getHours(), m = d.getMinutes(),
+          ap = h < 12 ? 'AM' : 'PM', hh = h % 12 || 12,
+          el = document.createElement('div');
+      el.className = 'gtick';
+      el.style.left = x(t) + 'px';
+      el.textContent = hh + ':' + (m < 10 ? '0' + m : m) + ' ' + ap;
+      timesEl.appendChild(el);
+    }
+  }
+
+  function addChannel(c) {
+    var row = document.createElement('div');
+    row.className = 'growr';
+    var label = document.createElement('div');
+    label.className = 'gch';
+    label.innerHTML = (c.logo ? '<img src="/logo/' + c.vcn + '" alt="" loading="lazy">' : '') +
+      '<span class="n">' + c.vcn + '<br>' + (c.call_sign || '') + '</span>';
+    var lane = document.createElement('div');
+    lane.className = 'glane';
+    row.appendChild(label); row.appendChild(lane); rowsEl.appendChild(row);
+    rowByVcn[c.vcn] = lane;
+    channels.push(c);
+  }
+
+  function place(a) {
+    if (seen[a.id]) return;
+    var lane = rowByVcn[a.vcn];
+    if (!lane) return;
+    seen[a.id] = 1;
+    var el = document.createElement('div');
+    el.className = 'gprog' + (a.premiere ? ' live' : '') + (a.drm ? ' drm' : '');
+    el.style.left = x(a.b) + 'px';
+    el.style.width = Math.max(28, ((a.e - a.b) / 60) * PX_PER_MIN - 4) + 'px';
+    var when = new Date(a.b * 1000), hh = when.getHours() % 12 || 12,
+        mm = when.getMinutes(), ap = when.getHours() < 12 ? 'AM' : 'PM';
+    el.title = a.title + '\n' + hh + ':' + (mm < 10 ? '0' + mm : mm) + ' ' + ap +
+               (a.summary ? '\n\n' + a.summary : '');
+    el.innerHTML = '<div class="t">' + esc(a.title) + '</div>' +
+      '<div class="m">' + esc(a.parent && a.parent !== a.title ? a.parent : '') +
+      (a.premiere ? ' &middot; LIVE' : '') + (a.drm ? ' &middot; DRM' : '') + '</div>';
+    lane.appendChild(el);
+  }
+
+  function esc(t) {
+    return String(t || '').replace(/[&<>"]/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+    });
+  }
+
+  function widen() {
+    var w = x(endTs);
+    timesEl.style.width = w + 'px';
+    Array.prototype.forEach.call(rowsEl.querySelectorAll('.glane'), function (l) {
+      l.style.width = w + 'px';
+    });
+    marker();
+  }
+
+  function marker() {
+    var old = document.getElementById('nowline');
+    if (old) old.remove();
+    var n = Math.floor(Date.now() / 1000);
+    if (n < startTs || n > endTs) return;
+    var el = document.createElement('div');
+    el.id = 'nowline'; el.className = 'gnow';
+    el.style.left = x(n) + 'px';
+    rowsEl.appendChild(el);
+  }
+
+  function fetchWindow(s, e, off, limit) {
+    var u = '/api/grid?start=' + s + '&end=' + e + '&choffset=' + off + '&chlimit=' + limit +
+            (sports ? '&sports=1' : '') + (channel ? '&channel=' + encodeURIComponent(channel) : '');
+    return fetch(u).then(function (r) { return r.json(); });
+  }
+
+  // More channels: same time window, next slice of the channel list.
+  function loadChannels() {
+    if (busy || !moreChannels) return Promise.resolve();
+    busy = true; status.style.display = 'block'; status.textContent = 'Loading channels...';
+    var from = startTs, to = endTs > startTs ? endTs : startTs + CHUNK;
+    return fetchWindow(from, to, chOffset, CH_PAGE).then(function (d) {
+      if (guideEnd === null) guideEnd = d.guide_end;
+      if (endTs === startTs) { endTs = to; drawTicks(startTs, endTs); }
+      d.channels.forEach(addChannel);
+      chOffset += d.channels.length;
+      moreChannels = d.more_channels;
+      d.airings.forEach(place);
+      widen();
+      status.textContent = moreChannels ? '' : 'End of the channel list.';
+      status.style.display = moreChannels ? 'none' : 'block';
+    }).finally(function () { busy = false; });
+  }
+
+  // More time: every channel already on screen, next chunk to the right.
+  function loadTime() {
+    if (busy || !moreTime || !channels.length) return Promise.resolve();
+    if (guideEnd && endTs >= guideEnd) { moreTime = false; return Promise.resolve(); }
+    busy = true;
+    var from = endTs, to = endTs + CHUNK;
+    return fetchWindow(from, to, 0, chOffset).then(function (d) {
+      endTs = to;
+      drawTicks(from, to);
+      d.airings.forEach(place);
+      widen();
+      if (guideEnd && endTs >= guideEnd) moreTime = false;
+    }).finally(function () { busy = false; });
+  }
+
+  wrap.addEventListener('scroll', function () {
+    if (wrap.scrollTop + wrap.clientHeight > wrap.scrollHeight - ROW_H * 3) loadChannels();
+    if (wrap.scrollLeft + wrap.clientWidth > wrap.scrollWidth - 400) loadTime();
+  });
+
+  loadChannels().then(function () {
+    // Fill the viewport before waiting on a scroll event.
+    var guard = 0;
+    (function fill() {
+      if (guard++ > 12) return;
+      if (wrap.scrollWidth <= wrap.clientWidth + 200 && moreTime) return loadTime().then(fill);
+      if (wrap.scrollHeight <= wrap.clientHeight + 40 && moreChannels) return loadChannels().then(fill);
+    })();
+  });
 })();
 </script>
 {% endblock %}

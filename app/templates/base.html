@@ -55,6 +55,44 @@ tr:hover td{background:var(--panel2)}
 .chlogo{width:46px;height:26px;object-fit:contain;flex:0 0 46px;
   background:rgba(255,255,255,.04);border-radius:4px;padding:2px}
 .chtext{line-height:1.15;font-size:12px}
+
+/* ---- grid guide ---- */
+.gridwrap{overflow:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;max-height:calc(100vh - 230px);position:relative}
+.gridinner{position:relative;width:max-content;min-width:100%}
+.ghead{display:flex;position:sticky;top:0;z-index:3}
+.gcorner{position:sticky;left:0;z-index:4;flex:0 0 var(--chw);width:var(--chw);
+  height:34px;display:flex;align-items:center;padding:0 12px;background:var(--panel2);
+  border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+  font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim)}
+.gtimes{position:relative;height:34px;background:var(--panel2);
+  border-bottom:1px solid var(--line)}
+.gtick{position:absolute;top:0;height:34px;display:flex;align-items:center;
+  padding-left:8px;font-size:12px;color:var(--dim);border-left:1px solid var(--line);
+  white-space:nowrap}
+.growr{display:flex;border-bottom:1px solid var(--line)}
+.growr:last-child{border-bottom:none}
+.gch{position:sticky;left:0;z-index:2;flex:0 0 var(--chw);width:var(--chw);
+  display:flex;align-items:center;gap:9px;padding:0 12px;background:var(--panel);
+  border-right:1px solid var(--line)}
+.gch img{width:44px;height:26px;object-fit:contain;flex:0 0 44px;
+  background:rgba(255,255,255,.04);border-radius:4px;padding:2px}
+.gch .n{font-size:12px;line-height:1.15;color:var(--dim)}
+.glane{position:relative;height:var(--rowh)}
+.gprog{position:absolute;top:4px;bottom:4px;overflow:hidden;padding:6px 9px;
+  background:var(--panel2);border:1px solid var(--line);border-radius:5px;
+  display:flex;flex-direction:column;justify-content:center}
+.gprog:hover{background:#1a2b3a;border-color:#2c4257}
+.gprog .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.gprog .m{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.gprog.live{border-color:#f3a30b66}
+.gprog.drm{opacity:.5}
+.gnow{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);z-index:1;
+  pointer-events:none}
+:root{--chw:150px;--rowh:62px}
+@media (max-width:700px){:root{--chw:96px}.gch img{display:none}}
 .tiny{font-size:12px}
 input,select,button{font:inherit;background:var(--panel2);color:var(--text);
   border:1px solid var(--line);border-radius:6px;padding:7px 10px}
