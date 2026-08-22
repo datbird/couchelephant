@@ -92,17 +92,51 @@ body{margin:0;background:var(--bg);color:var(--text);
 a{color:inherit;text-decoration:none}
 
 /* ---- header ---- */
+/* The header and the tab bar travel together, so one sticky wrapper holds
+   both. Sticking them separately needs the tab bar to know the header's
+   height, which changes the moment the header wraps on a phone. */
+.topbar{position:sticky;top:0;z-index:10;background:var(--panel);
+  border-bottom:1px solid var(--line)}
 header{display:flex;align-items:center;gap:22px;padding:0 22px;height:64px;
-  background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+  background:var(--panel)}
 header .brand{display:flex;align-items:center;gap:9px;height:100%}
 /* Fills the bar edge to edge. The artwork is cropped to its own bounds, so
    height:100% leaves no gap above or below. */
 header .mark{height:100%;width:auto;display:block;align-self:stretch}
 header .wordmark{height:22px;width:auto;display:block}
-header nav{display:flex;gap:18px}
-header nav a{color:var(--dim);padding:4px 0;border-bottom:2px solid transparent;
-  white-space:nowrap}
-header nav a.on,header nav a:hover{color:var(--text);border-bottom-color:var(--accent)}
+/* ---- tab bar ----
+   Same shape as Ludodex: borderless tabs that dim when inactive, an underline
+   that slides between them, and a burst of sparks on arrival. Ported from the
+   React component to plain markup, and themed to CouchElephant's own colours.
+   Adapted from CodeFronts "Particle Burst" CSS tabs (MIT). See THIRD_PARTY.md. */
+/* No overflow here. A scroll container clips both axes, and the sparks that
+   fly downward out of the bar were being cut off at its edge. Two short tabs
+   fit the narrowest phone, so there is nothing to scroll. */
+.pt-nav{position:relative;display:flex;gap:0;padding:0 22px;
+  background:var(--panel)}
+.pt-tab{display:inline-block;color:var(--text);opacity:.62;
+  font-size:15px;font-weight:600;letter-spacing:.02em;
+  padding:12px 18px;cursor:pointer;position:relative;white-space:nowrap;
+  transition:color .2s,opacity .2s,background .12s}
+.pt-tab:hover{opacity:.95;background:var(--accent-soft)}
+.pt-tab.active{color:var(--accent-ink);opacity:1}
+.pt-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:4px}
+/* Sits on the wrapper's bottom border, which is why it hangs 1px below. */
+.pt-line{position:absolute;bottom:-1px;left:0;height:2px;width:0;
+  background:var(--accent);border-radius:2px;pointer-events:none;z-index:1}
+.pt-line.move{transition:left .4s cubic-bezier(.65,0,.35,1),
+  width .4s cubic-bezier(.65,0,.35,1)}
+.pt-spark{position:absolute;width:5px;height:5px;border-radius:50%;
+  pointer-events:none;z-index:5;
+  animation:pt-fly .6s cubic-bezier(.2,.6,.4,1) forwards}
+@keyframes pt-fly{
+  from{transform:translate(0,0) scale(1);opacity:1}
+  to{transform:translate(var(--dx),var(--dy)) scale(.3);opacity:0}
+}
+@media (prefers-reduced-motion:reduce){
+  .pt-line.move{transition:none}
+  .pt-spark{animation:none;opacity:0}
+}
 header .right{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--dim)}
 /* The gear is a nav destination as well as a button, so it shows the same
    "you are here" state the text tabs do. */
@@ -463,13 +497,12 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
    --------------------------------------------------------------------------- */
 @media (max-width:860px){
   header{height:auto;padding:0 12px;gap:10px;flex-wrap:wrap;row-gap:0}
-  header .brand{height:52px;order:1}
+  header .brand{height:52px}
   header .mark{height:44px;align-self:center}
   header .wordmark{height:19px}
-  header .right{order:2;gap:4px;height:52px}
-  header nav{order:3;flex-basis:100%;gap:16px;overflow-x:auto;padding:0 0 8px;
-    -webkit-overflow-scrolling:touch;scrollbar-width:none}
-  header nav::-webkit-scrollbar{display:none}
+  header .right{gap:4px;height:52px}
+  .pt-nav{padding:0 6px}
+  .pt-tab{font-size:14px;padding:10px 14px}
   /* A scrollbar under the day strip is noise on a touch screen, where the
      strip is dragged rather than scrolled by a bar. */
   .daybar{scrollbar-width:none}
@@ -568,8 +601,8 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   body.gridpage main{padding:8px}
   body.gridpage .daybar{margin-bottom:8px;padding-bottom:5px}
   body.gridpage .filterbar{margin-bottom:8px}
-  body.gridpage header{position:static}
-  body.gridpage header nav{padding-bottom:5px}
+  body.gridpage .topbar{position:static}
+  body.gridpage .pt-tab{padding:8px 14px;font-size:13px}
 }
 
 /* Comfortable touch targets, only where the pointer is actually coarse. */
@@ -581,16 +614,13 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 </style>
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
+<div class="topbar">
 <header>
   <a class="brand" href="/" title="A CouchElephant never forgets.">
     <img src="/static/mark.png" alt="" class="mark">
     <img src="/static/wordmark.png" alt="CouchElephant" class="wordmark darkonly">
     <img src="/static/wordmark-light.png" alt="CouchElephant" class="wordmark lightonly">
   </a>
-  <nav>
-    <a href="/" class="{{ 'on' if nav=='guide' }}">Guide</a>
-    <a href="/recordings" class="{{ 'on' if nav=='recordings' }}">Recordings</a>
-  </nav>
   <div class="right">
     {% if settings.dry_run == '1' %}<span class="pill warn">PREVIEW MODE</span>{% endif %}
     {% if last_sync and not last_sync.ok %}<span class="pill bad">sync failed</span>{% endif %}
@@ -629,6 +659,16 @@ Click to sync the guide now." aria-label="Sync the guide now">
     </a>
   </div>
 </header>
+{# Tab bar in the shape Ludodex uses: a sliding accent underline and a spark
+   burst on arrival. See THIRD_PARTY.md for the attribution. #}
+<nav class="pt-nav" id="ptnav" data-tab="{{ nav or '' }}">
+  <span class="pt-line" id="ptline" aria-hidden="true"></span>
+  <a class="pt-tab {{ 'active' if nav=='guide' }}" data-t="guide" href="/">Guide</a>
+  <a class="pt-tab {{ 'active' if nav=='recordings' }}" data-t="recordings"
+     href="/recordings">Recordings</a>
+</nav>
+</div>
+
 <div class="ovl" id="ovl"><div class="ovlbox" id="ovlbox"></div></div>
 <main>
 {% if not configured %}
@@ -678,6 +718,78 @@ Click to sync the guide now." aria-label="Sync the guide now">
       paintChrome(); label();
     });
   } catch (e) {}
+})();
+
+// Tab bar. Ludodex slides the underline and bursts sparks on click, inside a
+// single-page app. These pages are server rendered, so the click ends in a
+// page load and the slide would never be seen. Instead the bar remembers the
+// tab you came from: on load it puts the line back there, then moves it to the
+// tab you are on. The slide plays after the page is up, so it costs nothing.
+// Adapted from CodeFronts "Particle Burst" CSS tabs (MIT), see THIRD_PARTY.md.
+(function () {
+  var nav = document.getElementById('ptnav'), line = document.getElementById('ptline');
+  if (!nav || !line) return;
+  var tabs = nav.querySelectorAll('.pt-tab');
+  var here = nav.dataset.tab || '';
+  var active = nav.querySelector('.pt-tab.active') || tabs[0];
+  if (!active) return;
+
+  function sit(el, animate) {
+    line.classList.toggle('move', !!animate);
+    line.style.left = el.offsetLeft + 'px';
+    line.style.width = el.offsetWidth + 'px';
+  }
+
+  // The spark palette follows the theme, so the burst stays visible on paper
+  // as well as on the dark ground.
+  function colours() {
+    var cs = getComputedStyle(document.documentElement);
+    return ['--accent', '--live-dot', '--ok', '--info-fg', '--bad']
+      .map(function (n) { return cs.getPropertyValue(n).trim() || '#f3a30b'; });
+  }
+
+  function burst(el) {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var r = el.getBoundingClientRect(), nr = nav.getBoundingClientRect();
+    var cx = r.left - nr.left + nav.scrollLeft + r.width / 2;
+    var cy = r.top - nr.top + r.height / 2;
+    var pal = colours();
+    for (var i = 0; i < 8; i++) {
+      var sp = document.createElement('span');
+      sp.className = 'pt-spark';
+      sp.style.left = cx + 'px';
+      sp.style.top = cy + 'px';
+      sp.style.background = pal[i % pal.length];
+      var angle = (i / 8) * Math.PI * 2, dist = 32 + Math.random() * 18;
+      sp.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+      sp.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+      nav.appendChild(sp);
+      (function (el2) { setTimeout(function () { el2.remove(); }, 700); })(sp);
+    }
+  }
+
+  var from = null;
+  try { from = sessionStorage.getItem('ce-tab'); } catch (e) {}
+  var prev = from && from !== here
+    ? nav.querySelector('.pt-tab[data-t="' + from + '"]') : null;
+
+  // Start under the tab that was left, with no transition, then move.
+  sit(prev || active, false);
+  if (prev) {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { sit(active, true); burst(active); });
+    });
+  }
+  try { sessionStorage.setItem('ce-tab', here); } catch (e) {}
+
+  // A tab already under the pointer still bursts, so a click always answers.
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      if (t === active) burst(t);
+    });
+  });
+
+  window.addEventListener('resize', function () { sit(active, false); });
 })();
 
 // Spin the sync icon while the request is in flight. A full page reload
