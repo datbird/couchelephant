@@ -234,6 +234,7 @@
         mm = when.getMinutes(), ap = when.getHours() < 12 ? 'AM' : 'PM';
     el.title = a.title + '\n' + hh + ':' + (mm < 10 ? '0' + mm : mm) + ' ' + ap +
                (a.summary ? '\n\n' + a.summary : '');
+    el.dataset.aid = a.id;
     el.innerHTML = '<div class="t">' + esc(a.title) + '</div>' +
       '<div class="m">' + esc(a.parent && a.parent !== a.title ? a.parent : '') +
       (a.premiere ? ' &middot; LIVE' : '') + (a.drm ? ' &middot; DRM' : '') + '</div>';
@@ -305,6 +306,11 @@
     }).finally(function () { busy = false; });
   }
 
+  rowsEl.addEventListener('click', function (e) {
+    var blk = e.target.closest('.gprog');
+    if (blk && blk.dataset.aid) window.openProgram(blk.dataset.aid);
+  });
+
   wrap.addEventListener('scroll', function () {
     if (wrap.scrollTop + wrap.clientHeight > wrap.scrollHeight - ROW_H * 3) loadChannels();
     if (wrap.scrollLeft + wrap.clientWidth > wrap.scrollWidth - 400) loadTime();
@@ -320,6 +326,127 @@
       if (wrap.scrollHeight <= wrap.clientHeight + 40 && moreChannels) return loadChannels().then(fill);
     })();
   });
+})();
+
+// ---- programme overlay ----
+// One place to see a programme and decide what to record. It lists every
+// airing, not just the one clicked, because choosing the live broadcast over a
+// rebroadcast is the entire point of this app.
+(function () {
+  var ovl = document.getElementById('ovl'), box = document.getElementById('ovlbox');
+  if (!ovl || !box) return;
+
+  function esc(t) {
+    return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+    });
+  }
+  function when(ts) {
+    var d = new Date(ts * 1000), h = d.getHours() % 12 || 12, m = d.getMinutes();
+    return d.toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'}) +
+           ', ' + h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
+  }
+  function close() { ovl.classList.remove('show'); box.innerHTML = ''; }
+
+  ovl.addEventListener('click', function (e) { if (e.target === ovl) close(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && ovl.classList.contains('show')) close();
+  });
+
+  function pickBest(airings) {
+    var usable = airings.filter(function (a) { return !a.drm; });
+    if (!usable.length) return null;
+    var live = usable.filter(function (a) { return a.premiere; });
+    var pool = live.length ? live : usable;
+    return pool.reduce(function (m, a) { return a.b < m.b ? a : m; });
+  }
+
+  function render(d) {
+    var best = pickBest(d.airings);
+    var h = '';
+    h += '<div class="ovlhead">';
+    if (d.thumb) h += '<img class="ovlthumb" src="' + esc(d.thumb) + '" alt="">';
+    h += '<div class="ovlmeta">';
+    if (d.parent && d.parent !== d.title) h += '<div class="parent">' + esc(d.parent) + '</div>';
+    h += '<h2>' + esc(d.title) + '</h2>';
+    var bits = [];
+    if (d.year) bits.push(d.year);
+    (d.genres || []).slice(0, 3).forEach(function (g) { bits.push(esc(g)); });
+    if (bits.length) h += '<div class="parent">' + bits.join(' &middot; ') + '</div>';
+    if (d.summary) h += '<div class="sum">' + esc(d.summary) + '</div>';
+    h += '</div><button class="ovlclose" id="ovlx" aria-label="Close">&times;</button></div>';
+
+    h += '<div class="ovlsec"><h3>Airings</h3>';
+    d.airings.forEach(function (a) {
+      var isBest = best && a.id === best.id;
+      h += '<div class="air' + (isBest ? ' best' : '') + '">';
+      h += a.logo ? '<img src="/logo/' + esc(a.vcn) + '" alt="">' : '<span style="width:40px"></span>';
+      h += '<div><div class="when">' + when(a.b) + '</div>' +
+           '<div class="ch">' + esc(a.vcn) + ' ' + esc(a.call_sign) +
+           (a.premiere ? ' &middot; <b>LIVE</b>' : '') + (a.drm ? ' &middot; DRM' : '') + '</div></div>';
+      h += '<div class="act">';
+      if (a.drm) h += '<span class="pill bad">cannot record</span>';
+      else h += '<button data-rec="' + esc(a.id) + '">Record</button>';
+      h += '</div></div>';
+    });
+    if (best && d.airings.length > 1) {
+      h += '<div class="note" style="margin-top:10px">Highlighted is the live broadcast. ' +
+           'The others are repeats of the same programme.</div>';
+    }
+    h += '</div>';
+
+    if ((d.teams || []).length) {
+      h += '<div class="ovlsec"><h3>Teams</h3><div class="row">';
+      d.teams.forEach(function (t) {
+        h += t.followed
+          ? '<span class="pill ok">Following ' + esc(t.name) + '</span>'
+          : '<button data-team="' + t.id + '">Follow ' + esc(t.name) + '</button>';
+      });
+      h += '</div><div class="note" style="margin-top:8px">A pass records every game this ' +
+           'team plays, always from the live broadcast.</div></div>';
+    }
+
+    h += '<div class="ovlfoot"><span class="note" id="ovlmsg">';
+    if (d.scheduled) h += 'Plex already has this: <b>' + esc(d.scheduled) + '</b>.';
+    else if (d.dry_run) h += 'Preview mode is on, so recording is disabled. Turn it off in Settings.';
+    h += '</span></div>';
+    box.innerHTML = h;
+
+    document.getElementById('ovlx').addEventListener('click', close);
+    box.querySelectorAll('[data-rec]').forEach(function (b) {
+      b.addEventListener('click', function () { post('/api/record', {airing_id: b.dataset.rec}, b); });
+    });
+    box.querySelectorAll('[data-team]').forEach(function (b) {
+      b.addEventListener('click', function () { post('/api/pass', {team_id: b.dataset.team}, b); });
+    });
+  }
+
+  function post(url, data, btn) {
+    var msg = document.getElementById('ovlmsg');
+    btn.disabled = true;
+    var old = btn.textContent;
+    btn.textContent = 'Working...';
+    var body = new URLSearchParams(data);
+    fetch(url, {method: 'POST', body: body})
+      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, j: j}; }); })
+      .then(function (res) {
+        msg.innerHTML = esc(res.j.message || res.j.error || '');
+        if (res.j.ok) { btn.textContent = 'Done'; }
+        else { btn.disabled = false; btn.textContent = old; }
+      })
+      .catch(function (e) {
+        msg.textContent = String(e); btn.disabled = false; btn.textContent = old;
+      });
+  }
+
+  window.openProgram = function (aid) {
+    box.innerHTML = '<div class="empty">Loading...</div>';
+    ovl.classList.add('show');
+    fetch('/api/program?airing_id=' + encodeURIComponent(aid))
+      .then(function (r) { return r.json(); })
+      .then(function (d) { d.error ? box.innerHTML = '<div class="empty">' + esc(d.error) + '</div>' : render(d); })
+      .catch(function (e) { box.innerHTML = '<div class="empty">' + esc(e) + '</div>'; });
+  };
 })();
 </script>
 {% endblock %}

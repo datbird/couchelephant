@@ -191,6 +191,86 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
     })
 
 
+@app.get("/api/program")
+def api_program(airing_id: str):
+    """Everything about one broadcast, plus every other airing of the same
+    programme, so the overlay can show which one is live."""
+    a = db.one(
+        """SELECT a.*, p.title, p.grandparent_title, p.summary, p.teams, p.genres,
+                  p.thumb, p.art, p.rating_key, p.originally_available, p.year, p.section
+           FROM airings a JOIN programs p ON p.guid = a.program_guid
+           WHERE a.id = ?""", (airing_id,))
+    if not a:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    siblings = db.query(
+        "SELECT * FROM airings WHERE program_guid = ? ORDER BY begins_at", (a["program_guid"],))
+    logos = _logo_map()
+    scheduled = db.one(
+        "SELECT status FROM plex_grabs WHERE title = ? AND status IN "
+        "('scheduled','inprogress','complete') LIMIT 1", (a["title"],))
+    my_passes = {r["team_id"] for r in db.query("SELECT team_id FROM passes")}
+
+    teams = db.unjs(a["teams"])
+    return JSONResponse({
+        "airing_id": a["id"],
+        "title": a["title"], "parent": a["grandparent_title"] or "",
+        "summary": a["summary"] or "", "year": a["year"],
+        "thumb": a["thumb"] or a["art"] or "",
+        "genres": db.unjs(a["genres"]),
+        "teams": [{"id": t.get("id"), "name": t.get("name"),
+                   "followed": t.get("id") in my_passes} for t in teams],
+        "section": a["section"],
+        "originally_available": a["originally_available"],
+        "scheduled": scheduled["status"] if scheduled else None,
+        "dry_run": db.get_setting("dry_run") == "1",
+        "airings": [{
+            "id": r["id"], "vcn": r["channel_vcn"], "call_sign": r["channel_call_sign"] or "",
+            "logo": bool(logos.get(r["channel_vcn"])),
+            "b": r["begins_at"], "e": r["ends_at"],
+            "premiere": bool(r["premiere"]), "drm": bool(r["drm"]),
+            "chosen": r["id"] == a["id"],
+        } for r in siblings],
+    })
+
+
+@app.post("/api/record")
+async def api_record(airing_id: str = Form(...)):
+    """Schedule this exact broadcast, pinned to its channel and start time."""
+    if db.get_setting("dry_run") == "1":
+        return JSONResponse({"ok": False, "error":
+                             "Preview mode is on. Turn it off in Settings to record."}, status_code=400)
+    row = db.one(
+        """SELECT a.*, p.rating_key, p.title FROM airings a
+           JOIN programs p ON p.guid = a.program_guid WHERE a.id = ?""", (airing_id,))
+    if not row:
+        return JSONResponse({"ok": False, "error": "airing not found"}, status_code=404)
+    if row["drm"]:
+        return JSONResponse({"ok": False, "error":
+                             "This airing is DRM encrypted and cannot be recorded."}, status_code=400)
+    try:
+        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+        await asyncio.to_thread(passes._schedule, plex, row, None)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
+    await asyncio.to_thread(sync.sync_recordings, Plex(db.get_setting("plex_url"),
+                                                      db.get_setting("plex_token")))
+    return JSONResponse({"ok": True, "message": "Recording scheduled."})
+
+
+@app.post("/api/pass")
+def api_pass(team_id: int = Form(...)):
+    t = db.one("SELECT * FROM teams WHERE id = ?", (team_id,))
+    if not t:
+        return JSONResponse({"ok": False, "error": "unknown team"}, status_code=404)
+    if db.one("SELECT 1 FROM passes WHERE team_id = ?", (team_id,)):
+        return JSONResponse({"ok": True, "message": f"Already following {t['name']}."})
+    with db.tx() as c:
+        c.execute("INSERT INTO passes (kind, team_id, team_name, enabled, created_at) "
+                  "VALUES ('team', ?, ?, 1, ?)", (t["id"], t["name"], int(time.time())))
+    return JSONResponse({"ok": True, "message": f"Following {t['name']}."})
+
+
 @app.get("/partial/airings", response_class=HTMLResponse)
 def airings_partial(request: Request, day: str = "", channel: str = "", sports: int = 0,
                     q: str = "", offset: int = 0):

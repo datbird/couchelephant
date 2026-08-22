@@ -98,6 +98,39 @@ tr:hover td{background:var(--panel2)}
 .gnow{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);z-index:1;
   pointer-events:none}
 :root{--chw:150px;--rowh:62px}
+
+/* ---- programme overlay ---- */
+.ovl{position:fixed;inset:0;background:rgba(2,6,11,.72);z-index:50;display:none;
+  align-items:center;justify-content:center;padding:24px}
+.ovl.show{display:flex}
+.ovlbox{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  width:min(720px,100%);max-height:min(86vh,860px);overflow:auto;
+  box-shadow:0 24px 60px rgba(0,0,0,.55)}
+.ovlhead{display:flex;gap:16px;padding:20px 22px 16px;border-bottom:1px solid var(--line)}
+.ovlthumb{width:104px;height:150px;object-fit:cover;border-radius:6px;flex:0 0 104px;
+  background:var(--panel2)}
+.ovlmeta{min-width:0;flex:1}
+.ovlmeta h2{margin:0 0 4px;font-size:20px;line-height:1.25}
+.ovlmeta .parent{color:var(--dim);font-size:13px;margin-bottom:8px}
+.ovlmeta .sum{font-size:13px;color:var(--dim);margin-top:10px;line-height:1.5}
+.ovlclose{margin-left:auto;align-self:flex-start;background:transparent;border:none;
+  color:var(--dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
+.ovlclose:hover{color:var(--text)}
+.ovlsec{padding:16px 22px;border-bottom:1px solid var(--line)}
+.ovlsec:last-child{border-bottom:none}
+.ovlsec h3{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--dim);font-weight:600}
+.air{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:6px;
+  border:1px solid transparent}
+.air+.air{margin-top:4px}
+.air.best{border-color:#f3a30b55;background:rgba(243,163,11,.07)}
+.air img{width:40px;height:24px;object-fit:contain;flex:0 0 40px;
+  background:rgba(255,255,255,.04);border-radius:3px;padding:2px}
+.air .when{font-size:13px}
+.air .ch{font-size:12px;color:var(--dim)}
+.air .act{margin-left:auto}
+.ovlfoot{padding:16px 22px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.note{font-size:12px;color:var(--dim)}
 @media (max-width:700px){:root{--chw:96px}.gch img{display:none}}
 .tiny{font-size:12px}
 input,select,button{font:inherit;background:var(--panel2);color:var(--text);
@@ -165,6 +198,7 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
     <form method="post" action="/sync" style="margin:0"><button>Sync now</button></form>
   </div>
 </header>
+<div class="ovl" id="ovl"><div class="ovlbox" id="ovlbox"></div></div>
 <main>
 {% if not configured %}
   <div class="banner bad">No Plex server configured yet. Open
