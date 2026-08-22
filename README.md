@@ -1,10 +1,13 @@
 <p align="center">
-  <img src="docs/images/guide-dark.png" alt="CouchElephant guide" width="820">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/logo-light.png">
+    <img src="docs/images/logo-dark.png" alt="CouchElephant" width="560">
+  </picture>
 </p>
 
-# CouchElephant
-
-**A CouchElephant never forgets.**
+<h1 align="center">CouchElephant</h1>
+<p align="center"><b>A CouchElephant never forgets.</b></p>
 
 Plex's DVR records the wrong broadcast. Ask it to record your team and it will
 happily pick the repeat that airs two days later, on a channel you do not
