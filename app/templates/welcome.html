@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Set up CouchElephant{% endblock %}
+{% block bodyclass %}signin{% endblock %}
+{% block footer %}{% endblock %}
+{% block body %}
+<div class="signin-card card" style="width:min(560px,100%)">
+  <img src="/static/mark.png" alt="" class="signin-mark">
+  <h1>Set up CouchElephant</h1>
+  <div class="sub">Point it at your Plex server. That is the only thing it needs
+    to start.</div>
+
+  <div class="verdict" id="wverdict" hidden>
+    <span class="vmark" aria-hidden="true"></span><span class="vtext"></span>
+  </div>
+
+  <form id="wform">
+    <div class="field">
+      <label for="wu">Plex server address</label>
+      <input id="wu" name="plex_url" value="{{ settings.plex_url or '' }}"
+             placeholder="http://192.168.1.10:32400" autofocus required>
+      <span class="help">The address has to work from inside this container. If Plex runs
+        on another machine, use that machine's address, not 127.0.0.1.</span>
+    </div>
+
+    <div class="field">
+      <label for="wt">Plex token</label>
+      <input id="wt" name="plex_token" type="password" placeholder="X-Plex-Token" required>
+      <span class="help">On the Plex server this is the <code>PlexOnlineToken</code> in
+        Preferences.xml. It is kept in the local database and never logged.</span>
+    </div>
+
+    <div class="field">
+      <label for="wz">Timezone your Plex server is in</label>
+      <select id="wz" name="timezone">
+        {% for z in zones %}
+          <option value="{{ z }}" {{ 'selected' if z == (settings.timezone or 'UTC') }}>{{ z }}</option>
+        {% endfor %}
+      </select>
+      <span class="help">Guide times come from Plex in this zone, and every time here is
+        shown in it. Pick where the server is, not where you are, if they differ.</span>
+    </div>
+
+    <div class="row">
+      <button class="primary" type="submit">Test and save</button>
+    </div>
+  </form>
+
+  <div class="setblock">
+    <h3>Two things you can leave for later</h3>
+    <p class="dim" style="margin:0 0 10px">Neither is needed to start, and both live in
+      <b>Settings</b> once you are in.</p>
+    <table class="stack">
+      <tr>
+        <td class="dim">Sign-in</td>
+        <td>Nobody is asked to sign in. That suits a box on your own network. Under
+          <b>Settings, Accounts</b> you can switch to accounts kept here, or hand the
+          question to <b>Cloudflare Access</b>, before this is reachable from anywhere
+          else.</td>
+      </tr>
+      <tr>
+        <td class="dim">Preview mode</td>
+        <td>On to start with, so nothing is written to your DVR until you have seen
+          CouchElephant choose correctly. Turn it off under <b>Settings, Recording</b>.</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<script>
+// Test before saving. A wrong address or token saved quietly is the thing that
+// makes the first five minutes confusing.
+(function () {
+  var f = document.getElementById('wform'), out = document.getElementById('wverdict');
+  if (!f) return;
+
+  // Offer the browser's own zone, which is right far more often than UTC.
+  try {
+    var sel = document.getElementById('wz');
+    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && sel.value === 'UTC' && sel.querySelector('option[value="' + tz + '"]')) {
+      sel.value = tz;
+    }
+  } catch (e) {}
+
+  function say(kind, text) {
+    out.hidden = false;
+    out.className = 'verdict ' + kind;
+    out.querySelector('.vtext').textContent = text;
+  }
+
+  f.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = f.querySelector('button');
+    btn.disabled = true; btn.textContent = 'Testing...';
+    say('busy', 'Asking your Plex server...');
+    fetch('/welcome', {method: 'POST', headers: {Accept: 'application/json'},
+                       body: new URLSearchParams(new FormData(f))})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j.ok) {
+          say('ok', j.detail + ' Taking you to the guide...');
+          setTimeout(function () { location.href = '/'; }, 1300);
+        } else {
+          say('bad', j.detail);
+          btn.disabled = false; btn.textContent = 'Test and save';
+        }
+      })
+      .catch(function (err) {
+        say('bad', 'Could not reach CouchElephant itself: ' + err);
+        btn.disabled = false; btn.textContent = 'Test and save';
+      });
+  });
+})();
+</script>
+{% endblock %}

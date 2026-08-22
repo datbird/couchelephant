@@ -6,10 +6,16 @@
 # again for new code to take effect.
 set -euo pipefail
 
-HOST="${COUCHELEPHANT_HOST:-your-plex-host}"
-REMOTE_DIR="${COUCHELEPHANT_REMOTE_DIR:-/mnt/data/couchelephant}"
+HERE_EARLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# A local .env keeps your host out of the repo. See .env.example.
+[ -f "$HERE_EARLY/.env" ] && . "$HERE_EARLY/.env"
+
+# Nothing about one person's network belongs in the repo, so the host has no
+# default. Set it, or put these in a local env file that git ignores.
+HOST="${COUCHELEPHANT_HOST:?set COUCHELEPHANT_HOST to the ssh host to deploy to}"
+REMOTE_DIR="${COUCHELEPHANT_REMOTE_DIR:-/opt/couchelephant}"
 PORT="${COUCHELEPHANT_PORT:-8710}"
-TZ_NAME="${COUCHELEPHANT_TZ:-America/Chicago}"
+TZ_NAME="${COUCHELEPHANT_TZ:-UTC}"
 TAG="couchelephant:1.0"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

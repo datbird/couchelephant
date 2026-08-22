@@ -1,4 +1,6 @@
+# Local deployment settings. Hostnames and paths are one person's network,
+# never the repo's business.
+.env
+*.local
 __pycache__/
 *.pyc
-data/
-*.db
