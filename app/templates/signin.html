@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Set up CouchElephant' if setup else 'Sign in' }} - CouchElephant{% endblock %}
+{% block bodyclass %}signin{% endblock %}
+{% block footer %}{% endblock %}
+{% block body %}
+<div class="signin-card card">
+  <img src="/static/mark.png" alt="" class="signin-mark">
+  {% if setup %}
+    <h1>Create the first account</h1>
+    <div class="sub">Sign-in is on, and nobody has an account yet. This one is
+      the administrator.</div>
+  {% else %}
+    <h1>Sign in</h1>
+    <div class="sub">A CouchElephant never forgets.</div>
+  {% endif %}
+
+  {% if error %}<div class="banner bad">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ '/setup' if setup else '/login' }}">
+    <div class="field">
+      <label for="u">Username</label>
+      <input id="u" name="username" autocomplete="username" autofocus required>
+    </div>
+    <div class="field">
+      <label for="p">Password</label>
+      <input id="p" name="password" type="password" required
+             autocomplete="{{ 'new-password' if setup else 'current-password' }}">
+      {% if setup %}<span class="help">At least 8 characters.</span>{% endif %}
+    </div>
+    <button class="primary">{{ 'Create account' if setup else 'Sign in' }}</button>
+  </form>
+</div>
+{% endblock %}

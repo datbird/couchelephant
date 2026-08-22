@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, filters, passes, sync
+from . import auth, cf_access, db, filters, passes, sync
 from .plex import Plex, PlexError
 
 BASE = os.path.dirname(__file__)
@@ -58,13 +58,134 @@ def _logo_map():
         "SELECT vcn FROM channels WHERE logo_path IS NOT NULL AND logo_path != ''")}
 
 
+def current_user(request):
+    """Who is asking, by whichever route the install allows.
+
+    With sign-in off there is no user, and everything is public. That is the
+    state a fresh install starts in.
+    """
+    m = auth.mode()
+    if m == "none":
+        return None
+    user = auth.session_user(request.cookies.get(auth.SESSION_COOKIE))
+    if user:
+        return user
+    if m == "cloudflare":
+        token = (request.headers.get("Cf-Access-Jwt-Assertion")
+                 or request.cookies.get("CF_Authorization"))
+        email = cf_access.verify_email(token, db.get_setting("cf_team_domain"),
+                                       db.get_setting("cf_aud"))
+        if email:
+            return auth.user_for_email(email)
+    return None
+
+
 def page(request, name, **ctx):
+    user = ctx.get("user") or current_user(request)
+    ctx.setdefault("user", user)
+    # A signed-in person's theme is theirs, so it follows them to any browser.
+    # Signed out there is nobody to attach it to and the browser's own copy is
+    # the only record.
+    ctx.setdefault("theme", auth.get_pref(user["id"], "theme") if user else None)
+    ctx.setdefault("auth_mode", auth.mode())
     ctx.setdefault("settings", db.all_settings())
     ctx.setdefault("configured", bool(db.get_setting("plex_url") and db.get_setting("plex_token")))
     ctx.setdefault("last_sync", db.one("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1"))
     ctx.setdefault("now", int(time.time()))
     ctx["request"] = request
     return templates.TemplateResponse(name, ctx)
+
+
+# Reachable without signing in: the sign-in screens themselves, the health
+# check, and the static files that render them.
+_OPEN = ("/login", "/setup", "/logout", "/healthz", "/static/", "/favicon.ico")
+
+
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next):
+    path = request.url.path
+    if auth.mode() == "none" or path.startswith(_OPEN):
+        return await call_next(request)
+    if current_user(request):
+        return await call_next(request)
+    # A fresh switch to local sign-in has no accounts yet, so send the first
+    # visitor to create one rather than to a login they cannot pass.
+    where = "/setup" if auth.needs_setup() else "/login"
+    if path.startswith("/api/") or path.startswith("/partial/"):
+        return JSONResponse({"ok": False, "error": "sign in required"}, status_code=401)
+    return RedirectResponse(where, status_code=303)
+
+
+# ---------- sign in ----------
+
+def _set_session(resp, token):
+    resp.set_cookie(auth.SESSION_COOKIE, token, httponly=True, samesite="lax",
+                    max_age=auth.SESSION_TTL, path="/")
+    return resp
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_form(request: Request, error: str = ""):
+    if auth.mode() == "none" or not auth.needs_setup():
+        return RedirectResponse("/", status_code=303)
+    return page(request, "signin.html", setup=True, error=error, nav="")
+
+
+@app.post("/setup")
+def setup_save(username: str = Form(""), password: str = Form("")):
+    if auth.mode() == "none" or not auth.needs_setup():
+        return RedirectResponse("/", status_code=303)
+    try:
+        uid = auth.create_user(username, password, role="admin")
+    except ValueError as e:
+        return RedirectResponse(f"/setup?error={urllib.parse.quote(str(e))}",
+                                status_code=303)
+    return _set_session(RedirectResponse("/", status_code=303), auth.create_session(uid))
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_form(request: Request, error: str = ""):
+    if auth.mode() == "none":
+        return RedirectResponse("/", status_code=303)
+    if auth.needs_setup():
+        return RedirectResponse("/setup", status_code=303)
+    if current_user(request):
+        return RedirectResponse("/", status_code=303)
+    return page(request, "signin.html", setup=False, error=error, nav="")
+
+
+@app.post("/login")
+def login_save(username: str = Form(""), password: str = Form("")):
+    user = auth.verify(username, password)
+    if not user:
+        return RedirectResponse(
+            "/login?error=" + urllib.parse.quote("that username and password do not match"),
+            status_code=303)
+    return _set_session(RedirectResponse("/", status_code=303),
+                        auth.create_session(user["id"]))
+
+
+@app.post("/logout")
+def logout(request: Request):
+    auth.delete_session(request.cookies.get(auth.SESSION_COOKIE))
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.post("/api/theme")
+def api_theme(request: Request, theme: str = Form("dark")):
+    """Remember the theme against the account, when there is one.
+
+    With sign-in off the browser keeps it in local storage instead, which is
+    the only place it can live when nobody is identified.
+    """
+    theme = theme if theme in ("light", "dark") else "dark"
+    user = current_user(request)
+    if user:
+        auth.set_pref(user["id"], "theme", theme)
+        return JSONResponse({"ok": True, "stored": "account"})
+    return JSONResponse({"ok": True, "stored": "browser"})
 
 
 # ---------- lifecycle ----------
@@ -691,10 +812,11 @@ async def passes_run():
 # ---------- settings ----------
 
 @app.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request, tested: str = ""):
+def settings_page(request: Request, tested: str = "", autherror: str = ""):
     zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
     return page(request, "settings.html", zones=zones, tested=tested,
-                logos=sync.logo_coverage())
+                autherror=autherror, logos=sync.logo_coverage(),
+                users=auth.list_users(), cf_ready=cf_access.available())
 
 
 @app.post("/settings")
@@ -707,6 +829,38 @@ def settings_save(plex_url: str = Form(""), plex_token: str = Form(""),
     db.set_setting("timezone", timezone)
     db.set_setting("sync_minutes", sync_minutes)
     db.set_setting("dry_run", "1" if dry_run == "1" else "0")
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/auth")
+def settings_auth(request: Request, auth_mode: str = Form("none"),
+                  cf_team_domain: str = Form(""), cf_aud: str = Form("")):
+    """Change how, or whether, people sign in.
+
+    Turning sign-in on with no accounts sends the next visitor to create one.
+    Turning it off is deliberately allowed from inside: someone locked out of
+    Cloudflare Access can still reach the box on the LAN and switch back.
+    """
+    mode = auth_mode if auth_mode in auth.MODES else "none"
+    if mode == "cloudflare":
+        ok, detail = cf_access.check(cf_team_domain.strip(), cf_aud.strip())
+        if not ok:
+            return RedirectResponse(
+                "/settings?autherror=" + urllib.parse.quote(detail), status_code=303)
+    db.set_setting("cf_team_domain", cf_team_domain.strip())
+    db.set_setting("cf_aud", cf_aud.strip())
+    db.set_setting("auth_mode", mode)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@app.post("/settings/users/{uid}/delete")
+def settings_user_delete(request: Request, uid: int):
+    me = current_user(request)
+    if me and me["id"] == uid:
+        return RedirectResponse(
+            "/settings?autherror=" + urllib.parse.quote("you cannot delete your own account"),
+            status_code=303)
+    auth.delete_user(uid)
     return RedirectResponse("/settings", status_code=303)
 
 

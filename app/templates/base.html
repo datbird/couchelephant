@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="{{ theme or 'dark' }}"
+      data-theme-from="{{ 'account' if theme else 'browser' }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -14,12 +15,16 @@
      show a dark page for one frame on the way to a light one. -->
 <script>
 (function () {
+  var root = document.documentElement;
+  // The server already stamped the account's theme. Leave it alone, or the
+  // browser's copy from a different account would flash over it.
+  if (root.getAttribute('data-theme-from') === 'account') return;
   try {
     var t = localStorage.getItem('ce-theme');
     if (t !== 'light' && t !== 'dark') {
       t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     }
-    document.documentElement.setAttribute('data-theme', t);
+    root.setAttribute('data-theme', t);
   } catch (e) { /* private mode: the dark default in the markup stands */ }
 })();
 </script>
@@ -144,12 +149,31 @@ header .right{margin-left:auto;display:flex;align-items:center;gap:6px;font-size
 /* A sync in flight, so the icon is not a button that appears to do nothing. */
 .iconbtn.spinning svg{animation:spin .9s linear infinite}
 
-/* The theme switch. One button, both glyphs drawn, the irrelevant one hidden,
-   so there is no icon swap flicker and no second request. */
-.themebtn{width:34px;height:34px;flex:0 0 34px}
-.themebtn svg{width:19px;height:19px}
-[data-theme="dark"] .themebtn .i-moon,
-[data-theme="light"] .themebtn .i-sun{display:none}
+/* The account menu. One icon, and everything about the person behind it,
+   dark mode included, because that is a preference of theirs rather than of
+   the server. Shape follows the same author's ludodex. */
+.profile-wrap{position:relative}
+.profile{display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;flex:0 0 34px;background:var(--panel2);
+  border:1px solid var(--line);border-radius:50%;color:var(--dim);cursor:pointer;
+  padding:0;transition:border-color .1s,color .1s}
+.profile:hover,.profile.open{border-color:var(--accent);color:var(--text)}
+.profile-menu{display:none;position:absolute;top:calc(100% + 8px);right:0;
+  min-width:196px;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:12px;box-shadow:var(--shadow-lg);z-index:40}
+.profile-menu.open{display:block}
+.pm-name{color:var(--text);font-weight:600;font-size:14px}
+.pm-sub{color:var(--dim);font-size:12px;margin-top:2px}
+.pm-divider{height:1px;background:var(--line);margin:10px -12px}
+.pm-item{display:block;width:100%;text-align:left;background:none;border:none;
+  color:var(--dim);font:inherit;font-size:13px;padding:6px 8px;margin:0 -8px;
+  border-radius:6px;cursor:pointer}
+.pm-item:hover{background:var(--accent-soft);color:var(--text)}
+.pm-theme-label{display:inline-flex;align-items:center;gap:8px}
+/* Both glyphs are drawn and the wrong one hidden, so switching does not
+   flicker and costs no second request. */
+[data-theme="dark"] .pm-theme .i-moon,
+[data-theme="light"] .pm-theme .i-sun{display:none}
 
 main{padding:22px;max-width:1400px;margin:0 auto}
 /* The grid guide wants the whole width, and owns the only scrollbar on the
@@ -363,62 +387,77 @@ tr:hover td{background:var(--panel2)}
 /* Two columns while they fit. Label left, control right, so the eye runs down
    the labels the way it does in Plex's own dialog. */
 .optgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}
-.optrow{display:flex;align-items:center;gap:10px;justify-content:space-between;
-  font-size:13px;min-width:0}
-.optlabel{color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis}
+.optrow{display:flex;align-items:center;gap:9px;font-size:13px;min-width:0}
+.optlabel{color:var(--dim);min-width:0;flex:1 1 auto;overflow:hidden;
+  text-overflow:ellipsis}
 .optrow select,.optrow input[type=number],.optrow input[type=text]{
   flex:0 1 auto;max-width:58%;padding:5px 8px;font-size:13px}
 .optrow input[type=number]{width:82px}
 .optrow input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto}
 /* Whose feature is this. Amber is CouchElephant throughout the app, and the
    blue-grey is the one the guide already uses for Plex's own recordings, so
-   the two pages teach the same colour. */
-.tag{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;
-  vertical-align:middle}
-.tag.ce{background:var(--accent)}
-.tag.plex{background:var(--live-dot)}
-.ovlsec.ce{border-left:3px solid var(--accent)}
-.ovlsec.plex{border-left:3px solid var(--live)}
+   every page teaches the same colour. A small rectangle beside each option,
+   rather than two separate lists the reader has to join back together. */
+.own{display:inline-block;width:10px;height:14px;border-radius:2px;flex:0 0 10px}
+.own.ce{background:var(--accent)}
+.own.plex{background:var(--live-dot)}
+.ownkey{display:flex;gap:16px;align-items:center;font-size:11px;color:var(--dim);
+  margin:0 0 12px;text-transform:uppercase;letter-spacing:.4px}
+.ownkey span{display:inline-flex;align-items:center;gap:6px}
+.ownkey .own{height:11px}
 
 /* The verdict. Which system ends up owning this recording, said before the
    user presses the button rather than discovered afterwards. */
 .optbar{padding:11px 22px;font-size:13px;line-height:1.45;
-  border-bottom:1px solid var(--line)}
+  border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
+.optbar .own{margin-top:2px;height:16px}
 .optbar.plex{background:var(--live-soft);color:var(--text);
   box-shadow:inset 3px 0 0 var(--live)}
 .optbar.ce{background:var(--accent-soft);color:var(--text);
   box-shadow:inset 3px 0 0 var(--accent)}
 
-/* Limit to: a set of networks or channels, which is a CouchElephant idea.
-   Plex's own "Limit to channel" takes exactly one. */
-.srcsum{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end;max-width:70%}
-.optrow.src{align-items:flex-start}
-.srcq{width:100%;margin:10px 0 8px}
-.srcbody{max-height:190px;overflow:auto;border:1px solid var(--line);
-  border-radius:7px;padding:8px;background:var(--panel2)}
-.srcsec{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
-  margin:2px 0 6px}
-.srcsec+.srcrow{margin-bottom:10px}
-.srcrow{display:flex;flex-wrap:wrap;gap:5px}
-.srcchip{font-size:12px;padding:3px 9px;border-radius:12px;cursor:pointer;
-  border:1px solid var(--line);background:var(--panel);color:var(--dim)}
-.srcchip:hover{color:var(--text);border-color:var(--hover-bd)}
-.srcchip.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent);
-  font-weight:600}
-/* A single broadcast is already one channel at one time, so the limit has
-   nothing to narrow. Shown, greyed, with the reason. */
-.ovlsec.ce .nahint{display:none}
-.ovlsec.ce.na .srcq,.ovlsec.ce.na .srcbody,.ovlsec.ce.na .optrow.src{opacity:.42;
-  pointer-events:none}
-.ovlsec.ce.na .nahint{display:block;margin-top:9px}
+/* A dropdown that takes more than one answer. It has to sit beside the single
+   choice ones without looking like a different kind of control, so the closed
+   state is a select: same height, same border, same chevron. */
+.multi{position:relative;flex:0 1 auto;max-width:58%}
+.multibtn{display:inline-flex;align-items:center;gap:8px;width:100%;
+  justify-content:space-between;padding:5px 8px;font-size:13px;
+  background:var(--panel2);border:1px solid var(--line);border-radius:6px;
+  color:var(--text);text-align:left}
+.multibtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.multibtn.set{border-color:var(--accent);color:var(--accent-ink)}
+.multibtn:disabled{opacity:.5;cursor:default}
+.multimenu{display:none;position:absolute;top:calc(100% + 5px);right:0;z-index:60;
+  width:300px;max-width:78vw;background:var(--panel);border:1px solid var(--line);
+  border-radius:8px;box-shadow:var(--shadow-lg);padding:8px}
+.multimenu.open{display:block}
+.multiq{width:100%;margin-bottom:6px;padding:6px 8px;font-size:13px}
+.multibody{display:block;max-height:250px;overflow:auto}
+.multisec{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--dim);padding:8px 4px 4px;position:sticky;top:0;background:var(--panel)}
+.multirow{display:flex;align-items:center;gap:9px;padding:5px 6px;border-radius:5px;
+  cursor:pointer;font-size:13px}
+.multirow:hover{background:var(--panel2)}
+.multirow input{width:15px;height:15px;margin:0;flex:0 0 15px;accent-color:var(--accent)}
+.multirow .mt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.multirow .mn{margin-left:auto;padding-left:10px;color:var(--dim);font-size:11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
+.multinone{display:block;padding:16px;text-align:center;color:var(--dim);font-size:13px}
+.opthint{display:block;font-size:11px;opacity:.75;margin-top:1px}
+/* The source limit gets the full width. Its label carries a second line of
+   explanation, and in a half-width cell that line was clipped. */
+.optrow.wide{grid-column:1/-1}
+.optrow.wide .optlabel{overflow:visible;white-space:normal}
+.optrow.wide .multi{max-width:320px;flex:0 0 320px}
 
 @media (max-width:700px){
   .optgrid{grid-template-columns:1fr}
   .pickrow .note{display:none}
   .optbar{padding:11px 16px}
-  .srcsum{max-width:100%;justify-content:flex-start}
-  .optrow.src{flex-direction:column;align-items:flex-start;gap:6px}
-  .srcbody{max-height:160px}
+  /* One column, so the menu can use the full width under its button. */
+  .multi{max-width:58%}
+  .multimenu{width:auto;left:0;right:0;max-width:none}
+  .multibody{max-height:210px}
 }
 /* The result of pressing Record. It used to be dim grey at the bottom of a
    scrollable panel, which is indistinguishable from nothing happening. */
@@ -485,6 +524,18 @@ button.danger{background:transparent;color:var(--bad-fg);border-color:var(--bad-
   border:none;padding:0;color:var(--dim);cursor:pointer;line-height:0}
 .iconbtn:hover{color:var(--text);background:var(--panel2)}
 .iconbtn svg{display:block}
+/* The sign-in screen. Nothing else on the page, so it centres in what is
+   left below the header. */
+body.signin main{max-width:none;display:flex;justify-content:center;
+  align-items:flex-start;padding-top:8vh}
+body.signin .pt-nav{display:none}
+.signin-card{width:min(400px,100%);text-align:left}
+.signin-mark{height:74px;width:auto;display:block;margin:0 auto 10px}
+.signin-card h1{text-align:center}
+.signin-card .sub{text-align:center}
+.signin-card .field{max-width:none}
+.signin-card button.primary{width:100%;padding:10px}
+
 footer{margin:38px 0 14px;text-align:center;font-size:12px;letter-spacing:1.6px;
   text-transform:uppercase;color:var(--dim);opacity:.7}
 footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
@@ -609,7 +660,7 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 @media (pointer:coarse){
   button,.iconbtn,.daybar a{min-height:38px}
   .iconbtn{width:38px;height:38px;flex:0 0 38px}
-  .themebtn{width:38px;height:38px;flex:0 0 38px}
+  .profile{width:38px;height:38px;flex:0 0 38px}
 }
 </style>
 </head>
@@ -638,17 +689,51 @@ Click to sync the guide now." aria-label="Sync the guide now">
       </button>
     </form>
 
-    <button type="button" class="iconbtn themebtn" id="themebtn"
-            title="Switch theme" aria-label="Switch between light and dark">
-      <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
-      <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="2" stroke-linecap="round">
-        <circle cx="12" cy="12" r="4.2"/>
-        <path d="M12 2.4v2.2M12 19.4v2.2M2.4 12h2.2M19.4 12h2.2
-                 M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>
-    </button>
+    {# Everything about the person using this, behind one icon. Dark mode
+       lives here because it is a preference of theirs, not of the server. #}
+    <div class="profile-wrap" id="pwrap">
+      <button type="button" class="profile" id="pbtn" title="Account"
+              aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <circle cx="12" cy="8" r="4" fill="currentColor"/>
+          <path d="M4 20c0-4 4-6 8-6s8 2 8 6" fill="currentColor"/></svg>
+      </button>
+      <div class="profile-menu" id="pmenu">
+        <div class="pm-name">{{ user.username if user else 'Guest' }}</div>
+        <div class="pm-sub">
+          {%- if user -%}
+            {{ 'Administrator' if user.role == 'admin' else 'Signed in' }}
+          {%- elif auth_mode == 'none' -%}
+            Sign-in is off
+          {%- else -%}
+            Not signed in
+          {%- endif -%}
+        </div>
+        <div class="pm-divider"></div>
+        <button type="button" class="pm-item pm-theme" id="themebtn">
+          <span class="pm-theme-label">
+            <svg class="i-moon" viewBox="0 0 24 24" width="16" height="16" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+            <svg class="i-sun" viewBox="0 0 24 24" width="16" height="16" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="4.2"/>
+              <path d="M12 2.4v2.2M12 19.4v2.2M2.4 12h2.2M19.4 12h2.2
+                       M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"/></svg>
+            <span id="themelabel">Light mode</span>
+          </span>
+        </button>
+        <div class="pm-divider"></div>
+        <a class="pm-item pm-link" href="/settings">Settings</a>
+        {% if user %}
+          <form method="post" action="/logout" style="margin:0">
+            <button type="submit" class="pm-item pm-link">Sign out</button></form>
+        {% elif auth_mode != 'none' %}
+          <a class="pm-item pm-link" href="/login">Sign in</a>
+        {% endif %}
+      </div>
+    </div>
 
     <a href="/settings" class="iconbtn {{ 'on' if nav=='settings' }}"
        title="Settings" aria-label="Settings">
@@ -698,10 +783,12 @@ Click to sync the guide now." aria-label="Sync the guide now">
     if (meta) meta.setAttribute('content',
       getComputedStyle(root).getPropertyValue('--bg').trim() || '#040c15');
   }
+  var txt = document.getElementById('themelabel');
   function label() {
     var to = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
     btn.title = 'Switch to ' + to + ' theme';
     btn.setAttribute('aria-label', btn.title);
+    if (txt) txt.textContent = to === 'light' ? 'Light mode' : 'Dark mode';
   }
   paintChrome(); label();
   btn.addEventListener('click', function () {
@@ -709,10 +796,17 @@ Click to sync the guide now." aria-label="Sync the guide now">
     root.setAttribute('data-theme', next);
     try { localStorage.setItem('ce-theme', next); } catch (e) {}
     paintChrome(); label();
+    // Signed in, the choice belongs to the account, so it follows the person
+    // to another browser. Signed out there is nobody to attach it to and the
+    // local copy above is the whole story.
+    try {
+      fetch('/api/theme', {method: 'POST', body: new URLSearchParams({theme: next})});
+    } catch (e) {}
   });
   // Follow the system only while the user has expressed no preference.
   try {
     window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function (e) {
+      if (root.getAttribute('data-theme-from') === 'account') return;
       if (localStorage.getItem('ce-theme')) return;
       root.setAttribute('data-theme', e.matches ? 'light' : 'dark');
       paintChrome(); label();
@@ -790,6 +884,29 @@ Click to sync the guide now." aria-label="Sync the guide now">
   });
 
   window.addEventListener('resize', function () { sit(active, false); });
+})();
+
+// The account menu.
+(function () {
+  var wrap = document.getElementById('pwrap'), btn = document.getElementById('pbtn'),
+      menu = document.getElementById('pmenu');
+  if (!wrap || !btn || !menu) return;
+  function shut() {
+    menu.classList.remove('open');
+    btn.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = menu.classList.toggle('open');
+    btn.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  // The theme button lives inside, and closing on its click would hide the
+  // label that just changed.
+  menu.addEventListener('click', function (e) { e.stopPropagation(); });
+  document.addEventListener('click', shut);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
 })();
 
 // Spin the sync icon while the request is in flight. A full page reload

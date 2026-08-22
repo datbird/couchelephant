@@ -87,6 +87,69 @@
   </form>
 </div>
 
+<div class="card">
+  <h2 style="font-size:15px;margin:0 0 4px">Accounts</h2>
+  <div class="sub">Who may use this. A fresh install asks nobody to sign in.</div>
+  {% if autherror %}<div class="banner bad">{{ autherror }}</div>{% endif %}
+
+  <form method="post" action="/settings/auth">
+    <div class="field">
+      <label for="am">Sign-in</label>
+      <select id="am" name="auth_mode">
+        <option value="none" {{ 'selected' if auth_mode == 'none' }}>
+          Off. Anyone who can reach this page can use it</option>
+        <option value="local" {{ 'selected' if auth_mode == 'local' }}>
+          Local accounts, kept here</option>
+        <option value="cloudflare" {{ 'selected' if auth_mode == 'cloudflare' }}>
+          Cloudflare Access</option>
+      </select>
+      <span class="help">Off suits a box on your own network. Turn it on before
+        this is reachable from anywhere else.</span>
+    </div>
+
+    <div class="field">
+      <label for="cfd">Cloudflare team domain</label>
+      <input id="cfd" name="cf_team_domain" value="{{ settings.cf_team_domain or '' }}"
+             placeholder="yourteam.cloudflareaccess.com">
+      <span class="help">Only used by Cloudflare Access. The signing keys live under it.</span>
+    </div>
+    <div class="field">
+      <label for="cfa">Cloudflare application AUD</label>
+      <input id="cfa" name="cf_aud" value="{{ settings.cf_aud or '' }}"
+             placeholder="the Access application's Audience tag">
+      <span class="help">CouchElephant verifies the token Cloudflare sends against
+        this. The email header on its own is never trusted, so a request that
+        skips Cloudflare cannot claim to be you.</span>
+    </div>
+    <button class="primary">Save</button>
+    {% if not cf_ready %}
+      <span class="note">PyJWT is missing from this image, so Cloudflare Access
+        cannot be verified here.</span>
+    {% endif %}
+  </form>
+
+  {% if users %}
+  <table class="stack" style="margin-top:16px">
+    <tr><th>User</th><th>Role</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td><b>{{ u.username }}</b>{% if user and u.id == user.id %}
+        <span class="pill ok">you</span>{% endif %}</td>
+      <td class="tiny dim">{{ u.role }}</td>
+      <td style="text-align:right">
+        {% if not (user and u.id == user.id) %}
+        <form method="post" action="/settings/users/{{ u.id }}/delete" style="margin:0">
+          <button class="tiny danger">Remove</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% elif auth_mode != 'none' %}
+    <div class="empty tiny">No accounts yet. The next visitor is asked to create one.</div>
+  {% endif %}
+</div>
+
 {% if last_sync %}
 <div class="card">
   <h2 style="font-size:15px;margin:0 0 4px">Last sync</h2>

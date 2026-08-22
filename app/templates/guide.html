@@ -722,81 +722,106 @@
   // copied here that would go stale.
   var optState = null;
 
+  // One row per option. The little rectangle says whose feature it is, so the
+  // two systems read as one list rather than two lists the user has to join up.
+  function row(owner, id, label, control, hint, cls) {
+    return '<label class="optrow' + (cls ? ' ' + cls : '') + '" for="' + id + '">' +
+      '<i class="own ' + owner + '" title="' +
+        (owner === 'ce' ? 'CouchElephant feature' : 'Plex DVR feature') + '"></i>' +
+      '<span class="optlabel">' + esc(label) +
+        (hint ? '<span class="opthint">' + esc(hint) + '</span>' : '') + '</span>' +
+      control + '</label>';
+  }
+
   function field(st) {
-    var id = 'set_' + st.id, h = '';
-    h += '<label class="optrow" for="' + id + '">';
-    h += '<span class="optlabel">' + esc(st.label) + '</span>';
+    var id = 'set_' + st.id, c = '';
     if (st.options && st.options.length) {
-      h += '<select id="' + id + '" data-set="' + esc(st.id) + '">';
-      st.options.forEach(function (o) {
-        h += '<option value="' + esc(o.value) + '"' +
-             (String(o.value) === String(st.value) ? ' selected' : '') + '>' +
-             esc(o.label) + '</option>';
+      c += '<select id="' + id + '" data-set="' + esc(st.id) + '">';
+      st.options.forEach(function (op) {
+        c += '<option value="' + esc(op.value) + '"' +
+             (String(op.value) === String(st.value) ? ' selected' : '') + '>' +
+             esc(op.label) + '</option>';
       });
-      h += '</select>';
+      c += '</select>';
     } else if (st.type === 'bool') {
       var on = String(st.value) === 'true' || String(st.value) === '1';
-      h += '<input type="checkbox" id="' + id + '" data-set="' + esc(st.id) +
+      c += '<input type="checkbox" id="' + id + '" data-set="' + esc(st.id) +
            '" data-bool="1"' + (on ? ' checked' : '') + '>';
     } else if (st.type === 'int') {
-      h += '<input type="number" id="' + id + '" data-set="' + esc(st.id) +
+      c += '<input type="number" id="' + id + '" data-set="' + esc(st.id) +
            '" value="' + esc(st.value) + '">';
     } else {
-      h += '<input type="text" id="' + id + '" data-set="' + esc(st.id) +
+      c += '<input type="text" id="' + id + '" data-set="' + esc(st.id) +
            '" value="' + esc(st.value) + '">';
     }
-    return h + '</label>';
+    return row('plex', id, st.label, c);
   }
 
-  // Which side owns the recording. Plex settings map onto one Plex
-  // subscription; CouchElephant settings do not, so CouchElephant has to keep
-  // the rule and pin each airing itself. Saying which is about to happen is
-  // the point of the bar at the top.
-  function verdict() {
+  // A dropdown that takes more than one answer. It looks like the single
+  // choice ones next to it, and opens a list where every item has its own
+  // checkbox, because several can be true at once.
+  function multiField() {
     var t = optState.templates[optState.pick];
-    var limited = optState.nets.length || optState.chans.length;
-    if (limited && !t.one_shot) return 'ce';
-    return 'plex';
+    var picked = optState.nets.concat(optState.chans);
+    var summary = !picked.length ? 'Anywhere'
+      : picked.length <= 2 ? picked.join(', ')
+      : picked.length + ' selected';
+    var c = '<span class="multi' + (t.one_shot ? ' na' : '') + '" id="multi">' +
+      '<button type="button" class="multibtn" id="multibtn"' +
+        (t.one_shot ? ' disabled title="A single broadcast is already one channel ' +
+          'at one time, so there is nothing to narrow."' : '') + '>' +
+        '<span id="multisum">' + esc(summary) + '</span>' +
+        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+          'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
+          'stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>' +
+      '</button>' +
+      '<span class="multimenu" id="multimenu">' +
+        '<input class="multiq" id="multiq" placeholder="Search..." autocomplete="off">' +
+        '<span class="multibody" id="multibody"></span>' +
+      '</span></span>';
+    return row('ce', 'multibtn', 'Limit to networks or channels', c,
+               t.one_shot ? '' : 'Plex takes one channel. This takes as many as you like.',
+               'wide');
   }
 
-  function sourceChips() {
-    var h = '', picked = optState.nets.concat(optState.chans);
-    if (!picked.length) return '<span class="note">Anywhere in the guide.</span>';
-    picked.forEach(function (n) {
-      h += '<span class="srcchip on">' + esc(n) + '</span>';
+  function renderMulti() {
+    var body = document.getElementById('multibody');
+    if (!body) return;
+    var q = ((document.getElementById('multiq') || {}).value || '').toLowerCase();
+    var h = '';
+    function item(kind, value, label, note, on) {
+      return '<label class="multirow"><input type="checkbox" data-' + kind + '="' +
+        esc(value) + '"' + (on ? ' checked' : '') + '>' +
+        '<span class="mt">' + esc(label) + '</span>' +
+        (note ? '<span class="mn">' + esc(note) + '</span>' : '') + '</label>';
+    }
+    var nets = optState.opts.networks.filter(function (n) {
+      return !q || n.name.toLowerCase().indexOf(q) !== -1;
     });
-    return h;
-  }
-
-  function renderSourcePicker() {
-    var wrap = document.getElementById('srcbody');
-    if (!wrap) return;
-    var q = (document.getElementById('srcq') || {}).value || '';
-    q = q.toLowerCase();
-    var h = '<div class="srcsec">Networks</div><div class="srcrow">';
-    optState.opts.networks.forEach(function (n) {
-      if (q && n.name.toLowerCase().indexOf(q) === -1) return;
-      var on = optState.nets.indexOf(n.name) !== -1;
-      h += '<button type="button" class="srcchip' + (on ? ' on' : '') +
-           '" data-net="' + esc(n.name) + '" title="' + esc(n.channels.join(', ')) +
-           '">' + esc(n.name) + '</button>';
+    if (nets.length) {
+      h += '<span class="multisec">Networks</span>';
+      nets.forEach(function (n) {
+        h += item('net', n.name, n.name, n.channels.join(', '),
+                  optState.nets.indexOf(n.name) !== -1);
+      });
+    }
+    var chans = optState.opts.channels.filter(function (c) {
+      return !q || (c.vcn + ' ' + c.call_sign + ' ' + c.network).toLowerCase().indexOf(q) !== -1;
     });
-    h += '</div><div class="srcsec">Channels</div><div class="srcrow">';
-    optState.opts.channels.forEach(function (c) {
-      var hay = (c.vcn + ' ' + c.call_sign + ' ' + c.network).toLowerCase();
-      if (q && hay.indexOf(q) === -1) return;
-      var on = optState.chans.indexOf(c.vcn) !== -1;
-      h += '<button type="button" class="srcchip' + (on ? ' on' : '') +
-           '" data-ch="' + esc(c.vcn) + '" title="' + esc(c.call_sign) + '">' +
-           esc(c.vcn) + '</button>';
+    if (chans.length) {
+      h += '<span class="multisec">Channels</span>';
+      chans.forEach(function (c) {
+        h += item('ch', c.vcn, c.vcn + ' ' + c.call_sign, c.network,
+                  optState.chans.indexOf(c.vcn) !== -1);
+      });
+    }
+    if (!h) h = '<span class="multinone">Nothing matches.</span>';
+    body.innerHTML = h;
+    body.querySelectorAll('[data-net]').forEach(function (cb) {
+      cb.addEventListener('change', function () { toggle(optState.nets, cb.dataset.net); });
     });
-    h += '</div>';
-    wrap.innerHTML = h;
-    wrap.querySelectorAll('[data-net]').forEach(function (b) {
-      b.addEventListener('click', function () { toggle(optState.nets, b.dataset.net); });
-    });
-    wrap.querySelectorAll('[data-ch]').forEach(function (b) {
-      b.addEventListener('click', function () { toggle(optState.chans, b.dataset.ch); });
+    body.querySelectorAll('[data-ch]').forEach(function (cb) {
+      cb.addEventListener('change', function () { toggle(optState.chans, cb.dataset.ch); });
     });
   }
 
@@ -806,25 +831,36 @@
     paintOptions();
   }
 
-  // Only the parts that change are redrawn. Rebuilding the whole panel on
-  // every chip would close the picker under the user's finger.
+  // Which side owns the recording. Plex settings map onto one Plex
+  // subscription; CouchElephant settings do not, so CouchElephant has to keep
+  // the rule and pin each airing itself. Saying which is about to happen is
+  // the point of the bar at the top.
+  function verdict() {
+    var t = optState.templates[optState.pick];
+    return (optState.nets.length || optState.chans.length) && !t.one_shot ? 'ce' : 'plex';
+  }
+
+  // Only the parts that change are redrawn. Rebuilding the panel on every
+  // checkbox would close the dropdown under the user's finger.
   function paintOptions() {
     var v = verdict(), bar = document.getElementById('optbar');
-    var t = optState.templates[optState.pick];
     if (bar) {
       bar.className = 'optbar ' + v;
-      bar.innerHTML = v === 'ce'
-        ? '<b>CouchElephant schedule.</b> It watches the guide and books each ' +
-          'airing itself, because a Plex rule takes one channel and you have ' +
-          'named more than one source.'
-        : '<b>Plex schedule.</b> This becomes an ordinary Plex recording, and ' +
-          'Plex takes it from here.';
+      bar.innerHTML = '<i class="own ' + v + '"></i>' + (v === 'ce'
+        ? '<span><b>CouchElephant schedule.</b> It watches the guide and books ' +
+          'each airing itself, because a Plex rule takes one channel and you ' +
+          'have named more than one source.</span>'
+        : '<span><b>Plex schedule.</b> This becomes an ordinary Plex recording, ' +
+          'and Plex takes it from here.</span>');
     }
-    var sum = document.getElementById('srcsum');
-    if (sum) sum.innerHTML = sourceChips();
-    var cesec = document.getElementById('cesec');
-    if (cesec) cesec.classList.toggle('na', !!t.one_shot);
-    renderSourcePicker();
+    var picked = optState.nets.concat(optState.chans);
+    var sum = document.getElementById('multisum');
+    if (sum) {
+      sum.textContent = !picked.length ? 'Anywhere'
+        : picked.length <= 2 ? picked.join(', ') : picked.length + ' selected';
+    }
+    var btn = document.getElementById('multibtn');
+    if (btn) btn.classList.toggle('set', !!picked.length);
   }
 
   function renderOptions(o, prog, airingId) {
@@ -847,26 +883,16 @@
     });
     h += '</div>';
 
-    // CouchElephant's own options come first, because they are the reason to
-    // use this app rather than Plex's dialog.
-    h += '<div class="ovlsec ce" id="cesec"><h3><i class="tag ce"></i>CouchElephant options</h3>';
-    h += '<div class="optrow src"><span class="optlabel">Limit to</span>' +
-         '<span class="srcsum" id="srcsum"></span></div>';
-    h += '<input class="fsearch srcq" id="srcq" placeholder="Search networks and channels..." ' +
-         'autocomplete="off">';
-    h += '<div class="srcbody" id="srcbody"></div>';
-    h += '<div class="note nahint">A single broadcast is already fixed to one ' +
-         'channel and time, so a source limit only applies to the recurring ' +
-         'choices above.</div>';
-    h += '</div>';
-
-    h += '<div class="ovlsec plex"><h3><i class="tag plex"></i>Plex options</h3>';
+    h += '<div class="ovlsec"><h3>Options</h3>';
+    h += '<div class="ownkey"><span><i class="own ce"></i>CouchElephant</span>' +
+         '<span><i class="own plex"></i>Plex DVR</span></div>';
     if (t.one_shot) {
       h += '<div class="note" style="margin-bottom:10px">CouchElephant has already set ' +
            '<b>Limit to channel</b> and <b>Limit to airing time</b> to the broadcast ' +
            'you picked. That is what stops Plex choosing a repeat.</div>';
     }
     h += '<div class="optgrid">';
+    h += multiField();
     t.settings.forEach(function (st) { h += field(st); });
     h += '</div></div>';
 
@@ -880,13 +906,32 @@
     document.getElementById('optback').addEventListener('click', function () {
       window.openProgram(prog.airing_id || airingId);
     });
-    document.getElementById('srcq').addEventListener('input', renderSourcePicker);
     box.querySelectorAll('input[name=tpl]').forEach(function (r) {
       r.addEventListener('change', function () {
         optState.pick = +r.value;
         renderOptions(o, prog, airingId);
       });
     });
+
+    var mbtn = document.getElementById('multibtn'),
+        menu = document.getElementById('multimenu'),
+        mq = document.getElementById('multiq');
+    if (mbtn && !mbtn.disabled) {
+      mbtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        var open = menu.classList.toggle('open');
+        if (open) { renderMulti(); if (!coarse()) mq.focus(); }
+      });
+      mq.addEventListener('input', renderMulti);
+      // A label wraps the row, so a click inside the menu would re-fire the
+      // button it is labelled by and close the menu on every tick.
+      menu.addEventListener('click', function (e) { e.stopPropagation(); });
+      document.addEventListener('click', function (e) {
+        var m = document.getElementById('multi');
+        if (m && !m.contains(e.target)) menu.classList.remove('open');
+      });
+    }
+
     document.getElementById('optgo').addEventListener('click', function (e) {
       var vals = {};
       box.querySelectorAll('[data-set]').forEach(function (el) {
@@ -900,6 +945,10 @@
       }, e.target, airingId);
     });
     paintOptions();
+  }
+
+  function coarse() {
+    return window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
   }
 
   function openOptions(airingId, prog) {
