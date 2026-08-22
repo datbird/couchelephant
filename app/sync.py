@@ -51,15 +51,18 @@ def _upsert_channel(c, med, now):
     if not vcn:
         return
     c.execute(
-        """INSERT INTO channels (vcn, call_sign, title, identifier, thumb_url, updated_at)
-           VALUES (?,?,?,?,?,?)
+        """INSERT INTO channels (vcn, call_sign, title, network, identifier,
+                                 thumb_url, updated_at)
+           VALUES (?,?,?,?,?,?,?)
            ON CONFLICT(vcn) DO UPDATE SET
              call_sign=COALESCE(excluded.call_sign, channels.call_sign),
              title=COALESCE(excluded.title, channels.title),
+             network=COALESCE(excluded.network, channels.network),
              identifier=COALESCE(excluded.identifier, channels.identifier),
              thumb_url=COALESCE(excluded.thumb_url, channels.thumb_url),
              updated_at=excluded.updated_at""",
         (vcn, med.get("channelCallSign"), med.get("channelTitle"),
+         network_of(med.get("channelTitle")),
          med.get("channelIdentifier"), med.get("channelThumb"), now),
     )
 
@@ -233,6 +236,23 @@ def sync_teams(plex, provider, sports):
             )
         c.execute("DELETE FROM teams WHERE updated_at < ?", (now,))
     return len(rows)
+
+
+def network_of(title):
+    """The network a channel carries.
+
+    The guide names a channel `"41.1 KQGGDT (NBC)"`, and that trailing
+    parenthetical is the only affiliation Plex exposes. The tuner's own channel
+    list carries none, so this is the source.
+    """
+    if not title:
+        return None
+    a = title.rfind("(")
+    b = title.rfind(")")
+    if a == -1 or b < a:
+        return None
+    name = title[a + 1:b].strip()
+    return name or None
 
 
 def sync_channels(plex, dvr_key=None):

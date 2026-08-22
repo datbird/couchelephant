@@ -137,6 +137,9 @@ tr:hover td{background:var(--panel2)}
 .pill.ok{background:var(--ok-soft);border-color:var(--ok-bd);color:var(--ok-fg)}
 .pill.warn{background:var(--warn-soft);border-color:var(--warn-bd);color:var(--warn-fg)}
 .pill.bad{background:var(--bad-soft);border-color:var(--bad-bd);color:var(--bad-fg)}
+/* Whose feature, in the same two colours the guide and the record options use. */
+.pill.ce{background:var(--accent-soft);border-color:var(--accent-bd);color:var(--accent-ink)}
+.pill.plexsrc{background:var(--live-soft);border-color:var(--live);color:var(--live-dot)}
 .dim{color:var(--dim)}
 .chcell{white-space:nowrap;color:var(--dim);display:flex;align-items:center;gap:8px}
 .chlogo{width:46px;height:26px;object-fit:contain;flex:0 0 46px;
@@ -333,9 +336,55 @@ tr:hover td{background:var(--panel2)}
   flex:0 1 auto;max-width:58%;padding:5px 8px;font-size:13px}
 .optrow input[type=number]{width:82px}
 .optrow input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto}
+/* Whose feature is this. Amber is CouchElephant throughout the app, and the
+   blue-grey is the one the guide already uses for Plex's own recordings, so
+   the two pages teach the same colour. */
+.tag{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;
+  vertical-align:middle}
+.tag.ce{background:var(--accent)}
+.tag.plex{background:var(--live-dot)}
+.ovlsec.ce{border-left:3px solid var(--accent)}
+.ovlsec.plex{border-left:3px solid var(--live)}
+
+/* The verdict. Which system ends up owning this recording, said before the
+   user presses the button rather than discovered afterwards. */
+.optbar{padding:11px 22px;font-size:13px;line-height:1.45;
+  border-bottom:1px solid var(--line)}
+.optbar.plex{background:var(--live-soft);color:var(--text);
+  box-shadow:inset 3px 0 0 var(--live)}
+.optbar.ce{background:var(--accent-soft);color:var(--text);
+  box-shadow:inset 3px 0 0 var(--accent)}
+
+/* Limit to: a set of networks or channels, which is a CouchElephant idea.
+   Plex's own "Limit to channel" takes exactly one. */
+.srcsum{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end;max-width:70%}
+.optrow.src{align-items:flex-start}
+.srcq{width:100%;margin:10px 0 8px}
+.srcbody{max-height:190px;overflow:auto;border:1px solid var(--line);
+  border-radius:7px;padding:8px;background:var(--panel2)}
+.srcsec{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--dim);
+  margin:2px 0 6px}
+.srcsec+.srcrow{margin-bottom:10px}
+.srcrow{display:flex;flex-wrap:wrap;gap:5px}
+.srcchip{font-size:12px;padding:3px 9px;border-radius:12px;cursor:pointer;
+  border:1px solid var(--line);background:var(--panel);color:var(--dim)}
+.srcchip:hover{color:var(--text);border-color:var(--hover-bd)}
+.srcchip.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent);
+  font-weight:600}
+/* A single broadcast is already one channel at one time, so the limit has
+   nothing to narrow. Shown, greyed, with the reason. */
+.ovlsec.ce .nahint{display:none}
+.ovlsec.ce.na .srcq,.ovlsec.ce.na .srcbody,.ovlsec.ce.na .optrow.src{opacity:.42;
+  pointer-events:none}
+.ovlsec.ce.na .nahint{display:block;margin-top:9px}
+
 @media (max-width:700px){
   .optgrid{grid-template-columns:1fr}
   .pickrow .note{display:none}
+  .optbar{padding:11px 16px}
+  .srcsum{max-width:100%;justify-content:flex-start}
+  .optrow.src{flex-direction:column;align-items:flex-start;gap:6px}
+  .srcbody{max-height:160px}
 }
 /* The result of pressing Record. It used to be dim grey at the bottom of a
    scrollable panel, which is indistinguishable from nothing happening. */

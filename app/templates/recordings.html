@@ -23,6 +23,11 @@
 {% block body %}
 <h1>Recordings</h1>
 <div class="sub">Every schedule on this server, whichever of us created it.</div>
+{# The same two colours the record options use, so the pages teach one thing. #}
+<div class="legend">
+  <span><i class="ce"></i> CouchElephant keeps the rule and books each airing</span>
+  <span><i class="plex"></i> Plex holds the rule and picks the airings</span>
+</div>
 
 <div class="card">
   <div class="row" style="justify-content:space-between;align-items:baseline">
@@ -43,8 +48,9 @@
       <td>{{ kindicon(r.kind) }}</td>
       <td><b>{{ r.title }}</b>{% if not r.enabled %} <span class="pill">paused</span>{% endif %}</td>
       <td class="tiny dim">{{ r.detail }}</td>
-      <td>{% if r.source == 'ce' %}<span class="pill ok">CouchElephant</span>
-          {% else %}<span class="pill">Plex</span>{% endif %}</td>
+      <td>{% if r.source == 'ce' %}<span class="pill ce">CouchElephant</span>
+          {% else %}<span class="pill plexsrc">Plex</span>{% endif %}
+          {% if r.limited %}<span class="pill ce" title="Plex rules take one channel. CouchElephant books each airing itself.">source limit</span>{% endif %}</td>
       <td style="text-align:right;white-space:nowrap">
         {% if r.pass_id %}
         <form method="post" action="/passes/{{ r.pass_id }}/toggle" style="display:inline;margin:0">
@@ -104,8 +110,8 @@
         {% if g.parent_title %}<span class="dim tiny">{{ g.parent_title }}</span><br>{% endif %}
         <b>{{ g.title }}</b>
       </td>
-      <td>{% if g.source == 'ce' %}<span class="pill ok">CouchElephant</span>
-          {% else %}<span class="pill">Plex</span>{% endif %}</td>
+      <td>{% if g.source == 'ce' %}<span class="pill ce">CouchElephant</span>
+          {% else %}<span class="pill plexsrc">Plex</span>{% endif %}</td>
       <td>
         {% if g.status == 'scheduled' %}<span class="pill">scheduled</span>
         {% elif g.status == 'inprogress' %}<span class="pill live">recording</span>

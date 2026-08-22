@@ -106,12 +106,20 @@ CREATE TABLE IF NOT EXISTS plex_grabs (
 -- Ours. A pass says "follow this team"; the scheduler turns it into pinned
 -- one-shot recordings on the airing we choose.
 CREATE TABLE IF NOT EXISTS passes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind        TEXT NOT NULL DEFAULT 'team',
-    team_id     INTEGER,
-    team_name   TEXT,
-    enabled     INTEGER DEFAULT 1,
-    created_at  INTEGER
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind         TEXT NOT NULL DEFAULT 'team',
+    team_id      INTEGER,
+    team_name    TEXT,
+    -- A series rule follows one programme rather than a team.
+    series_guid  TEXT,
+    series_title TEXT,
+    -- Two allowlists, JSON lists. Empty or null on both means anywhere. Set
+    -- either and an airing has to match one of them, which is how "only ABC,
+    -- CBS and FOX" is said. Plex has no equivalent: its rules take one channel.
+    networks     TEXT,
+    channels     TEXT,
+    enabled      INTEGER DEFAULT 1,
+    created_at   INTEGER
 );
 
 -- Audit trail. Every decision is written here, including the ones we skipped
@@ -205,6 +213,14 @@ MIGRATIONS = [
     # The Plex subscription a recording of ours created, so it can be cancelled
     # again from the same place it was scheduled.
     ("our_grabs", "subscription", "TEXT"),
+    # The network a channel carries, pulled out of the guide's channel title.
+    ("channels", "network", "TEXT"),
+    # A rule can be limited to a set of networks, which Plex cannot express:
+    # its own rules take one channel or none.
+    ("passes", "networks", "TEXT"),
+    ("passes", "channels", "TEXT"),
+    ("passes", "series_guid", "TEXT"),
+    ("passes", "series_title", "TEXT"),
 ]
 
 

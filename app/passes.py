@@ -28,23 +28,69 @@ def _now():
     return int(time.time())
 
 
-def candidate_airings(team_id, horizon_days=30):
-    """Future airings of games featuring this team, newest guide data only."""
+def _future_airings(horizon_days=30):
     cutoff = _now() - LEAD_SECONDS
     limit = _now() + horizon_days * 86400
-    rows = db.query(
-        """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary
-           FROM airings a JOIN programs p ON p.guid = a.program_guid
+    return db.query(
+        """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary,
+                  c.network AS channel_network
+           FROM airings a
+           JOIN programs p ON p.guid = a.program_guid
+           LEFT JOIN channels c ON c.vcn = a.channel_vcn
            WHERE a.begins_at BETWEEN ? AND ?
            ORDER BY a.begins_at""",
         (cutoff, limit),
     )
+
+
+def candidate_airings(team_id, horizon_days=30):
+    """Future airings of games featuring this team, newest guide data only."""
     out = []
-    for r in rows:
+    for r in _future_airings(horizon_days):
         teams = db.unjs(r["teams"])
         if any(int(t.get("id") or -1) == int(team_id) for t in teams):
             out.append(r)
     return out
+
+
+def series_airings(series_guid, horizon_days=30):
+    """Future airings of one programme, wherever it turns up.
+
+    Matched on the show rather than the episode, so a rule follows the series
+    across every episode the guide holds.
+    """
+    out = []
+    for r in _future_airings(horizon_days):
+        if r["program_guid"] == series_guid or r["grandparent_title"] == series_guid:
+            out.append(r)
+    return out
+
+
+def rule_airings(rule, horizon_days=30):
+    """Everything a rule could record, before the source limit is applied."""
+    if rule["kind"] == "series":
+        return series_airings(rule["series_guid"] or rule["series_title"], horizon_days)
+    return candidate_airings(rule["team_id"], horizon_days)
+
+
+def allowed_sources(rule):
+    """The networks and channels a rule accepts. Empty means anywhere."""
+    return (db.unjs(rule["networks"]) or [], db.unjs(rule["channels"]) or [])
+
+
+def in_sources(row, networks, channels):
+    """True when this broadcast comes from somewhere the rule accepts.
+
+    The two lists are one allowlist, not two filters that both have to pass.
+    Naming a network and a channel means "either of these", which is what a
+    person means by "only ABC, CBS and channel 41.1".
+    """
+    if not networks and not channels:
+        return True
+    if row["channel_vcn"] in channels:
+        return True
+    net = row["channel_network"] if "channel_network" in row.keys() else None
+    return bool(net and net in networks)
 
 
 def choose_airing(airings):
@@ -183,6 +229,10 @@ def forget(airing_id):
         c.execute("DELETE FROM our_grabs WHERE airing_id = ?", (airing_id,))
 
 
+def rule_label(rule):
+    return rule["team_name"] or rule["series_title"] or "rule"
+
+
 def run_passes(force_dry_run=None):
     """Evaluate every enabled pass. Returns a list of decision dicts."""
     dry = db.get_setting("dry_run") == "1" if force_dry_run is None else force_dry_run
@@ -196,36 +246,51 @@ def run_passes(force_dry_run=None):
         plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
 
     for p in rows:
-        games = group_by_game(candidate_airings(p["team_id"]))
+        label = rule_label(p)
+        networks, channels = allowed_sources(p)
+        games = group_by_game(rule_airings(p))
         for guid, airings in games.items():
-            pick, reason = choose_airing(airings)
-            if not pick:
+            # The source limit is applied before the choice, not after, so the
+            # rule picks the best airing among the ones it is allowed to use
+            # rather than picking first and then finding it disallowed.
+            allowed = [a for a in airings if in_sources(a, networks, channels)]
+            if not allowed:
+                where = " or ".join(networks + channels)
+                reason = f"no airing is on {where}"
                 _log(p["id"], airings[0], "skipped", reason, dry)
-                results.append({"pass": p["team_name"], "game": airings[0]["title"],
+                results.append({"pass": label, "game": airings[0]["title"],
+                                "action": "skipped", "reason": reason})
+                continue
+            pick, reason = choose_airing(allowed)
+            if networks or channels:
+                reason += f", limited to {' or '.join(networks + channels)}"
+            if not pick:
+                _log(p["id"], allowed[0], "skipped", reason, dry)
+                results.append({"pass": label, "game": allowed[0]["title"],
                                 "action": "skipped", "reason": reason})
                 continue
             blocked = already_handled(guid, pick["id"])
             if blocked:
-                results.append({"pass": p["team_name"], "game": pick["title"],
+                results.append({"pass": label, "game": pick["title"],
                                 "action": "skipped", "reason": blocked,
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
                 continue
             if dry:
                 _log(p["id"], pick, "would schedule", reason, True)
-                results.append({"pass": p["team_name"], "game": pick["title"],
+                results.append({"pass": label, "game": pick["title"],
                                 "action": "would schedule", "reason": reason,
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
                 continue
             try:
                 _schedule(plex, pick, None)
                 _log(p["id"], pick, "scheduled", reason, False)
-                results.append({"pass": p["team_name"], "game": pick["title"],
+                results.append({"pass": label, "game": pick["title"],
                                 "action": "scheduled", "reason": reason,
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
             except Exception as e:
                 msg = f"{type(e).__name__}: {e}"
                 _log(p["id"], pick, "failed", msg, False)
-                results.append({"pass": p["team_name"], "game": pick["title"],
+                results.append({"pass": label, "game": pick["title"],
                                 "action": "failed", "reason": msg,
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
     return results

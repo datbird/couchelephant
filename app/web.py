@@ -291,7 +291,7 @@ def _enum(raw):
 
 def _airing_row(airing_id):
     return db.one(
-        """SELECT a.*, p.rating_key, p.title, p.guid AS program_guid_full
+        """SELECT a.*, p.rating_key, p.title, p.grandparent_title, p.teams
            FROM airings a JOIN programs p ON p.guid = a.program_guid
            WHERE a.id = ?""", (airing_id,))
 
@@ -339,16 +339,86 @@ async def api_record_options(airing_id: str):
             "index": i, "title": title, "type": s_.get("type"),
             "one_shot": one_shot, "settings": settings,
         })
+    # Where a recording could come from. Networks first, because "only ABC,
+    # CBS and FOX" is how people say it; channels are the finer grain.
+    nets, chans = {}, []
+    for c in db.query("SELECT vcn, call_sign, network FROM channels "
+                      "ORDER BY CAST(vcn AS REAL)"):
+        if c["network"]:
+            nets.setdefault(c["network"], []).append(c["vcn"])
+        chans.append({"vcn": c["vcn"], "call_sign": c["call_sign"] or "",
+                      "network": c["network"] or ""})
     return JSONResponse({
         "ok": True, "title": row["title"], "templates": out,
         "dry_run": db.get_setting("dry_run") == "1",
+        "networks": [{"name": n, "channels": v} for n, v in
+                     sorted(nets.items(), key=lambda kv: kv[0].lower())],
+        "channels": chans,
+    })
+
+
+def _make_ce_rule(row, chosen, nets, chans):
+    """Take over a recurring choice that Plex cannot express.
+
+    Plex's team and series rules accept one channel. Several networks, or
+    several channels, needs someone to watch the guide and pin each airing, so
+    CouchElephant keeps the rule and does that itself.
+    """
+    title = chosen.get("title") or ""
+    # A team template names the team it follows: "All Kansas City Chiefs Events".
+    team = None
+    for t in db.unjs(row["teams"]) or []:
+        if t.get("name") and t["name"] in title:
+            team = t
+            break
+    if team:
+        existing = db.one("SELECT id FROM passes WHERE kind='team' AND team_id = ?",
+                          (team["id"],))
+        with db.tx() as c:
+            if existing:
+                c.execute("UPDATE passes SET networks=?, channels=?, enabled=1 WHERE id=?",
+                          (db.js(nets), db.js(chans), existing["id"]))
+            else:
+                c.execute("INSERT INTO passes (kind, team_id, team_name, networks, "
+                          "channels, enabled, created_at) VALUES ('team',?,?,?,?,1,?)",
+                          (team["id"], team["name"], db.js(nets), db.js(chans),
+                           int(time.time())))
+        label = team["name"]
+    else:
+        series = row["grandparent_title"] or row["title"]
+        existing = db.one("SELECT id FROM passes WHERE kind='series' AND series_title = ?",
+                          (series,))
+        with db.tx() as c:
+            if existing:
+                c.execute("UPDATE passes SET networks=?, channels=?, enabled=1 WHERE id=?",
+                          (db.js(nets), db.js(chans), existing["id"]))
+            else:
+                c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
+                          "channels, enabled, created_at) VALUES ('series',?,?,?,?,1,?)",
+                          (series, series, db.js(nets), db.js(chans), int(time.time())))
+        label = series
+
+    done = passes.run_passes()
+    made = len([d for d in done if d["action"] == "scheduled"])
+    where = " or ".join(nets + chans)
+    return JSONResponse({
+        "ok": True, "ce_rule": True,
+        "message": (f"CouchElephant is following {label}, only from {where}. "
+                    f"{made} upcoming airing(s) scheduled."),
     })
 
 
 @app.post("/api/record")
 async def api_record(airing_id: str = Form(...), template: int = Form(0),
-                     settings: str = Form("")):
-    """Schedule this broadcast with the options the user chose."""
+                     settings: str = Form(""), networks: str = Form(""),
+                     channels: str = Form("")):
+    """Schedule this broadcast with the options the user chose.
+
+    A source limit across several networks or channels is something Plex cannot
+    express: its own rules take one channel or none. When one is set on a
+    recurring choice, CouchElephant keeps the rule itself and pins each airing
+    as it comes, rather than handing Plex a rule that would ignore the limit.
+    """
     if db.get_setting("dry_run") == "1":
         return JSONResponse({"ok": False, "error":
                              "Preview mode is on. Turn it off in Settings to record."},
@@ -360,17 +430,23 @@ async def api_record(airing_id: str = Form(...), template: int = Form(0),
         return JSONResponse({"ok": False, "error":
                              "This airing is DRM encrypted and cannot be recorded."},
                             status_code=400)
+    nets = db.unjs(networks, []) or []
+    chans = db.unjs(channels, []) or []
     try:
         plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
         options = await asyncio.to_thread(passes.templates, plex, row)
         if not options:
             raise PlexError("Plex offered no recording options")
         chosen = options[template] if 0 <= template < len(options) else options[0]
+        one_shot = (chosen.get("title") or "").lower().startswith("this ")
+
+        if (nets or chans) and not one_shot:
+            return await asyncio.to_thread(_make_ce_rule, row, chosen, nets, chans)
 
         prefs = dict(db.unjs(settings, {}) or {})
         # oneShot is never shown, and it is what separates one game from every
         # future airing of the same programme. It follows the template.
-        prefs["oneShot"] = "1" if (chosen.get("title") or "").lower().startswith("this ") else "0"
+        prefs["oneShot"] = "1" if one_shot else "0"
         prefs = {k: v for k, v in prefs.items() if v is not None}
 
         await asyncio.to_thread(passes._schedule, plex, row, None, "manual", chosen, prefs)
@@ -493,11 +569,19 @@ def recordings(request: Request):
 
     # Our own team passes. These are rules in the same sense: they keep
     # matching new games without being asked again.
-    for p in db.query("SELECT * FROM passes ORDER BY team_name"):
+    for p in db.query("SELECT * FROM passes ORDER BY COALESCE(team_name, series_title)"):
+        nets = db.unjs(p["networks"]) or []
+        chans = db.unjs(p["channels"]) or []
+        bits = ["Always from the live broadcast"]
+        if nets or chans:
+            bits.append("only on " + ", ".join(nets + chans))
         rules.append({
-            "kind": "sports", "source": "ce", "pass_id": p["id"],
-            "enabled": p["enabled"], "title": p["team_name"],
-            "detail": "Every game, always from the live broadcast",
+            "kind": "sports" if p["kind"] == "team" else "series",
+            "source": "ce", "pass_id": p["id"],
+            "enabled": p["enabled"],
+            "title": p["team_name"] or p["series_title"],
+            "detail": ". ".join(bits),
+            "limited": bool(nets or chans),
         })
 
     # Plex's own rules. A one-shot is a single recording rather than a rule, so
@@ -517,7 +601,7 @@ def recordings(request: Request):
             "kind": "sports" if str(s_["type"]) == "15" else "series",
             "source": "ce" if s_["owned_by_us"] else "plex",
             "pass_id": None, "enabled": 1, "title": s_["title"],
-            "detail": ", ".join(bits),
+            "detail": ", ".join(bits), "limited": False,
         })
 
     # Individual recordings. A grab counts as sport when the programme it comes
@@ -538,13 +622,18 @@ def recordings(request: Request):
     # bug the whole app exists to fix.
     upcoming = []
     for p in db.query("SELECT * FROM passes WHERE enabled = 1"):
-        for guid, airings in passes.group_by_game(
-                passes.candidate_airings(p["team_id"])).items():
-            pick, reason = passes.choose_airing(airings)
+        nets, chans = passes.allowed_sources(p)
+        for guid, airings in passes.group_by_game(passes.rule_airings(p)).items():
+            allowed = [a for a in airings if passes.in_sources(a, nets, chans)]
+            if not allowed:
+                continue
+            pick, reason = passes.choose_airing(allowed)
             if not pick:
                 continue
+            if nets or chans:
+                reason += ", limited to " + " or ".join(nets + chans)
             upcoming.append({
-                "team": p["team_name"], "title": pick["title"],
+                "team": passes.rule_label(p), "title": pick["title"],
                 "grandparent": pick["grandparent_title"],
                 "channel": f'{pick["channel_vcn"]} {pick["channel_call_sign"] or ""}'.strip(),
                 "begins_at": pick["begins_at"], "reason": reason,
