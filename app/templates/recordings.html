@@ -1,25 +1,6 @@
 {% extends "base.html" %}{% set nav='recordings' %}
 {% block title %}Recordings - CouchElephant{% endblock %}
 
-{# One icon set for the whole page. A trophy means the schedule came from
-   following a team; the screen means an ordinary series or single programme. #}
-{% macro kindicon(kind) -%}
-{%- if kind == 'sports' -%}
-<span class="kind sports" title="Sports pass">
-  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-       stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/>
-    <path d="M7 6H4v1a4 4 0 0 0 3.4 3.9M17 6h3v1a4 4 0 0 1-3.4 3.9"/>
-    <path d="M12 14v3M9 20h6M10 17h4l.5 3h-5z"/></svg></span>
-{%- else -%}
-<span class="kind series" title="Scheduled programme">
-  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
-       stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="2.5" y="6" width="19" height="13" rx="2"/>
-    <path d="M8 2.8L12 6l4-3.2"/></svg></span>
-{%- endif -%}
-{%- endmacro %}
-
 {% block body %}
 <div class="pagehead">
   <div>
@@ -76,40 +57,8 @@
 </div>
 
 <script>
-// Shared helpers for this page.
-function esc(t) {
-  return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
-    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
-  });
-}
-function fmtTime(ts) {
-  var d = new Date(ts * 1000), h = d.getHours() % 12 || 12, m = d.getMinutes();
-  return h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
-}
-function fmtDay(ts) {
-  var d = new Date(ts * 1000), t = new Date();
-  var same = function (a, b) { return a.toDateString() === b.toDateString(); };
-  var tm = new Date(t.getTime() + 86400000);
-  if (same(d, t)) return 'Today';
-  if (same(d, tm)) return 'Tomorrow';
-  return d.toLocaleDateString(undefined,
-    {weekday: 'long', month: 'long', day: 'numeric'});
-}
-var KIND_ICON = {
-  sports: '<span class="kind sports" title="From a sports pass">' +
-    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"' +
-    ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/>' +
-    '<path d="M7 6H4v1a4 4 0 0 0 3.4 3.9M17 6h3v1a4 4 0 0 1-3.4 3.9"/>' +
-    '<path d="M12 14v3M9 20h6M10 17h4l.5 3h-5z"/></svg></span>',
-  series: '<span class="kind series" title="A programme"><svg viewBox="0 0 24 24"' +
-    ' width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"' +
-    ' stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19"' +
-    ' height="13" rx="2"/><path d="M8 2.8L12 6l4-3.2"/></svg></span>',
-  one: '<span class="kind series" title="One broadcast"><svg viewBox="0 0 24 24"' +
-    ' width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">' +
-    '<circle cx="12" cy="12" r="6"/></svg></span>'
-};
+// Helpers and the kind icons are shared. See static/js/ce.js.
+var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_ICON;
 
 // ---- sub-tabs: Schedule and Passes ----
 (function () {
@@ -391,7 +340,10 @@ var KIND_ICON = {
   if (!opener || !ovl || !box) return;
 
   var st = {kind: 'team', team: null, series: null, nets: [], chans: [],
-            src: null, tpl: null, pick: 0, editing: null, q: ''};
+            tpl: null, pick: 0, editing: null, q: ''};
+  // One picker, kept across panel rebuilds so its fetched list is not
+  // re-requested every time the panel redraws.
+  st.picker = new CE.SourcePicker(st, paint);
 
   function shut() { ovl.classList.remove('show'); box.innerHTML = ''; }
   ovl.addEventListener('click', function (e) { if (e.target === ovl) shut(); });
@@ -413,14 +365,7 @@ var KIND_ICON = {
       lbl.textContent = chosenName() || 'nothing yet';
       lbl.classList.toggle('set', !!chosen());
     }
-    var picked = st.nets.concat(st.chans);
-    var sum = document.getElementById('multisum');
-    if (sum) {
-      sum.textContent = !picked.length ? 'Anywhere'
-        : picked.length <= 2 ? picked.join(', ') : picked.length + ' selected';
-    }
-    var mb = document.getElementById('multibtn');
-    if (mb) mb.classList.toggle('set', !!picked.length);
+    st.picker.paint();
     var go = document.getElementById('rgo');
     if (go) go.disabled = !st.editing && !chosen();
     var bar = document.getElementById('optbar');
@@ -470,19 +415,8 @@ var KIND_ICON = {
   }
 
   function multiField() {
-    var picked = st.nets.concat(st.chans);
-    var summary = !picked.length ? 'Anywhere'
-      : picked.length <= 2 ? picked.join(', ') : picked.length + ' selected';
-    var c = '<span class="multi" id="multi">' +
-      '<button type="button" class="multibtn" id="multibtn">' +
-        '<span id="multisum">' + esc(summary) + '</span>' +
-        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
-          'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
-          'stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>' +
-      '<span class="multimenu" id="multimenu">' +
-        '<input class="multiq" id="multiq" placeholder="Search..." autocomplete="off">' +
-        '<span class="multibody" id="multibody"></span></span></span>';
-    return row('ce', 'multibtn', 'Limit to networks or channels', c,
+    return row('ce', 'multibtn', 'Limit to networks or channels',
+               st.picker.html(),
                'Plex takes one channel. This takes as many as you like.', 'wide');
   }
 
@@ -565,7 +499,7 @@ var KIND_ICON = {
       q.addEventListener('input', function () { st.q = q.value; search(st.q); });
       search(st.q);
     }
-    wireMulti();
+    st.picker.wire();
     document.getElementById('rgo').addEventListener('click', create);
     paint();
   }
@@ -578,6 +512,14 @@ var KIND_ICON = {
     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
       st.tpl = d.ok ? d.templates : null;
       st.pick = 0;
+      // Show what this pass already saved, not Plex's defaults.
+      if (st.tpl && st.editing && st.editing.prefs) {
+        st.tpl.forEach(function (t) {
+          t.settings.forEach(function (stg) {
+            if (stg.id in st.editing.prefs) stg.value = st.editing.prefs[stg.id];
+          });
+        });
+      }
       render();
       if (!d.ok) {
         var m = document.getElementById('ovlmsg');
@@ -634,74 +576,6 @@ var KIND_ICON = {
     }, 180);
   }
 
-  function placeMenu(btn, menu) {
-    requestAnimationFrame(function () {
-      menu.classList.remove('up');
-      var panel = menu.closest('.ovlbox') || document.documentElement;
-      var room = panel.getBoundingClientRect().bottom - btn.getBoundingClientRect().bottom;
-      if (room < menu.offsetHeight + 16) menu.classList.add('up');
-    });
-  }
-
-  function wireMulti() {
-    var btn = document.getElementById('multibtn'), menu = document.getElementById('multimenu'),
-        mq = document.getElementById('multiq');
-    if (!btn) return;
-    btn.addEventListener('click', function (e) {
-      e.preventDefault();
-      if (menu.classList.toggle('open')) {
-        if (!st.src) {
-          fetch('/api/sources').then(function (r) { return r.json(); })
-            .then(function (d) { st.src = d; renderMulti(); placeMenu(btn, menu); });
-        } else { renderMulti(); placeMenu(btn, menu); }
-      }
-    });
-    mq.addEventListener('input', function () { renderMulti(); placeMenu(btn, menu); });
-    menu.addEventListener('click', function (e) { e.stopPropagation(); });
-    document.addEventListener('click', function (e) {
-      var m = document.getElementById('multi');
-      if (m && !m.contains(e.target)) menu.classList.remove('open');
-    });
-  }
-
-  function renderMulti() {
-    var body = document.getElementById('multibody');
-    if (!body || !st.src) return;
-    var q = ((document.getElementById('multiq') || {}).value || '').toLowerCase(), h = '';
-    function item(kind, value, label, note, on) {
-      return '<label class="multirow"><input type="checkbox" data-' + kind + '="' +
-        esc(value) + '"' + (on ? ' checked' : '') + '><span class="mt">' + esc(label) +
-        '</span>' + (note ? '<span class="mn">' + esc(note) + '</span>' : '') + '</label>';
-    }
-    var nets = st.src.networks.filter(function (n) {
-      return !q || n.name.toLowerCase().indexOf(q) !== -1; });
-    if (nets.length) {
-      h += '<span class="multisec">Networks</span>';
-      nets.forEach(function (n) {
-        h += item('net', n.name, n.name, n.channels.join(', '),
-                  st.nets.indexOf(n.name) !== -1); });
-    }
-    var chans = st.src.channels.filter(function (c) {
-      return !q || (c.vcn + ' ' + c.call_sign + ' ' + c.network).toLowerCase().indexOf(q) !== -1; });
-    if (chans.length) {
-      h += '<span class="multisec">Channels</span>';
-      chans.forEach(function (c) {
-        h += item('ch', c.vcn, c.vcn + ' ' + c.call_sign, c.network,
-                  st.chans.indexOf(c.vcn) !== -1); });
-    }
-    body.innerHTML = h || '<span class="multinone">Nothing matches.</span>';
-    body.querySelectorAll('[data-net]').forEach(function (cb) {
-      cb.addEventListener('change', function () { flip(st.nets, cb.dataset.net); }); });
-    body.querySelectorAll('[data-ch]').forEach(function (cb) {
-      cb.addEventListener('change', function () { flip(st.chans, cb.dataset.ch); }); });
-  }
-
-  function flip(list, v) {
-    var i = list.indexOf(v);
-    if (i === -1) list.push(v); else list.splice(i, 1);
-    paint();
-  }
-
   function create(e) {
     var btn = e.target, msg = document.getElementById('ovlmsg');
     var back = st.editing ? 'Save pass' : 'Create schedule';
@@ -714,6 +588,7 @@ var KIND_ICON = {
     var body = st.editing
       ? new URLSearchParams({networks: JSON.stringify(st.nets),
                              channels: JSON.stringify(st.chans),
+                             settings: JSON.stringify(vals),
                              enabled: st.editing.enabled ? '1' : '0'})
       : new URLSearchParams({
           kind: st.kind,
@@ -725,10 +600,7 @@ var KIND_ICON = {
           settings: JSON.stringify(vals)
         });
     fetch(url, {method: 'POST', body: body})
-      .then(function (r) { return r.text().then(function (t) {
-        var j; try { j = JSON.parse(t); }
-        catch (err) { j = {ok: false, error: 'HTTP ' + r.status + ': ' + t.slice(0, 200)}; }
-        return j; }); })
+      .then(CE.readJson)
       .then(function (j) {
         msg.className = 'note said ' + (j.ok ? 'ok' : 'bad');
         msg.textContent = j.message || j.error || '';
@@ -743,8 +615,9 @@ var KIND_ICON = {
   }
 
   opener.addEventListener('click', function () {
-    st = {kind: 'team', team: null, series: null, nets: [], chans: [],
-          src: st.src, tpl: null, pick: 0, editing: null, q: ''};
+    st.kind = 'team'; st.team = null; st.series = null; st.editing = null;
+    st.tpl = null; st.pick = 0; st.q = '';
+    st.nets.length = 0; st.chans.length = 0;
     ovl.classList.add('show'); render();
   });
 
@@ -754,12 +627,17 @@ var KIND_ICON = {
     fetch('/api/rules').then(function (r) { return r.json(); }).then(function (d) {
       var r = (d.rules || []).filter(function (x) { return String(x.id) === String(id); })[0];
       if (!r) return;
-      st = {kind: r.kind === 'team' ? 'team' : 'series',
-            team: r.kind === 'team' ? {id: r.team_id, name: r.title} : null,
-            series: r.kind === 'team' ? null : r.title,
-            nets: r.networks.slice(), chans: r.channels.slice(),
-            src: st.src, tpl: null, pick: 0, editing: r, q: ''};
+      st.kind = r.kind === 'team' ? 'team' : 'series';
+      st.team = r.kind === 'team' ? {id: r.team_id, name: r.title} : null;
+      st.series = r.kind === 'team' ? null : r.title;
+      st.tpl = null; st.pick = 0; st.editing = r; st.q = '';
+      st.nets.length = 0; st.chans.length = 0;
+      r.networks.forEach(function (n) { st.nets.push(n); });
+      r.channels.forEach(function (c) { st.chans.push(c); });
       ovl.classList.add('show'); render();
+      // Plex's own settings are editable after creation too, so the panel
+      // fetches them and fills in what the pass already carries.
+      loadTemplates();
     });
   };
 })();

@@ -116,20 +116,27 @@ def group_by_game(rows):
     return games
 
 
-def already_handled(program_guid, airing_id):
-    """True if we, or Plex, already have this game covered."""
+def already_handled(program_guid):
+    """Why this game needs no booking, or None.
+
+    Matching Plex's grabs by title alone treated any programme that keeps its
+    title, a daily news or quiz show, as already covered forever. A broadcast
+    is identified by its channel and start time, so the check is against the
+    times this programme actually airs.
+    """
     mine = db.one(
         "SELECT 1 FROM pass_actions WHERE program_guid = ? AND action = 'scheduled' "
         "AND dry_run = 0 LIMIT 1", (program_guid,))
     if mine:
         return "already scheduled by a pass"
-    prog = db.one("SELECT title FROM programs WHERE guid = ?", (program_guid,))
-    if prog:
-        hit = db.one(
-            "SELECT status FROM plex_grabs WHERE title = ? AND status IN "
-            "('scheduled','inprogress','complete') LIMIT 1", (prog["title"],))
-        if hit:
-            return f"Plex already has it ({hit['status']})"
+    hit = db.one(
+        """SELECT g.status FROM plex_grabs g
+           JOIN airings a ON a.channel_vcn = g.channel_vcn AND a.begins_at = g.begins_at
+           WHERE a.program_guid = ?
+             AND g.status IN ('scheduled','inprogress','complete')
+           LIMIT 1""", (program_guid,))
+    if hit:
+        return f"Plex already has it ({hit['status']})"
     return None
 
 
@@ -199,7 +206,9 @@ def _schedule(plex, row, target_section, source="pass", template=None, prefs=Non
     # Plex answers 200 and hands back a key, then sometimes drops the
     # subscription by itself. Reporting a recording it did not keep is worse
     # than failing, so check before claiming anything.
-    if key and not plex.subscription_exists(key):
+    # `is False` on purpose. None means the check could not be made, and a
+    # network blip must not be reported as "Plex discarded your recording".
+    if key and plex.subscription_exists(key) is False:
         raise PlexError(
             "Plex accepted the recording and then discarded it. That usually "
             "means it already has this episode, or the airing is a repeat and "
@@ -275,7 +284,7 @@ def run_passes(force_dry_run=None):
                 results.append({"pass": label, "game": allowed[0]["title"],
                                 "action": "skipped", "reason": reason})
                 continue
-            blocked = already_handled(guid, pick["id"])
+            blocked = already_handled(guid)
             if blocked:
                 results.append({"pass": label, "game": pick["title"],
                                 "action": "skipped", "reason": blocked,

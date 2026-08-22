@@ -906,6 +906,8 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   .profile{width:38px;height:38px;flex:0 0 38px}
 }
 </style>
+<script src="/static/js/ce.js"></script>
+<script src="/static/js/sources.js"></script>
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
 <div class="topbar">
@@ -1145,16 +1147,7 @@ Click to sync the guide now." aria-label="Sync the guide now">
   var ovl = document.getElementById('ovl'), box = document.getElementById('ovlbox');
   if (!ovl || !box) return;
 
-  function esc(t) {
-    return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
-      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
-    });
-  }
-  function when(ts) {
-    var d = new Date(ts * 1000), h = d.getHours() % 12 || 12, m = d.getMinutes();
-    return d.toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'}) +
-           ', ' + h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
-  }
+  var esc = CE.esc, when = CE.fmtWhen, coarse = CE.coarse;
   function close() { ovl.classList.remove('show'); box.innerHTML = ''; }
 
   ovl.addEventListener('click', function (e) { if (e.target === ovl) close(); });
@@ -1305,91 +1298,16 @@ Click to sync the guide now." aria-label="Sync the guide now">
     return row('plex', id, st.label, c);
   }
 
-  // A dropdown that takes more than one answer. It looks like the single
-  // choice ones next to it, and opens a list where every item has its own
-  // checkbox, because several can be true at once.
+  // The source limit is the shared picker, not a copy. See static/js/sources.js.
   function multiField() {
     var t = optState.templates[optState.pick];
-    var picked = optState.nets.concat(optState.chans);
-    var summary = !picked.length ? 'Anywhere'
-      : picked.length <= 2 ? picked.join(', ')
-      : picked.length + ' selected';
-    var c = '<span class="multi' + (t.one_shot ? ' na' : '') + '" id="multi">' +
-      '<button type="button" class="multibtn" id="multibtn"' +
-        (t.one_shot ? ' disabled title="A single broadcast is already one channel ' +
-          'at one time, so there is nothing to narrow."' : '') + '>' +
-        '<span id="multisum">' + esc(summary) + '</span>' +
-        '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
-          'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
-          'stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>' +
-      '</button>' +
-      '<span class="multimenu" id="multimenu">' +
-        '<input class="multiq" id="multiq" placeholder="Search..." autocomplete="off">' +
-        '<span class="multibody" id="multibody"></span>' +
-      '</span></span>';
+    var c = optState.picker.html(
+      t.one_shot,
+      'A single broadcast is already one channel at one time, so there is ' +
+      'nothing to narrow.');
     return row('ce', 'multibtn', 'Limit to networks or channels', c,
                t.one_shot ? '' : 'Plex takes one channel. This takes as many as you like.',
                'wide');
-  }
-
-  // Open upward when the panel has no room below. The menu is inside a
-  // scrolling box, so a menu that overflows is clipped, not scrolled to.
-  function placeMenu(btn, menu) {
-    // After the next frame, so the menu is measured at the height it actually
-    // rendered. Measuring in the same tick reads the empty box and never flips.
-    requestAnimationFrame(function () {
-      menu.classList.remove('up');
-      var panel = menu.closest('.ovlbox') || document.documentElement;
-      var room = panel.getBoundingClientRect().bottom - btn.getBoundingClientRect().bottom;
-      if (room < menu.offsetHeight + 16) menu.classList.add('up');
-    });
-  }
-
-  function renderMulti() {
-    var body = document.getElementById('multibody');
-    if (!body) return;
-    var q = ((document.getElementById('multiq') || {}).value || '').toLowerCase();
-    var h = '';
-    function item(kind, value, label, note, on) {
-      return '<label class="multirow"><input type="checkbox" data-' + kind + '="' +
-        esc(value) + '"' + (on ? ' checked' : '') + '>' +
-        '<span class="mt">' + esc(label) + '</span>' +
-        (note ? '<span class="mn">' + esc(note) + '</span>' : '') + '</label>';
-    }
-    var nets = optState.opts.networks.filter(function (n) {
-      return !q || n.name.toLowerCase().indexOf(q) !== -1;
-    });
-    if (nets.length) {
-      h += '<span class="multisec">Networks</span>';
-      nets.forEach(function (n) {
-        h += item('net', n.name, n.name, n.channels.join(', '),
-                  optState.nets.indexOf(n.name) !== -1);
-      });
-    }
-    var chans = optState.opts.channels.filter(function (c) {
-      return !q || (c.vcn + ' ' + c.call_sign + ' ' + c.network).toLowerCase().indexOf(q) !== -1;
-    });
-    if (chans.length) {
-      h += '<span class="multisec">Channels</span>';
-      chans.forEach(function (c) {
-        h += item('ch', c.vcn, c.vcn + ' ' + c.call_sign, c.network,
-                  optState.chans.indexOf(c.vcn) !== -1);
-      });
-    }
-    if (!h) h = '<span class="multinone">Nothing matches.</span>';
-    body.innerHTML = h;
-    body.querySelectorAll('[data-net]').forEach(function (cb) {
-      cb.addEventListener('change', function () { toggle(optState.nets, cb.dataset.net); });
-    });
-    body.querySelectorAll('[data-ch]').forEach(function (cb) {
-      cb.addEventListener('change', function () { toggle(optState.chans, cb.dataset.ch); });
-    });
-  }
-
-  function toggle(list, value) {
-    var i = list.indexOf(value);
-    if (i === -1) list.push(value); else list.splice(i, 1);
-    paintOptions();
   }
 
   // Which side owns the recording. Plex settings map onto one Plex
@@ -1404,6 +1322,7 @@ Click to sync the guide now." aria-label="Sync the guide now">
   // Only the parts that change are redrawn. Rebuilding the panel on every
   // checkbox would close the dropdown under the user's finger.
   function paintOptions() {
+    optState.picker.paint();
     var v = verdict(), bar = document.getElementById('optbar');
     if (bar) {
       bar.className = 'optbar ' + v;
@@ -1414,14 +1333,6 @@ Click to sync the guide now." aria-label="Sync the guide now">
         : '<span><b>Plex schedule.</b> This becomes an ordinary Plex recording, ' +
           'and Plex takes it from here.</span>');
     }
-    var picked = optState.nets.concat(optState.chans);
-    var sum = document.getElementById('multisum');
-    if (sum) {
-      sum.textContent = !picked.length ? 'Anywhere'
-        : picked.length <= 2 ? picked.join(', ') : picked.length + ' selected';
-    }
-    var btn = document.getElementById('multibtn');
-    if (btn) btn.classList.toggle('set', !!picked.length);
   }
 
   function renderOptions(o, prog, airingId) {
@@ -1474,24 +1385,7 @@ Click to sync the guide now." aria-label="Sync the guide now">
       });
     });
 
-    var mbtn = document.getElementById('multibtn'),
-        menu = document.getElementById('multimenu'),
-        mq = document.getElementById('multiq');
-    if (mbtn && !mbtn.disabled) {
-      mbtn.addEventListener('click', function (e) {
-        e.preventDefault();
-        var open = menu.classList.toggle('open');
-        if (open) { renderMulti(); placeMenu(mbtn, menu); if (!coarse()) mq.focus(); }
-      });
-      mq.addEventListener('input', function () { renderMulti(); placeMenu(mbtn, menu); });
-      // A label wraps the row, so a click inside the menu would re-fire the
-      // button it is labelled by and close the menu on every tick.
-      menu.addEventListener('click', function (e) { e.stopPropagation(); });
-      document.addEventListener('click', function (e) {
-        var m = document.getElementById('multi');
-        if (m && !m.contains(e.target)) menu.classList.remove('open');
-      });
-    }
+    optState.picker.wire();
 
     document.getElementById('optgo').addEventListener('click', function (e) {
       var vals = {};
@@ -1508,10 +1402,6 @@ Click to sync the guide now." aria-label="Sync the guide now">
     paintOptions();
   }
 
-  function coarse() {
-    return window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
-  }
-
   function openOptions(airingId, prog) {
     box.innerHTML = '<div class="empty">Asking Plex what it can record...</div>';
     fetch('/api/record/options?airing_id=' + encodeURIComponent(airingId))
@@ -1519,6 +1409,7 @@ Click to sync the guide now." aria-label="Sync the guide now">
       .then(function (o) {
         if (!o.ok) { box.innerHTML = '<div class="empty">' + esc(o.error) + '</div>'; return; }
         optState = {templates: o.templates, pick: 0, opts: o, nets: [], chans: []};
+        optState.picker = new CE.SourcePicker(optState, paintOptions);
         renderOptions(o, prog, airingId);
       })
       .catch(function (e) { box.innerHTML = '<div class="empty">' + esc(e) + '</div>'; });

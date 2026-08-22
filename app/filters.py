@@ -9,7 +9,9 @@ from . import db
 FLAGS = [
     ("live", "Live broadcast", "a.premiere = 1"),
     ("drm", "DRM encrypted", "a.drm = 1"),
-    ("hd", "HD", "a.resolution >= '720'"),
+    # Compared as a number. As strings '1080' sorts before '720', so a string
+    # compare silently dropped every 1080 channel from "HD".
+    ("hd", "HD", "CAST(a.resolution AS INTEGER) >= 720"),
     ("recording", "Being recorded", "a.id IN (SELECT airing_id FROM our_grabs)"),
     ("movie", "Film", "p.section = 'movies'"),
     ("sport", "Sport", "p.section = 'sports'"),

@@ -69,6 +69,12 @@ A Jinja template's `{% block title %}` ends with the same `{% endblock %}` the
 body does. A careless replace over the whole file puts your script in the
 `<title>`, where it never runs and takes an hour to notice.
 
+## Known platform assumptions
+
+`fmt()` uses `%-I` in its strftime pattern, a glibc extension for an unpadded
+hour. It is correct in the container this ships in, and breaks on Windows and
+the BSDs. If you run the app outside Linux, that is the line to change.
+
 ## Testing against a real server
 
 There is no test suite. The app talks to a live Plex DVR, and the interesting

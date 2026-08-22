@@ -308,11 +308,7 @@
     lane.appendChild(el);
   }
 
-  function esc(t) {
-    return String(t || '').replace(/[&<>"]/g, function (c) {
-      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
-    });
-  }
+  var esc = CE.esc;
 
   function widen() {
     var w = x(endTs);
@@ -477,11 +473,7 @@
   var exc = new Set((excEl.value || '').split(',').filter(Boolean));
   var sections = null, openSecs = {}, names = {};
 
-  function esc(t) {
-    return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
-      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
-    });
-  }
+  var esc = CE.esc;
 
   function apply() {
     incEl.value = Array.from(inc).join(',');

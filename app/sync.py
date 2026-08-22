@@ -34,7 +34,13 @@ def _upsert_program(c, m, section, now):
            ON CONFLICT(guid) DO UPDATE SET
              rating_key=excluded.rating_key, title=excluded.title,
              grandparent_title=excluded.grandparent_title, summary=excluded.summary,
-             section=excluded.section, genres=excluded.genres, teams=excluded.teams,
+             section=excluded.section, genres=excluded.genres,
+             -- A bulk section listing carries Genre but NOT Team, so an
+             -- incoming empty list means "not asked", not "no teams". Writing
+             -- it back blanked what enrich_sports had fetched, and made every
+             -- sync re-fetch every sports programme.
+             teams=CASE WHEN excluded.teams IN ('[]', '') OR excluded.teams IS NULL
+                        THEN programs.teams ELSE excluded.teams END,
              thumb=excluded.thumb, art=excluded.art,
              originally_available=excluded.originally_available,
              year=excluded.year, updated_at=excluded.updated_at""",
@@ -289,7 +295,9 @@ def sync_recordings(plex):
     with db.tx() as c:
         for s in subs:
             key = str(s.get("key"))
-            detail = plex.subscription(key) or s
+            # Some server versions carry Setting on the list itself. Only ask
+            # for the detail when it does not, rather than one request each.
+            detail = s if s.get("Setting") else (plex.subscription(key) or s)
             settings = {st.get("id"): st.get("value") for st in (detail.get("Setting") or [])}
             # Plex titles a rule by its template, "All Episodes", which says
             # nothing about what it follows. The programme is on the body, under

@@ -18,7 +18,16 @@ TIMEOUT = httpx.Timeout(120.0, connect=15.0)
 
 
 class PlexError(RuntimeError):
-    pass
+    """A Plex request failed.
+
+    `status` is the HTTP status when the server answered, and None when it did
+    not. Callers used to look for "401" inside the message, which also matched
+    a port number in the URL.
+    """
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class Plex:
@@ -29,17 +38,38 @@ class Plex:
             raise PlexError("no Plex token configured")
         self.base = base_url.rstrip("/")
         self.token = token
+        self._http = None
 
     def _client(self):
-        return httpx.Client(timeout=TIMEOUT, headers={"Accept": "application/json"})
+        """One connection pool per server, reused.
+
+        A fresh client per call meant a new TCP handshake for every request,
+        and a sync makes one per sports programme. The pool is opened lazily
+        so constructing a Plex object stays free.
+        """
+        if self._http is None:
+            self._http = httpx.Client(timeout=TIMEOUT,
+                                      headers={"Accept": "application/json"})
+        return self._http
+
+    def close(self):
+        if self._http is not None:
+            self._http.close()
+            self._http = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
     def _get(self, path, params=None):
         params = dict(params or {})
         params["X-Plex-Token"] = self.token
-        with self._client() as c:
-            r = c.get(self.base + path, params=params)
+        r = self._client().get(self.base + path, params=params)
         if r.status_code >= 400:
-            raise PlexError(f"GET {path} -> HTTP {r.status_code}: {r.text[:200]}")
+            raise PlexError(f"GET {path} -> HTTP {r.status_code}: {r.text[:200]}",
+                            r.status_code)
         try:
             return r.json().get("MediaContainer", {})
         except Exception:
@@ -65,11 +95,6 @@ class Plex:
         """Everything in an EPG section. `type=4` means airings (episodes)."""
         return self._get(f"/{provider}/sections/{section}/all", filters).get("Metadata", []) or []
 
-    def section_search(self, provider, section, query, type_=4):
-        return self._get(
-            f"/{provider}/sections/{section}/search", {"query": query, "type": type_}
-        ).get("Metadata", []) or []
-
     def metadata(self, provider, rating_key):
         """Full metadata for one programme.
 
@@ -83,9 +108,6 @@ class Plex:
     def teams(self, provider, section):
         """Every team the guide knows about, with the ids used by `?team=<id>`."""
         return self._get(f"/{provider}/sections/{section}/team").get("Directory", []) or []
-
-    def by_team(self, provider, section, team_id):
-        return self.section_all(provider, section, type=4, team=team_id)
 
     # ---------- recordings ----------
 
@@ -123,12 +145,14 @@ class Plex:
         url = f"{self.base}/media/subscriptions?{parameters}"
         url += f"&targetLibrarySectionID={target_section}&type={type_}"
         for k, v in (prefs or {}).items():
-            url += f"&prefs%5B{k}%5D={v}"
+            key = urllib.parse.quote(str(k), safe="")
+            val = urllib.parse.quote(str(v), safe="")
+            url += f"&prefs%5B{key}%5D={val}"
         url += f"&X-Plex-Token={self.token}"
-        with self._client() as c:
-            r = c.post(url)
+        r = self._client().post(url)
         if r.status_code >= 400:
-            raise PlexError(f"create recording -> HTTP {r.status_code}: {r.text[:300]}")
+            raise PlexError(f"create recording -> HTTP {r.status_code}: {r.text[:300]}",
+                            r.status_code)
         # The reply carries the new subscription, key included. Reading it here
         # is exact; hunting for it afterwards in the scheduled list is not.
         try:
@@ -139,16 +163,26 @@ class Plex:
             return None
 
     def subscription_exists(self, key):
-        """True while Plex still holds this subscription.
+        """Whether Plex still holds this subscription: True, False, or None.
 
         Plex will answer a create with 200 and a key, then drop the
         subscription on its own, for instance when the airing is a repeat and
         the rule is new-airings-only. Without this check the app reports a
         recording that does not exist.
+
+        None means the question could not be answered. Only a definite 404
+        proves the subscription is gone, so a network error must not be
+        reported as "Plex discarded it".
         """
-        with self._client() as c:
-            r = c.get(f"{self.base}/media/subscriptions/{key}",
-                      params={"X-Plex-Token": self.token})
+        try:
+            r = self._client().get(f"{self.base}/media/subscriptions/{key}",
+                                   params={"X-Plex-Token": self.token})
+        except Exception:
+            return None
+        if r.status_code == 404:
+            return False
+        if r.status_code >= 500:
+            return None
         return r.status_code < 400
 
     def find_subscription(self, guid, begins_at, tries=1, wait=0.7):
@@ -186,11 +220,11 @@ class Plex:
         return None
 
     def delete_subscription(self, key):
-        with self._client() as c:
-            r = c.delete(f"{self.base}/media/subscriptions/{key}",
-                         params={"X-Plex-Token": self.token})
+        r = self._client().delete(f"{self.base}/media/subscriptions/{key}",
+                                  params={"X-Plex-Token": self.token})
         if r.status_code >= 400:
-            raise PlexError(f"delete subscription {key} -> HTTP {r.status_code}")
+            raise PlexError(f"delete subscription {key} -> HTTP {r.status_code}",
+                            r.status_code)
         return True
 
 

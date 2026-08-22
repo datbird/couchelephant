@@ -20,6 +20,7 @@ import hmac
 import os
 import secrets
 import sqlite3
+import threading
 import time
 
 from . import db
@@ -63,12 +64,29 @@ CREATE TABLE IF NOT EXISTS prefs (
 """
 
 
+_local = threading.local()
+_ready = False
+
+
 def _con():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    con = sqlite3.connect(DB_PATH, timeout=30)
-    con.row_factory = sqlite3.Row
-    con.executescript(SCHEMA)
-    return con
+    """One connection per thread, schema applied once.
+
+    Every session check used to open a connection and replay four
+    CREATE TABLE statements, which is a page load's worth of work to look up a
+    cookie. The connection is kept, so callers must not close it.
+    """
+    global _ready
+    if not hasattr(_local, "conn"):
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        con = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA journal_mode=WAL")
+        if not _ready:
+            con.executescript(SCHEMA)
+            con.commit()
+            _ready = True
+        _local.conn = con
+    return _local.conn
 
 
 def _now():
@@ -101,11 +119,7 @@ def needs_setup():
 # ---------- users ----------
 
 def user_count():
-    con = _con()
-    try:
-        return con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-    finally:
-        con.close()
+    return _con().execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
 def create_user(username, password, role="admin"):
@@ -120,21 +134,15 @@ def create_user(username, password, role="admin"):
         con.execute("INSERT INTO users (username, pw_hash, pw_salt, role, created_at) "
                     "VALUES (?,?,?,?,?)", (username, ph, salt, role, _now()))
         con.commit()
-        return con.execute("SELECT id FROM users WHERE username=? COLLATE NOCASE",
-                           (username,)).fetchone()[0]
     except sqlite3.IntegrityError:
         raise ValueError("that username is taken")
-    finally:
-        con.close()
+    return con.execute("SELECT id FROM users WHERE username=? COLLATE NOCASE",
+                       (username,)).fetchone()[0]
 
 
 def verify(username, password):
-    con = _con()
-    try:
-        row = con.execute("SELECT * FROM users WHERE username=? COLLATE NOCASE",
-                          ((username or "").strip(),)).fetchone()
-    finally:
-        con.close()
+    row = _con().execute("SELECT * FROM users WHERE username=? COLLATE NOCASE",
+                         ((username or "").strip(),)).fetchone()
     if not row:
         # Hash anyway, so a missing username does not answer faster than a
         # wrong password and give the difference away.
@@ -147,24 +155,17 @@ def verify(username, password):
 
 
 def list_users():
-    con = _con()
-    try:
-        return [dict(r) for r in con.execute(
-            "SELECT id, username, role, created_at FROM users ORDER BY created_at")]
-    finally:
-        con.close()
+    return [dict(r) for r in _con().execute(
+        "SELECT id, username, role, created_at FROM users ORDER BY created_at")]
 
 
 def delete_user(uid):
     con = _con()
-    try:
-        con.execute("DELETE FROM users WHERE id=?", (uid,))
-        con.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
-        con.execute("DELETE FROM email_map WHERE user_id=?", (uid,))
-        con.execute("DELETE FROM prefs WHERE user_id=?", (uid,))
-        con.commit()
-    finally:
-        con.close()
+    con.execute("DELETE FROM users WHERE id=?", (uid,))
+    con.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+    con.execute("DELETE FROM email_map WHERE user_id=?", (uid,))
+    con.execute("DELETE FROM prefs WHERE user_id=?", (uid,))
+    con.commit()
 
 
 # ---------- sessions ----------
@@ -173,27 +174,20 @@ def create_session(user_id):
     token = secrets.token_urlsafe(32)
     now = _now()
     con = _con()
-    try:
-        con.execute("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) "
-                    "VALUES (?,?,?,?)", (_tok_hash(token), user_id, now, now + SESSION_TTL))
-        con.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
-        con.commit()
-    finally:
-        con.close()
+    con.execute("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) "
+                "VALUES (?,?,?,?)", (_tok_hash(token), user_id, now, now + SESSION_TTL))
+    con.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+    con.commit()
     return token
 
 
 def session_user(token):
     if not token:
         return None
-    con = _con()
-    try:
-        row = con.execute(
-            "SELECT u.id, u.username, u.role, s.expires_at FROM sessions s "
-            "JOIN users u ON u.id = s.user_id WHERE s.token_hash=?",
-            (_tok_hash(token),)).fetchone()
-    finally:
-        con.close()
+    row = _con().execute(
+        "SELECT u.id, u.username, u.role, s.expires_at FROM sessions s "
+        "JOIN users u ON u.id = s.user_id WHERE s.token_hash=?",
+        (_tok_hash(token),)).fetchone()
     if not row or row["expires_at"] < _now():
         return None
     return {"id": row["id"], "username": row["username"], "role": row["role"]}
@@ -203,11 +197,8 @@ def delete_session(token):
     if not token:
         return
     con = _con()
-    try:
-        con.execute("DELETE FROM sessions WHERE token_hash=?", (_tok_hash(token),))
-        con.commit()
-    finally:
-        con.close()
+    con.execute("DELETE FROM sessions WHERE token_hash=?", (_tok_hash(token),))
+    con.commit()
 
 
 # ---------- Cloudflare Access ----------
@@ -222,34 +213,31 @@ def user_for_email(email, create=True):
     if not email:
         return None
     con = _con()
-    try:
-        row = con.execute(
-            "SELECT u.id, u.username, u.role FROM email_map m "
-            "JOIN users u ON u.id = m.user_id WHERE m.email=? COLLATE NOCASE",
-            (email,)).fetchone()
-        if row:
-            return dict(row)
-        if not create:
-            return None
-        first = con.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
-        name = email.split("@")[0] or email
-        base, n = name, 1
-        while con.execute("SELECT 1 FROM users WHERE username=? COLLATE NOCASE",
-                          (name,)).fetchone():
-            n += 1
-            name = f"{base}{n}"
-        con.execute("INSERT INTO users (username, pw_hash, pw_salt, role, created_at) "
-                    "VALUES (?,?,?,?,?)",
-                    (name, "", "", "admin" if first else "user", _now()))
-        uid = con.execute("SELECT id FROM users WHERE username=? COLLATE NOCASE",
-                          (name,)).fetchone()[0]
-        con.execute("INSERT OR REPLACE INTO email_map (email, user_id, created_at) "
-                    "VALUES (?,?,?)", (email, uid, _now()))
-        con.commit()
-        return {"id": uid, "username": name,
-                "role": "admin" if first else "user"}
-    finally:
-        con.close()
+    row = con.execute(
+        "SELECT u.id, u.username, u.role FROM email_map m "
+        "JOIN users u ON u.id = m.user_id WHERE m.email=? COLLATE NOCASE",
+        (email,)).fetchone()
+    if row:
+        return dict(row)
+    if not create:
+        return None
+    first = con.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
+    name = email.split("@")[0] or email
+    base, n = name, 1
+    while con.execute("SELECT 1 FROM users WHERE username=? COLLATE NOCASE",
+                      (name,)).fetchone():
+        n += 1
+        name = f"{base}{n}"
+    con.execute("INSERT INTO users (username, pw_hash, pw_salt, role, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (name, "", "", "admin" if first else "user", _now()))
+    uid = con.execute("SELECT id FROM users WHERE username=? COLLATE NOCASE",
+                      (name,)).fetchone()[0]
+    con.execute("INSERT OR REPLACE INTO email_map (email, user_id, created_at) "
+                "VALUES (?,?,?)", (email, uid, _now()))
+    con.commit()
+    return {"id": uid, "username": name,
+            "role": "admin" if first else "user"}
 
 
 # ---------- per-user preferences ----------
@@ -257,23 +245,16 @@ def user_for_email(email, create=True):
 def get_pref(user_id, key, default=None):
     if not user_id:
         return default
-    con = _con()
-    try:
-        row = con.execute("SELECT value FROM prefs WHERE user_id=? AND key=?",
-                          (user_id, key)).fetchone()
-        return row["value"] if row else default
-    finally:
-        con.close()
+    row = _con().execute("SELECT value FROM prefs WHERE user_id=? AND key=?",
+                         (user_id, key)).fetchone()
+    return row["value"] if row else default
 
 
 def set_pref(user_id, key, value):
     if not user_id:
         return
     con = _con()
-    try:
-        con.execute("INSERT INTO prefs (user_id, key, value) VALUES (?,?,?) "
-                    "ON CONFLICT(user_id, key) DO UPDATE SET value=excluded.value",
-                    (user_id, key, value))
-        con.commit()
-    finally:
-        con.close()
+    con.execute("INSERT INTO prefs (user_id, key, value) VALUES (?,?,?) "
+                "ON CONFLICT(user_id, key) DO UPDATE SET value=excluded.value",
+                (user_id, key, value))
+    con.commit()

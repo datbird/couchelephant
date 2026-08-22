@@ -1,5 +1,9 @@
 # Code review, v0.90
 
+**Status: every finding below is fixed.** See the "What was done" section at
+the end for how each was verified. The findings are kept as written so the
+reasoning survives, not just the diff.
+
 A full read of every Python module and template, done 2026-08-22 against
 commit `71e6180`. Each finding says what is wrong, how it was verified, and
 what to do. Severity is about consequence, not code smell.
@@ -324,3 +328,70 @@ Worth recording so the next reviewer does not re-litigate it:
 6. S1: the origin-check middleware, before the repo goes public.
 7. M1, M2, M4: extract shared JS. Do this before the next feature that touches
    both panels, not after.
+
+
+---
+
+# What was done
+
+Every finding fixed, and verified against the live server rather than by
+reading the diff back.
+
+## Measured before and after
+
+| | Before | After |
+| --- | --- | --- |
+| Sports programmes re-enriched per sync (B1) | 47, every sync | 0 |
+| Resolutions the HD filter accepts (B2) | 720 only | 720, 1080, 2160 |
+| Copies of the source picker (M1) | 2, already drifted | 1 |
+| Copies of `esc()` (M2) | 4, two of them different | 1 |
+| Datasets built per `/recordings` load (V1) | 5, including a full pass run | 0 |
+| Cross-origin POST (S1) | accepted | 403 |
+| `/loginanything` past the auth gate (S2) | allowed | 404 |
+
+## Verification notes
+
+**B1** was the one worth measuring. The sync log read "47 sports enriched" on
+every sync before, and reads 0 now, with all 47 programmes keeping their team
+tags across syncs. The fix preserves the stored value when an incoming listing
+carries an empty array, because a bulk listing not carrying teams means "not
+asked", not "no teams".
+
+**B2** was proved in isolation before the change went in: with a string
+compare, `SELECT ... WHERE resolution >= '720'` returns only `720` out of
+`480, 720, 1080, 2160`. With the cast it returns `720, 1080, 2160`.
+
+**B9** turned out to need care. Making `subscription_exists` tri-state without
+updating its two call sites would have made the bug worse, because
+`not None` is true and every failed check would have reported "Plex discarded
+your recording". Both call sites now test `is False`.
+
+**S1** is a same-origin check rather than CSRF tokens. A browser always sends
+`Origin` on a cross-site POST, so comparing it to the host the request arrived
+on needs no session and no token machinery. A request with neither header
+passes, which is curl, and curl was never the threat. Verified: a POST
+carrying `Origin: http://evil.example` gets 403, the same origin gets 200, and
+a plain curl call still works.
+
+**I3** exposed a smaller problem while being fixed. Saving a pass's Plex
+settings also stored `lineupChannel` and `startTimeslot` from the template. A
+pass always overrides those with its own pin, so storing them is noise, and a
+reader could believe a pass had been limited to one channel when it had not.
+They are stripped on save.
+
+**M1 and M2** carried the most regression risk, since both record panels and
+the guide grid depend on them. Verified after the extraction: both panels
+drive the one shared picker, both show all 117 sources, both flip the verdict
+bar correctly, and a full click-through of the guide, the record panel, the
+schedule, the calendar, the passes and settings reported zero page errors.
+
+## Left as noted, not changed
+
+**S3**, `%-I` in `strftime`, is a glibc extension. It is correct in the
+container this ships in. Recorded in DEVELOPING.md rather than worked around.
+
+## Not regressed
+
+The two live Chiefs recordings were checked after every deploy and are
+untouched: both still scheduled on 41.1, both still held by Plex as
+subscriptions 48 and 49.

@@ -18,6 +18,10 @@ BASE = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
 VERSION = "0.90"
 
+# Walking the tzdata directory on every settings render costs more than the
+# list is worth. It cannot change while the process runs.
+ZONES = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
+
 app = FastAPI(title="CouchElephant", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="static")
 
@@ -48,12 +52,6 @@ templates.env.filters["fmt_day"] = fmt_day
 templates.env.filters["unjs"] = db.unjs
 
 
-def _channel_list():
-    return db.query(
-        "SELECT vcn, call_sign AS cs FROM channels WHERE vcn IS NOT NULL "
-        "ORDER BY CAST(vcn AS REAL)")
-
-
 def _logo_map():
     """vcn -> True when a logo is cached, so the template can skip the <img>."""
     return {r["vcn"]: True for r in db.query(
@@ -65,7 +63,25 @@ def current_user(request):
 
     With sign-in off there is no user, and everything is public. That is the
     state a fresh install starts in.
+
+    Resolved once per request and kept on the request, because the gate and
+    the page render both ask, and in Cloudflare mode each ask verifies a JWT.
     """
+    cached = getattr(request.state, "ce_user", _MISSING)
+    if cached is not _MISSING:
+        return cached
+    user = _resolve_user(request)
+    try:
+        request.state.ce_user = user
+    except Exception:
+        pass
+    return user
+
+
+_MISSING = object()
+
+
+def _resolve_user(request):
     m = auth.mode()
     if m == "none":
         return None
@@ -101,8 +117,47 @@ def page(request, name, **ctx):
 
 # Reachable without signing in: the sign-in screens themselves, the health
 # check, and the static files that render them.
-_OPEN = ("/login", "/setup", "/logout", "/healthz", "/static/", "/favicon.ico",
-         "/welcome")
+_OPEN_EXACT = frozenset(("/login", "/setup", "/logout", "/healthz", "/welcome",
+                         "/favicon.ico"))
+_OPEN_PREFIX = ("/static/",)
+
+
+def _is_open(path):
+    """A prefix match let /loginanything past the gate. Match the path itself."""
+    return path in _OPEN_EXACT or path.startswith(_OPEN_PREFIX)
+
+
+@app.middleware("http")
+async def _same_origin(request: Request, call_next):
+    """Refuse a state-changing request that came from another site.
+
+    With sign-in off, which is the default, nothing else stands between a page
+    the user happens to be visiting and this app. That page can POST to
+    http://<lan-ip>:8710/settings from their browser, and with no cookie
+    required there is nothing to withhold. One such request could null the Plex
+    address.
+
+    A browser always sends Origin on a cross-site POST, so comparing it to the
+    host this request arrived on is enough, and needs no tokens or session. A
+    request with neither header is not from a browser form, so it passes: that
+    is curl, and curl was never the threat.
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return await call_next(request)
+
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if origin:
+        try:
+            sent = urllib.parse.urlsplit(origin).netloc.lower()
+        except Exception:
+            sent = ""
+        here = (request.headers.get("host") or "").lower()
+        if sent and here and sent != here:
+            return JSONResponse(
+                {"ok": False,
+                 "error": "That request came from another site and was refused."},
+                status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -110,7 +165,7 @@ async def _first_run(request: Request, call_next):
     """Nothing works before there is a server to talk to, so say so once,
     on a screen that asks for it, rather than a banner on every page."""
     path = request.url.path
-    if (not path.startswith(_OPEN) and not path.startswith("/settings")
+    if (not _is_open(path) and not path.startswith("/settings")
             and not path.startswith("/api/") and not path.startswith("/partial/")
             and request.method == "GET" and not _configured()):
         return RedirectResponse("/welcome", status_code=303)
@@ -120,7 +175,7 @@ async def _first_run(request: Request, call_next):
 @app.middleware("http")
 async def _auth_gate(request: Request, call_next):
     path = request.url.path
-    if auth.mode() == "none" or path.startswith(_OPEN):
+    if auth.mode() == "none" or _is_open(path):
         return await call_next(request)
     if current_user(request):
         return await call_next(request)
@@ -142,8 +197,7 @@ def _configured():
 def welcome(request: Request):
     if _configured():
         return RedirectResponse("/", status_code=303)
-    zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
-    return page(request, "welcome.html", zones=zones, nav="")
+    return page(request, "welcome.html", zones=ZONES, nav="")
 
 
 @app.post("/welcome")
@@ -155,16 +209,13 @@ def welcome_save(plex_url: str = Form(""), plex_token: str = Form(""),
     if not url or not token:
         return JSONResponse({"ok": False,
                              "detail": "Both the address and the token are needed."})
-    before = (db.get_setting("plex_url"), db.get_setting("plex_token"))
+    # Test the candidates without saving them. Writing first and reverting on
+    # failure left a window for the sync loop to run against them.
+    ok, detail = _test_plex(url, token)
+    if not ok:
+        return JSONResponse({"ok": False, "detail": detail})
     db.set_setting("plex_url", url)
     db.set_setting("plex_token", token)
-    ok, detail = _test_plex()
-    if not ok:
-        # Put back what was there. A failed test must not leave the app half
-        # configured and the banner gone.
-        db.set_setting("plex_url", before[0] or "")
-        db.set_setting("plex_token", before[1] or "")
-        return JSONResponse({"ok": False, "detail": detail})
     db.set_setting("timezone", timezone)
     db.set_setting("dry_run", "1")
     return JSONResponse({"ok": True, "detail": detail})
@@ -349,8 +400,11 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
                  "logo": bool(r["logo_path"])} for r in crows]
 
     ours = {r["airing_id"] for r in db.query("SELECT airing_id FROM our_grabs")}
-    plex_titles = {r["title"] for r in db.query(
-        "SELECT title FROM plex_grabs WHERE status IN ('scheduled','inprogress')")}
+    # Keyed by broadcast, not by title, or every episode of a daily programme
+    # showed as being recorded because one of them is.
+    plex_slots = {(r["channel_vcn"], r["begins_at"]) for r in db.query(
+        "SELECT channel_vcn, begins_at FROM plex_grabs "
+        "WHERE status IN ('scheduled','inprogress')")}
 
     frags, fargs = filters.build(filters.parse(f), filters.parse(x))
     airings = []
@@ -370,7 +424,7 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
             sched = None
             if r["id"] in ours:
                 sched = "ce"
-            elif r["title"] in plex_titles:
+            elif (r["channel_vcn"], r["begins_at"]) in plex_slots:
                 sched = "plex"
             airings.append({
                 "sched": sched,
@@ -441,9 +495,12 @@ def api_program(airing_id: str):
     siblings = db.query(
         "SELECT * FROM airings WHERE program_guid = ? ORDER BY begins_at", (a["program_guid"],))
     logos = _logo_map()
+    # This broadcast, not any programme sharing its title. A daily show keeps
+    # the same title, so a title match reported every future airing as covered.
     scheduled = db.one(
-        "SELECT status FROM plex_grabs WHERE title = ? AND status IN "
-        "('scheduled','inprogress','complete') LIMIT 1", (a["title"],))
+        "SELECT status FROM plex_grabs WHERE channel_vcn = ? AND begins_at = ? "
+        "AND status IN ('scheduled','inprogress','complete') LIMIT 1",
+        (a["channel_vcn"], a["begins_at"]))
     ours = {r["airing_id"] for r in db.query(
         "SELECT airing_id FROM our_grabs WHERE program_guid = ?", (a["program_guid"],))}
     my_passes = {r["team_id"] for r in db.query("SELECT team_id FROM passes")}
@@ -572,7 +629,61 @@ async def api_record_options(airing_id: str):
     })
 
 
-def _make_ce_rule(row, chosen, nets, chans):
+# A pass always pins each booking to the airing it chose, so these three are
+# not its to carry. Storing them is noise at best, and a reader could believe
+# a pass had been limited to one channel when it had not.
+_PASS_PREF_BLOCKED = frozenset(("oneShot", "lineupChannel", "startTimeslot"))
+
+
+def _pass_prefs(prefs):
+    return {k: v for k, v in (prefs or {}).items() if k not in _PASS_PREF_BLOCKED}
+
+
+def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,
+               update=True):
+    """Create or update one CouchElephant pass.
+
+    The only place a pass is written. There were three, and they had already
+    drifted: one checked for a duplicate, one checked the wrong column, one did
+    not check at all.
+
+    Returns (pass_id, label, created).
+    """
+    nets, chans, prefs = nets or [], chans or [], _pass_prefs(prefs)
+    if kind == "team":
+        existing = db.one("SELECT id FROM passes WHERE kind='team' AND team_id = ?",
+                          (team["id"],))
+        label = team["name"]
+    else:
+        existing = db.one("SELECT id FROM passes WHERE kind='series' AND series_title = ?",
+                          (series,))
+        label = series
+
+    if existing and not update:
+        return existing["id"], label, False
+
+    with db.tx() as c:
+        if existing:
+            c.execute("UPDATE passes SET networks=?, channels=?, prefs=?, enabled=1 "
+                      "WHERE id=?",
+                      (db.js(nets), db.js(chans), db.js(prefs), existing["id"]))
+            return existing["id"], label, False
+        if kind == "team":
+            c.execute("INSERT INTO passes (kind, team_id, team_name, networks, channels, "
+                      "prefs, enabled, created_at) VALUES ('team',?,?,?,?,?,1,?)",
+                      (team["id"], team["name"], db.js(nets), db.js(chans),
+                       db.js(prefs), int(time.time())))
+        else:
+            c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
+                      "channels, prefs, enabled, created_at) "
+                      "VALUES ('series',?,?,?,?,?,1,?)",
+                      (series, series, db.js(nets), db.js(chans), db.js(prefs),
+                       int(time.time())))
+        new_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+    return new_id, label, True
+
+
+def _make_ce_rule(row, chosen, nets, chans, prefs=None):
     """Take over a recurring choice that Plex cannot express.
 
     Plex's team and series rules accept one channel. Several networks, or
@@ -587,31 +698,11 @@ def _make_ce_rule(row, chosen, nets, chans):
             team = t
             break
     if team:
-        existing = db.one("SELECT id FROM passes WHERE kind='team' AND team_id = ?",
-                          (team["id"],))
-        with db.tx() as c:
-            if existing:
-                c.execute("UPDATE passes SET networks=?, channels=?, enabled=1 WHERE id=?",
-                          (db.js(nets), db.js(chans), existing["id"]))
-            else:
-                c.execute("INSERT INTO passes (kind, team_id, team_name, networks, "
-                          "channels, enabled, created_at) VALUES ('team',?,?,?,?,1,?)",
-                          (team["id"], team["name"], db.js(nets), db.js(chans),
-                           int(time.time())))
-        label = team["name"]
+        _, label, _ = _make_pass("team", team=team, nets=nets, chans=chans, prefs=prefs)
     else:
         series = row["grandparent_title"] or row["title"]
-        existing = db.one("SELECT id FROM passes WHERE kind='series' AND series_title = ?",
-                          (series,))
-        with db.tx() as c:
-            if existing:
-                c.execute("UPDATE passes SET networks=?, channels=?, enabled=1 WHERE id=?",
-                          (db.js(nets), db.js(chans), existing["id"]))
-            else:
-                c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
-                          "channels, enabled, created_at) VALUES ('series',?,?,?,?,1,?)",
-                          (series, series, db.js(nets), db.js(chans), int(time.time())))
-        label = series
+        _, label, _ = _make_pass("series", series=series, nets=nets, chans=chans,
+                                 prefs=prefs)
 
     done = passes.run_passes()
     made = len([d for d in done if d["action"] == "scheduled"])
@@ -655,20 +746,23 @@ async def api_record(airing_id: str = Form(...), template: int = Form(0),
         chosen = options[template] if 0 <= template < len(options) else options[0]
         one_shot = (chosen.get("title") or "").lower().startswith("this ")
 
-        if (nets or chans) and not one_shot:
-            return await asyncio.to_thread(_make_ce_rule, row, chosen, nets, chans)
-
         prefs = dict(db.unjs(settings, {}) or {})
+        prefs = {k: v for k, v in prefs.items() if v is not None}
+
+        if (nets or chans) and not one_shot:
+            # The settings the user just filled in belong to the pass too, or
+            # padding and quality are silently lost by choosing a source limit.
+            return await asyncio.to_thread(_make_ce_rule, row, chosen, nets, chans,
+                                           prefs)
+
         # oneShot is never shown, and it is what separates one game from every
         # future airing of the same programme. It follows the template.
         prefs["oneShot"] = "1" if one_shot else "0"
-        prefs = {k: v for k, v in prefs.items() if v is not None}
 
         await asyncio.to_thread(passes._schedule, plex, row, None, "manual", chosen, prefs)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
-    await asyncio.to_thread(sync.sync_recordings, Plex(db.get_setting("plex_url"),
-                                                      db.get_setting("plex_token")))
+    await asyncio.to_thread(sync.sync_recordings, plex)
     return JSONResponse({"ok": True, "message": "Recording scheduled."})
 
 
@@ -703,8 +797,9 @@ async def api_record_cancel(airing_id: str = Form(...)):
     # under way leaves the part it captured in the library. Say so rather than
     # letting the user find a stray file later.
     started = db.one(
-        "SELECT status FROM plex_grabs WHERE title = ? AND status IN "
-        "('inprogress','complete') LIMIT 1", (mine["title"],))
+        "SELECT status FROM plex_grabs WHERE channel_vcn = ? AND begins_at = ? "
+        "AND status IN ('inprogress','complete') LIMIT 1",
+        (mine["channel_vcn"], mine["begins_at"]))
     if started:
         return JSONResponse({"ok": True, "message":
                              "Cancelled. It had already started, so what Plex "
@@ -713,16 +808,24 @@ async def api_record_cancel(airing_id: str = Form(...)):
 
 
 @app.post("/api/pass")
-def api_pass(team_id: int = Form(...)):
+async def api_pass(team_id: int = Form(...)):
+    """Follow a team from the programme panel.
+
+    It runs the passes straight away, like every other way of creating one.
+    Without that the first game was not booked until the next sync, up to an
+    hour later, and the panel said "Following" with nothing to show for it.
+    """
     t = db.one("SELECT * FROM teams WHERE id = ?", (team_id,))
     if not t:
         return JSONResponse({"ok": False, "error": "unknown team"}, status_code=404)
-    if db.one("SELECT 1 FROM passes WHERE team_id = ?", (team_id,)):
-        return JSONResponse({"ok": True, "message": f"Already following {t['name']}."})
-    with db.tx() as c:
-        c.execute("INSERT INTO passes (kind, team_id, team_name, enabled, created_at) "
-                  "VALUES ('team', ?, ?, 1, ?)", (t["id"], t["name"], int(time.time())))
-    return JSONResponse({"ok": True, "message": f"Following {t['name']}."})
+    _, label, created = await asyncio.to_thread(
+        _make_pass, "team", dict(t), None, [], [], {}, False)
+    if not created:
+        return JSONResponse({"ok": True, "message": f"Already following {label}."})
+    done = await asyncio.to_thread(passes.run_passes)
+    made = len([d for d in done if d["action"] == "scheduled"])
+    return JSONResponse({"ok": True, "message":
+                         f"Following {label}. {made} upcoming game(s) scheduled."})
 
 
 @app.get("/partial/airings", response_class=HTMLResponse)
@@ -759,7 +862,7 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0,
 
     return page(request, "guide.html", rows=rows, days=days,
                 day=(day or (days[0]["key"] if days else "")),
-                channels=_channel_list(), channel=channel, sports=sports,
+                channel=channel, sports=sports,
                 q=q, logos=_logo_map(), f=f, x=x,
                 nfilters=len(filters.parse(f)) + len(filters.parse(x)))
 
@@ -774,95 +877,14 @@ def search_redirect(q: str = ""):
 
 @app.get("/recordings", response_class=HTMLResponse)
 def recordings(request: Request):
-    """One page for everything that is set to record.
+    """The shell. Everything on it is fetched from /api/schedule and /api/rules.
 
-    A schedule is a schedule whether a team pass, a Plex series rule or a
-    single game made it. Splitting them across two tabs asked the user to know
-    which machine created a recording before they could find it.
+    This route used to build the rules, the grabs, the upcoming picks, the
+    teams and the decision log on every page load, for a template that stopped
+    reading any of them. The upcoming picks alone ran a full pass evaluation
+    and threw it away.
     """
-    rules = []
-
-    # Our own team passes. These are rules in the same sense: they keep
-    # matching new games without being asked again.
-    for p in db.query("SELECT * FROM passes ORDER BY COALESCE(team_name, series_title)"):
-        nets = db.unjs(p["networks"]) or []
-        chans = db.unjs(p["channels"]) or []
-        bits = ["Always from the live broadcast"]
-        if nets or chans:
-            bits.append("only on " + ", ".join(nets + chans))
-        rules.append({
-            "kind": "sports" if p["kind"] == "team" else "series",
-            "source": "ce", "pass_id": p["id"],
-            "enabled": p["enabled"],
-            "title": p["team_name"] or p["series_title"],
-            "detail": ". ".join(bits),
-            "limited": bool(nets or chans),
-        })
-
-    # Plex's own rules. A one-shot is a single recording rather than a rule, so
-    # it belongs in the list below, not here.
-    for s_ in db.query("SELECT * FROM plex_subscriptions ORDER BY title"):
-        cfg = db.unjs(s_["settings"], {}) or {}
-        if str(cfg.get("oneShot", "")).lower() in ("1", "true", "yes"):
-            continue
-        bits = []
-        bits.append("New only" if cfg.get("onlyNewAirings") == "1" else "New and repeats")
-        if cfg.get("lineupChannel"):
-            bits.append("one channel")
-        if cfg.get("startTimeslot") and cfg.get("startTimeslot") != "-1":
-            bits.append("one time")
-        rules.append({
-            # Plex marks a team pass type 15. Anything else is a series rule.
-            "kind": "sports" if str(s_["type"]) == "15" else "series",
-            "source": "ce" if s_["owned_by_us"] else "plex",
-            "pass_id": None, "enabled": 1, "title": s_["title"],
-            "detail": ", ".join(bits), "limited": False,
-        })
-
-    # Individual recordings. A grab counts as sport when the programme it comes
-    # from carries team tags, which is the same signal the passes work from.
-    sports_titles = {r["title"] for r in db.query(
-        "SELECT DISTINCT title FROM programs WHERE teams IS NOT NULL AND teams != '[]'")}
-    ours = {(g["channel_vcn"], g["begins_at"]) for g in db.query(
-        "SELECT channel_vcn, begins_at FROM our_grabs")}
-    grabs = []
-    for g in db.query("SELECT * FROM plex_grabs ORDER BY COALESCE(begins_at, 0)"):
-        d = dict(g)
-        d["kind"] = "sports" if g["title"] in sports_titles else "series"
-        d["source"] = "ce" if (g["channel_vcn"], g["begins_at"]) in ours else "plex"
-        grabs.append(d)
-
-    # What each active pass would do next, and why. This is the part that has
-    # to stay visible: a pass that silently picks the wrong broadcast is the
-    # bug the whole app exists to fix.
-    upcoming = []
-    for p in db.query("SELECT * FROM passes WHERE enabled = 1"):
-        nets, chans = passes.allowed_sources(p)
-        for guid, airings in passes.group_by_game(passes.rule_airings(p)).items():
-            allowed = [a for a in airings if passes.in_sources(a, nets, chans)]
-            if not allowed:
-                continue
-            pick, reason = passes.choose_airing(allowed)
-            if not pick:
-                continue
-            if nets or chans:
-                reason += ", limited to " + " or ".join(nets + chans)
-            upcoming.append({
-                "team": passes.rule_label(p), "title": pick["title"],
-                "grandparent": pick["grandparent_title"],
-                "channel": f'{pick["channel_vcn"]} {pick["channel_call_sign"] or ""}'.strip(),
-                "begins_at": pick["begins_at"], "reason": reason,
-                "alternatives": len(airings) - 1,
-                "blocked": passes.already_handled(guid, pick["id"]),
-            })
-    upcoming.sort(key=lambda x: x["begins_at"])
-
-    teams = db.query("SELECT * FROM teams ORDER BY name")
-    actions = db.query(
-        "SELECT a.*, p.team_name FROM pass_actions a LEFT JOIN passes p ON p.id = a.pass_id "
-        "ORDER BY a.id DESC LIMIT 60")
-    return page(request, "recordings.html", rules=rules, grabs=grabs,
-                upcoming=upcoming, teams=teams, actions=actions)
+    return page(request, "recordings.html")
 
 
 # ---------- passes ----------
@@ -959,7 +981,19 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
 def api_schedule(offset: int = 0, limit: int = 40, start: int = 0, end: int = 0):
     rows = _schedule_rows(limit=limit, offset=offset,
                           start=start or None, end=end or None)
-    total = db.one("SELECT COUNT(*) c FROM plex_grabs")["c"]
+    # Counted over the same window as the rows. Counting every grab while the
+    # rows were windowed made `more` true forever for a windowed query.
+    where, args = [], []
+    if start:
+        where.append("COALESCE(begins_at, 0) >= ?")
+        args.append(start)
+    if end:
+        where.append("COALESCE(begins_at, 0) < ?")
+        args.append(end)
+    sql = "SELECT COUNT(*) c FROM plex_grabs"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    total = db.one(sql, tuple(args))["c"]
     return JSONResponse({"ok": True, "rows": rows, "total": total,
                          "more": offset + len(rows) < total})
 
@@ -1070,6 +1104,7 @@ def api_rules():
             "title": p["team_name"] or p["series_title"],
             "team_id": p["team_id"], "series": p["series_title"],
             "networks": nets, "channels": chans,
+            "prefs": db.unjs(p["prefs"], {}) or {},
             "enabled": bool(p["enabled"]), "booked": booked,
             "detail": ("Every game, from the live broadcast" if p["kind"] == "team"
                        else "Every episode the guide carries"),
@@ -1139,7 +1174,7 @@ def api_rule_upcoming(rule_id: int):
             "logo": bool(logos.get(pick["channel_vcn"])),
             "airing_id": pick["id"], "reason": reason,
             "rejected": len(airings) - 1,
-            "status": passes.already_handled(guid, pick["id"]) or "will schedule",
+            "status": passes.already_handled(guid) or "will schedule",
         })
     out.sort(key=lambda x: x["b"] or 0)
     return JSONResponse({"ok": True, "title": passes.rule_label(r), "upcoming": out})
@@ -1147,16 +1182,20 @@ def api_rule_upcoming(rule_id: int):
 
 @app.post("/api/rules/{rule_id}")
 async def api_rule_edit(rule_id: int, networks: str = Form(""),
-                        channels: str = Form(""), enabled: str = Form("")):
-    """Change where a pass may record from, or pause it."""
+                        channels: str = Form(""), enabled: str = Form(""),
+                        settings: str = Form("")):
+    """Change a pass: where it may record from, its Plex settings, or pause it."""
     r = db.one("SELECT * FROM passes WHERE id = ?", (rule_id,))
     if not r:
         return JSONResponse({"ok": False, "error": "no such pass"}, status_code=404)
     nets = db.unjs(networks, []) or []
     chans = db.unjs(channels, []) or []
+    # An empty settings field means "not sent", not "clear them".
+    prefs = db.unjs(settings, None) if settings else None
+    keep = db.js(_pass_prefs(prefs)) if prefs is not None else r["prefs"]
     with db.tx() as c:
-        c.execute("UPDATE passes SET networks=?, channels=?, enabled=? WHERE id=?",
-                  (db.js(nets), db.js(chans),
+        c.execute("UPDATE passes SET networks=?, channels=?, prefs=?, enabled=? WHERE id=?",
+                  (db.js(nets), db.js(chans), keep,
                    1 if enabled not in ("0", "false") else 0, rule_id))
     done = await asyncio.to_thread(passes.run_passes)
     made = len([d for d in done if d["action"] == "scheduled"])
@@ -1196,25 +1235,14 @@ async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
     if not (nets or chans):
         return await asyncio.to_thread(_make_plex_rule, label, rows, template, prefs)
 
-    if kind == "team":
-        if db.one("SELECT 1 FROM passes WHERE kind='team' AND team_id = ?", (t["id"],)):
-            return JSONResponse({"ok": False,
-                                 "error": f"You already follow {t['name']}."}, status_code=409)
-        with db.tx() as c:
-            c.execute("INSERT INTO passes (kind, team_id, team_name, networks, channels, "
-                      "prefs, enabled, created_at) VALUES ('team',?,?,?,?,?,1,?)",
-                      (t["id"], t["name"], db.js(nets), db.js(chans), db.js(prefs),
-                       int(time.time())))
-    else:
-        if db.one("SELECT 1 FROM passes WHERE kind='series' AND series_title = ?", (label,)):
-            return JSONResponse({"ok": False,
-                                 "error": f"You already follow {label}."}, status_code=409)
-        with db.tx() as c:
-            c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
-                      "channels, prefs, enabled, created_at) "
-                      "VALUES ('series',?,?,?,?,?,1,?)",
-                      (label, label, db.js(nets), db.js(chans), db.js(prefs),
-                       int(time.time())))
+    _, label, created = await asyncio.to_thread(
+        _make_pass, kind,
+        dict(t) if kind == "team" else None,
+        None if kind == "team" else label,
+        nets, chans, prefs, False)
+    if not created:
+        return JSONResponse({"ok": False, "error": f"You already follow {label}."},
+                            status_code=409)
 
     done = await asyncio.to_thread(passes.run_passes)
     made = len([d for d in done if d["action"] == "scheduled"])
@@ -1244,7 +1272,9 @@ def _make_plex_rule(label, rows, template, prefs):
             chosen["parameters"],
             chosen.get("targetLibrarySectionID") or 2,
             int(chosen.get("type") or 2), prefs)
-        if key and not plex.subscription_exists(key):
+        # `is False` on purpose: None means the check failed, not that the
+        # rule is gone.
+        if key and plex.subscription_exists(key) is False:
             raise PlexError("Plex accepted the rule and then discarded it. It may "
                             "already have one for this.")
     except Exception as e:
@@ -1253,16 +1283,6 @@ def _make_plex_rule(label, rows, template, prefs):
     return JSONResponse({"ok": True, "ce_rule": False, "message":
                          f"Plex is now recording {chosen.get('title') or label}. "
                          "It appears in the schedule as Plex's own rule."})
-
-
-@app.post("/passes/add")
-def pass_add(team_id: int = Form(...)):
-    t = db.one("SELECT * FROM teams WHERE id = ?", (team_id,))
-    if t:
-        with db.tx() as c:
-            c.execute("INSERT INTO passes (kind, team_id, team_name, enabled, created_at) "
-                      "VALUES ('team', ?, ?, 1, ?)", (t["id"], t["name"], int(time.time())))
-    return RedirectResponse("/recordings", status_code=303)
 
 
 @app.post("/api/plexrule/{key}/delete")
@@ -1317,8 +1337,7 @@ def _channel_rows():
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, tested: str = "", autherror: str = ""):
-    zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
-    return page(request, "settings.html", zones=zones, tested=tested,
+    return page(request, "settings.html", zones=ZONES, tested=tested,
                 autherror=autherror, logos=sync.logo_coverage(),
                 channels=_channel_rows(), users=auth.list_users(),
                 cf_ready=cf_access.available())
@@ -1327,8 +1346,7 @@ def settings_page(request: Request, tested: str = "", autherror: str = ""):
 @app.get("/partial/settings", response_class=HTMLResponse)
 def settings_partial(request: Request, tested: str = "", autherror: str = ""):
     """The settings window on its own, for the overlay the gear opens."""
-    zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
-    return page(request, "_settings.html", zones=zones, tested=tested,
+    return page(request, "_settings.html", zones=ZONES, tested=tested,
                 autherror=autherror, logos=sync.logo_coverage(),
                 channels=_channel_rows(), users=auth.list_users(),
                 cf_ready=cf_access.available())
@@ -1379,15 +1397,19 @@ def settings_user_delete(request: Request, uid: int):
     return RedirectResponse("/settings", status_code=303)
 
 
-def _test_plex():
-    """Check the server, and say something useful when it does not answer.
+def _test_plex(url=None, token=None):
+    """Check a server, and say something useful when it does not answer.
 
     Each step is separate so the reason names the step that failed. A single
     try around the lot can only ever report the last exception, which is how a
     bad token comes to read as "server unreachable".
+
+    Candidate values can be passed in. First run does that rather than saving
+    them, testing, and reverting, which left a window for the sync loop to run
+    against half-entered credentials.
     """
-    url = db.get_setting("plex_url")
-    token = db.get_setting("plex_token")
+    url = url if url is not None else db.get_setting("plex_url")
+    token = token if token is not None else db.get_setting("plex_token")
     if not url:
         return False, "No server address set. Fill in the address above and save."
     if not token:
@@ -1397,11 +1419,10 @@ def _test_plex():
     try:
         info = plex.server_info()
     except PlexError as e:
-        text = str(e)
-        if "401" in text or "403" in text:
+        if getattr(e, "status", None) in (401, 403):
             return False, ("The server answered but rejected the token. Check the "
                            "PlexOnlineToken in Preferences.xml on the server.")
-        return False, f"Could not reach {url}. {text}"
+        return False, f"Could not reach {url}. {e}"
     except Exception as e:
         # Almost always a wrong host, a wrong port, or nothing listening.
         return False, (f"Could not reach {url}. {type(e).__name__}: {e}. "
@@ -1451,9 +1472,17 @@ def _sniff_image(blob):
             return kind
     if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
         return "webp"
-    if blob.lstrip()[:5].lower() in (b"<?xml", b"<svg"):
-        return "svg"
     return None
+
+
+def _is_svg(blob):
+    """SVG is refused, not accepted and then broken.
+
+    It cannot be served as image/png, and serving an uploaded document as
+    image/svg+xml runs any script inside it on this origin.
+    """
+    head = blob.lstrip()[:200].lower()
+    return head.startswith(b"<?xml") or head.startswith(b"<svg") or b"<svg" in head
 
 
 @app.post("/settings/channels/{vcn}/logo")
@@ -1473,8 +1502,12 @@ async def channel_logo_upload(vcn: str, logo: UploadFile = File(...)):
     # would render as a broken image on every page that shows the channel.
     kind = _sniff_image(blob)
     if not kind:
+        if _is_svg(blob):
+            return JSONResponse({"ok": False, "error":
+                                 "SVG cannot be used here. Save it as a PNG and "
+                                 "upload that."}, status_code=400)
         return JSONResponse({"ok": False, "error":
-                             "that is not an image file (PNG, JPEG, GIF, WebP or SVG)."},
+                             "that is not an image file (PNG, JPEG, GIF or WebP)."},
                             status_code=400)
 
     os.makedirs(sync.LOGO_DIR, exist_ok=True)
@@ -1541,6 +1574,10 @@ _BLANK = bytes.fromhex(
     "0000000049454e44ae426082")
 
 
+_LOGO_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".gif": "image/gif", ".webp": "image/webp"}
+
+
 @app.get("/logo/{vcn}")
 def logo(vcn: str, v: str = ""):
     """Channel logo. A logo you supplied wins over the guide's own."""
@@ -1550,7 +1587,10 @@ def logo(vcn: str, v: str = ""):
         path = row["custom_logo"] if (row["custom_logo"] and
                                       os.path.exists(row["custom_logo"])) else row["logo_path"]
     if path and os.path.exists(path):
-        return FileResponse(path, media_type="image/png",
+        # An uploaded JPEG served as image/png renders as nothing in some
+        # browsers, so the type follows the file.
+        kind = _LOGO_TYPES.get(os.path.splitext(path)[1].lower(), "image/png")
+        return FileResponse(path, media_type=kind,
                             headers={"Cache-Control": "public, max-age=604800"})
     return Response(_BLANK, media_type="image/png",
                     headers={"Cache-Control": "public, max-age=3600"})
