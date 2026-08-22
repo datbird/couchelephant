@@ -102,13 +102,15 @@ a{color:inherit;text-decoration:none}
    height, which changes the moment the header wraps on a phone. */
 .topbar{position:sticky;top:0;z-index:10;background:var(--panel);
   border-bottom:1px solid var(--line)}
-header{display:flex;align-items:center;gap:22px;padding:0 22px;height:64px;
+header{display:flex;align-items:center;gap:22px;padding:0 22px;height:72px;
   background:var(--panel);border-bottom:1px solid var(--line)}
-header .brand{display:flex;align-items:center;gap:9px;height:100%}
+header .brand{display:flex;align-items:center;gap:11px;height:100%}
+.brand-text{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
 /* Fills the bar edge to edge. The artwork is cropped to its own bounds, so
    height:100% leaves no gap above or below. */
 header .mark{height:100%;width:auto;display:block;align-self:stretch}
-header .wordmark{height:22px;width:auto;display:block}
+header .wordmark{height:21px;width:auto;display:block}
+.tagline{font-size:12px;color:var(--dim);line-height:1;letter-spacing:.2px}
 /* ---- tab bar ----
    Same shape as Ludodex: borderless tabs that dim when inactive, an underline
    that slides between them, and a burst of sparks on arrival. Ported from the
@@ -606,6 +608,52 @@ body.signin .pt-nav{display:none}
 .setclose{position:absolute;top:10px;right:12px;background:transparent;border:none;
   color:var(--dim);font-size:24px;line-height:1;cursor:pointer;padding:0 4px;z-index:2}
 .setclose:hover{color:var(--text)}
+/* The result of a check, said plainly. A tick or a cross carries the answer,
+   and the sentence beside it carries the reason, which is the half that tells
+   you what to do next. */
+.verdict{display:flex;align-items:flex-start;gap:10px;margin-top:12px;
+  padding:11px 13px;border-radius:8px;font-size:13px;line-height:1.45;
+  border:1px solid var(--line);background:var(--panel2)}
+.verdict.ok{border-color:var(--ok-bd);background:var(--ok-soft)}
+.verdict.bad{border-color:var(--bad-bd);background:var(--bad-soft)}
+.vmark{flex:0 0 20px;width:20px;height:20px;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;line-height:1;margin-top:1px}
+.verdict.ok .vmark{background:var(--ok);color:#fff}
+.verdict.ok .vmark::before{content:"\2713"}
+.verdict.bad .vmark{background:var(--bad);color:#fff}
+.verdict.bad .vmark::before{content:"\2715"}
+.verdict.busy .vmark{background:var(--panel);border:2px solid var(--accent-ring);
+  border-top-color:var(--accent);animation:spin .7s linear infinite}
+.verdict .vtext{min-width:0}
+
+/* Channel artwork. One row per channel, its logo shown on the plate it will
+   actually appear on, so a white logo is judged against the right ground. */
+.chlist{border:1px solid var(--line);border-radius:8px;max-height:46vh;overflow:auto}
+.chrow{display:flex;align-items:center;gap:12px;padding:9px 12px;
+  border-bottom:1px solid var(--line);font-size:13px}
+.chrow:last-child{border-bottom:none}
+.chrow[hidden]{display:none}
+.chart{width:54px;height:32px;flex:0 0 54px;object-fit:contain;padding:3px;
+  border-radius:4px;background:var(--tile)}
+.chmeta{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.chmeta b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chsrc{margin-left:auto;flex:0 0 auto}
+.chacts{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.chup{cursor:pointer}
+.btnlike{display:inline-block;padding:3px 9px;font-size:12px;border-radius:6px;
+  border:1px solid var(--line);background:var(--panel2);color:var(--text)}
+.chup:hover .btnlike{border-color:var(--accent);color:var(--accent-ink)}
+.chsay{flex:0 0 100%;font-size:12px;color:var(--dim);padding-left:66px}
+.chsay.bad{color:var(--bad-fg)}
+.chsay.ok{color:var(--ok-fg)}
+.chsay:empty{display:none}
+.chrow{flex-wrap:wrap}
+@media (max-width:700px){
+  .chsrc{order:5}
+  .chsay{padding-left:0}
+}
+
 .saved{font-size:12px;color:var(--ok-fg);opacity:0;transition:opacity .15s ease}
 .saved.on{opacity:1}
 .saved.bad{color:var(--bad-fg)}
@@ -654,9 +702,10 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
    --------------------------------------------------------------------------- */
 @media (max-width:860px){
   header{height:auto;padding:0 12px;gap:10px;flex-wrap:wrap;row-gap:0}
-  header .brand{height:52px}
-  header .mark{height:44px;align-self:center}
-  header .wordmark{height:19px}
+  header .brand{height:56px}
+  header .mark{height:46px;align-self:center}
+  header .wordmark{height:18px}
+  .tagline{font-size:11px}
   header .right{gap:4px;height:52px}
   .pt-tab{font-size:14px;padding:10px 8px}
   /* A scrollbar under the day strip is noise on a touch screen, where the
@@ -674,7 +723,7 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   /* Below this the wordmark and the controls cannot share a line, and the
      controls are the half you can press. The mark alone still says whose app
      this is. */
-  header .wordmark{display:none}
+  header .wordmark,.tagline{display:none}
   header .brand{height:48px}
   header .mark{height:40px}
   header .right{height:48px}
@@ -772,10 +821,16 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 <body class="{% block bodyclass %}{% endblock %}">
 <div class="topbar">
 <header>
-  <a class="brand" href="/" title="A CouchElephant never forgets.">
-    <img src="/static/mark.png" alt="" class="mark">
-    <img src="/static/wordmark.png" alt="CouchElephant" class="wordmark darkonly">
-    <img src="/static/wordmark-light.png" alt="CouchElephant" class="wordmark lightonly">
+  {# Mark, then the wordmark stacked over the tagline, so the tagline reads as a
+     caption to the logo instead of a third thing competing for the bar. #}
+  <a class="brand" href="/">
+    <img src="/static/mark.png" alt="" class="mark"
+         title="CouchElephant {{ version }}">
+    <span class="brand-text">
+      <img src="/static/wordmark.png" alt="CouchElephant" class="wordmark darkonly">
+      <img src="/static/wordmark-light.png" alt="CouchElephant" class="wordmark lightonly">
+      <span class="tagline">A CouchElephant never forgets.</span>
+    </span>
   </a>
   <div class="right">
     {% if settings.dry_run == '1' %}<span class="pill warn">PREVIEW MODE</span>{% endif %}
@@ -1065,9 +1120,40 @@ window.wireSettings = function (root) {
 
   // Saving stays in the window. The endpoints redirect back to the settings
   // page, which a fetch follows and reads as success.
+  // A check reports a verdict rather than a saved marker: a tick or a cross,
+  // and the sentence that says what to do about it.
+  function runCheck(f) {
+    var out = f.parentElement.querySelector('.verdict');
+    var btn = f.querySelector('button'), old = btn ? btn.textContent : '';
+    if (out) {
+      out.hidden = false;
+      out.className = 'verdict busy';
+      out.querySelector('.vtext').textContent = 'Checking...';
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+    fetch(f.action, {method: 'POST', headers: {Accept: 'application/json'},
+                     body: new URLSearchParams(new FormData(f))})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (out) {
+          out.className = 'verdict ' + (j.ok ? 'ok' : 'bad');
+          out.querySelector('.vtext').textContent = j.detail || (j.ok ? 'Fine.' : 'Failed.');
+        }
+      })
+      .catch(function (err) {
+        if (out) {
+          out.className = 'verdict bad';
+          out.querySelector('.vtext').textContent =
+            'Could not reach CouchElephant itself: ' + err;
+        }
+      })
+      .then(function () { if (btn) { btn.disabled = false; btn.textContent = old; } });
+  }
+
   root.querySelectorAll('form.setform').forEach(function (f) {
     f.addEventListener('submit', function (e) {
       e.preventDefault();
+      if (f.dataset.verdict) { runCheck(f); return; }
       var btn = f.querySelector('button'), tell = f.querySelector('.saved') ||
         (f.parentElement && f.parentElement.querySelector('.saved'));
       var old = btn ? btn.textContent : '';
@@ -1080,10 +1166,9 @@ window.wireSettings = function (root) {
             setTimeout(function () { tell.className = 'saved'; }, 2400);
           }
           if (btn) { btn.disabled = false; btn.textContent = old; }
-          // A connection test and a user removal both change what the window
-          // shows, so those reload it rather than leaving a stale panel.
-          if (f.action.indexOf('/settings/test') !== -1 ||
-              f.action.indexOf('/delete') !== -1) location.reload();
+          // Removing a user changes what the window lists, so that one reloads
+          // rather than leaving a row that no longer exists on screen.
+          if (f.action.indexOf('/delete') !== -1) location.reload();
         })
         .catch(function () {
           if (tell) { tell.className = 'saved on bad'; tell.textContent = 'Failed'; }
@@ -1091,6 +1176,67 @@ window.wireSettings = function (root) {
         });
     });
   });
+
+  // Channel artwork: upload one of your own, or drop back to the guide's.
+  var chlist = root.querySelector('#chlist');
+  if (chlist) {
+    var chq = root.querySelector('#chq');
+    if (chq) chq.addEventListener('input', function () {
+      var t = chq.value.trim().toLowerCase();
+      chlist.querySelectorAll('.chrow').forEach(function (r) {
+        r.hidden = !!t && (r.dataset.find || '').toLowerCase().indexOf(t) === -1;
+      });
+    });
+
+    function tell(rowEl, text, kind) {
+      var s2 = rowEl.querySelector('.chsay');
+      s2.className = 'chsay' + (kind ? ' ' + kind : '');
+      s2.textContent = text || '';
+    }
+
+    function afterChange(rowEl, j, custom) {
+      // Bust the cache with the version the server just handed back, or the
+      // browser keeps showing the logo that was replaced.
+      var img = rowEl.querySelector('.chart');
+      img.src = '/logo/' + encodeURIComponent(rowEl.dataset.vcn) + '?v=' + (j.v || Date.now());
+      var pill = rowEl.querySelector('.chsrc');
+      pill.textContent = custom ? 'yours' : 'guide';
+      pill.classList.toggle('ce', custom);
+      rowEl.querySelector('.chreset').hidden = !custom;
+      rowEl.querySelector('.btnlike').textContent = 'Replace';
+      tell(rowEl, j.message || '', 'ok');
+    }
+
+    chlist.querySelectorAll('.chrow').forEach(function (rowEl) {
+      var file = rowEl.querySelector('input[type=file]');
+      file.addEventListener('change', function () {
+        if (!file.files || !file.files[0]) return;
+        var fd = new FormData();
+        fd.append('logo', file.files[0]);
+        tell(rowEl, 'Uploading...', '');
+        fetch('/settings/channels/' + encodeURIComponent(rowEl.dataset.vcn) + '/logo',
+              {method: 'POST', body: fd})
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j.ok) afterChange(rowEl, j, true);
+            else tell(rowEl, j.error || 'That did not work.', 'bad');
+          })
+          .catch(function (err) { tell(rowEl, String(err), 'bad'); })
+          .then(function () { file.value = ''; });
+      });
+      rowEl.querySelector('.chreset').addEventListener('click', function () {
+        tell(rowEl, 'Resetting...', '');
+        fetch('/settings/channels/' + encodeURIComponent(rowEl.dataset.vcn) + '/logo/reset',
+              {method: 'POST'})
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j.ok) afterChange(rowEl, j, false);
+            else tell(rowEl, j.error || 'That did not work.', 'bad');
+          })
+          .catch(function (err) { tell(rowEl, String(err), 'bad'); });
+      });
+    });
+  }
 
   show('plex');
 };

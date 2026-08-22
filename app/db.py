@@ -219,6 +219,10 @@ MIGRATIONS = [
     # its own rules take one channel or none.
     ("passes", "networks", "TEXT"),
     ("passes", "channels", "TEXT"),
+    # A logo the user supplied, which wins over whatever the guide offers. Kept
+    # in its own column so a re-fetch of the guide's own art cannot touch it.
+    ("channels", "custom_logo", "TEXT"),
+    ("channels", "custom_logo_at", "INTEGER"),
     ("passes", "series_guid", "TEXT"),
     ("passes", "series_title", "TEXT"),
 ]

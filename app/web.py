@@ -6,7 +6,7 @@ import time
 import urllib.parse
 import zoneinfo
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -16,6 +16,8 @@ from .plex import Plex, PlexError
 
 BASE = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
+VERSION = "0.90"
+
 app = FastAPI(title="CouchElephant", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="static")
 
@@ -92,13 +94,27 @@ def page(request, name, **ctx):
     ctx.setdefault("configured", bool(db.get_setting("plex_url") and db.get_setting("plex_token")))
     ctx.setdefault("last_sync", db.one("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1"))
     ctx.setdefault("now", int(time.time()))
+    ctx.setdefault("version", VERSION)
     ctx["request"] = request
     return templates.TemplateResponse(name, ctx)
 
 
 # Reachable without signing in: the sign-in screens themselves, the health
 # check, and the static files that render them.
-_OPEN = ("/login", "/setup", "/logout", "/healthz", "/static/", "/favicon.ico")
+_OPEN = ("/login", "/setup", "/logout", "/healthz", "/static/", "/favicon.ico",
+         "/welcome")
+
+
+@app.middleware("http")
+async def _first_run(request: Request, call_next):
+    """Nothing works before there is a server to talk to, so say so once,
+    on a screen that asks for it, rather than a banner on every page."""
+    path = request.url.path
+    if (not path.startswith(_OPEN) and not path.startswith("/settings")
+            and not path.startswith("/api/") and not path.startswith("/partial/")
+            and request.method == "GET" and not _configured()):
+        return RedirectResponse("/welcome", status_code=303)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -114,6 +130,44 @@ async def _auth_gate(request: Request, call_next):
     if path.startswith("/api/") or path.startswith("/partial/"):
         return JSONResponse({"ok": False, "error": "sign in required"}, status_code=401)
     return RedirectResponse(where, status_code=303)
+
+
+# ---------- first run ----------
+
+def _configured():
+    return bool(db.get_setting("plex_url") and db.get_setting("plex_token"))
+
+
+@app.get("/welcome", response_class=HTMLResponse)
+def welcome(request: Request):
+    if _configured():
+        return RedirectResponse("/", status_code=303)
+    zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
+    return page(request, "welcome.html", zones=zones, nav="")
+
+
+@app.post("/welcome")
+def welcome_save(plex_url: str = Form(""), plex_token: str = Form(""),
+                 timezone: str = Form("UTC")):
+    """Test first, then save. A wrong address saved quietly is what makes the
+    first five minutes confusing."""
+    url, token = plex_url.strip().rstrip("/"), plex_token.strip()
+    if not url or not token:
+        return JSONResponse({"ok": False,
+                             "detail": "Both the address and the token are needed."})
+    before = (db.get_setting("plex_url"), db.get_setting("plex_token"))
+    db.set_setting("plex_url", url)
+    db.set_setting("plex_token", token)
+    ok, detail = _test_plex()
+    if not ok:
+        # Put back what was there. A failed test must not leave the app half
+        # configured and the banner gone.
+        db.set_setting("plex_url", before[0] or "")
+        db.set_setting("plex_token", before[1] or "")
+        return JSONResponse({"ok": False, "detail": detail})
+    db.set_setting("timezone", timezone)
+    db.set_setting("dry_run", "1")
+    return JSONResponse({"ok": True, "detail": detail})
 
 
 # ---------- sign in ----------
@@ -911,12 +965,29 @@ async def passes_run():
 
 # ---------- settings ----------
 
+def _channel_rows():
+    """Every channel, and where its logo comes from."""
+    out = []
+    for c in db.query("SELECT * FROM channels ORDER BY CAST(vcn AS REAL), vcn"):
+        custom = bool(c["custom_logo"] and os.path.exists(c["custom_logo"]))
+        theirs = bool(c["logo_path"] and os.path.exists(c["logo_path"]))
+        out.append({
+            "vcn": c["vcn"], "call_sign": c["call_sign"] or "",
+            "network": c["network"] or "",
+            "custom": custom, "has_logo": custom or theirs,
+            "source": "yours" if custom else ("guide" if theirs else "none"),
+            "v": c["custom_logo_at"] or c["logo_fetched_at"] or 0,
+        })
+    return out
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, tested: str = "", autherror: str = ""):
     zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
     return page(request, "settings.html", zones=zones, tested=tested,
                 autherror=autherror, logos=sync.logo_coverage(),
-                users=auth.list_users(), cf_ready=cf_access.available())
+                channels=_channel_rows(), users=auth.list_users(),
+                cf_ready=cf_access.available())
 
 
 @app.get("/partial/settings", response_class=HTMLResponse)
@@ -925,7 +996,8 @@ def settings_partial(request: Request, tested: str = "", autherror: str = ""):
     zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
     return page(request, "_settings.html", zones=zones, tested=tested,
                 autherror=autherror, logos=sync.logo_coverage(),
-                users=auth.list_users(), cf_ready=cf_access.available())
+                channels=_channel_rows(), users=auth.list_users(),
+                cf_ready=cf_access.available())
 
 
 @app.post("/settings")
@@ -973,17 +1045,144 @@ def settings_user_delete(request: Request, uid: int):
     return RedirectResponse("/settings", status_code=303)
 
 
-@app.post("/settings/test")
-def settings_test():
+def _test_plex():
+    """Check the server, and say something useful when it does not answer.
+
+    Each step is separate so the reason names the step that failed. A single
+    try around the lot can only ever report the last exception, which is how a
+    bad token comes to read as "server unreachable".
+    """
+    url = db.get_setting("plex_url")
+    token = db.get_setting("plex_token")
+    if not url:
+        return False, "No server address set. Fill in the address above and save."
+    if not token:
+        return False, "No token set. Paste the token above and save."
+
+    plex = Plex(url, token)
     try:
-        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
         info = plex.server_info()
-        dvrs = plex.dvrs()
-        msg = (f"OK: {info.get('friendlyName')} (Plex {info.get('version')}), "
-               f"{len(dvrs)} DVR(s)")
+    except PlexError as e:
+        text = str(e)
+        if "401" in text or "403" in text:
+            return False, ("The server answered but rejected the token. Check the "
+                           "PlexOnlineToken in Preferences.xml on the server.")
+        return False, f"Could not reach {url}. {text}"
     except Exception as e:
-        msg = f"FAILED: {type(e).__name__}: {e}"
-    return RedirectResponse(f"/settings?tested={msg}", status_code=303)
+        # Almost always a wrong host, a wrong port, or nothing listening.
+        return False, (f"Could not reach {url}. {type(e).__name__}: {e}. "
+                       "The address has to work from inside this container, so "
+                       "127.0.0.1 only works if Plex runs in it too.")
+
+    name = info.get("friendlyName") or "the server"
+    version = info.get("version") or "unknown version"
+    try:
+        dvrs = plex.dvrs()
+    except Exception as e:
+        return False, (f"Reached {name} (Plex {version}), but could not read its "
+                       f"DVRs: {type(e).__name__}: {e}")
+    if not dvrs:
+        return False, (f"Reached {name} (Plex {version}), but it has no DVR. "
+                       "Add a tuner to Plex before CouchElephant can record.")
+
+    lineup = dvrs[0].get("lineupTitle") or "a lineup"
+    return True, (f"{name}, Plex {version}. "
+                  f"{len(dvrs)} DVR{'' if len(dvrs) == 1 else 's'}, {lineup}.")
+
+
+@app.post("/settings/test")
+def settings_test(request: Request):
+    ok, detail = _test_plex()
+    if "application/json" in (request.headers.get("accept") or ""):
+        return JSONResponse({"ok": ok, "detail": detail})
+    prefix = "OK: " if ok else "FAILED: "
+    return RedirectResponse("/settings?tested=" + urllib.parse.quote(prefix + detail),
+                            status_code=303)
+
+
+# What a browser will actually render, by the file's own first bytes rather
+# than by the name it arrived under.
+_IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\xff\xd8\xff", "jpg"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+)
+_MAX_LOGO = 2 * 1024 * 1024
+
+
+def _sniff_image(blob):
+    for magic, kind in _IMAGE_MAGIC:
+        if blob.startswith(magic):
+            return kind
+    if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        return "webp"
+    if blob.lstrip()[:5].lower() in (b"<?xml", b"<svg"):
+        return "svg"
+    return None
+
+
+@app.post("/settings/channels/{vcn}/logo")
+async def channel_logo_upload(vcn: str, logo: UploadFile = File(...)):
+    """Use a logo of your own for this channel."""
+    row = db.one("SELECT vcn, custom_logo FROM channels WHERE vcn = ?", (vcn,))
+    if not row:
+        return JSONResponse({"ok": False, "error": "unknown channel"}, status_code=404)
+    blob = await logo.read()
+    if not blob:
+        return JSONResponse({"ok": False, "error": "that file is empty"}, status_code=400)
+    if len(blob) > _MAX_LOGO:
+        return JSONResponse({"ok": False, "error":
+                             f"that file is {len(blob)//1024} KB. The limit is "
+                             f"{_MAX_LOGO//1024} KB."}, status_code=400)
+    # Trust the bytes, not the extension. A file named .png that is not one
+    # would render as a broken image on every page that shows the channel.
+    kind = _sniff_image(blob)
+    if not kind:
+        return JSONResponse({"ok": False, "error":
+                             "that is not an image file (PNG, JPEG, GIF, WebP or SVG)."},
+                            status_code=400)
+
+    os.makedirs(sync.LOGO_DIR, exist_ok=True)
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in vcn)
+    path = os.path.join(sync.LOGO_DIR, f"custom-{safe}.{kind}")
+    tmp = path + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(blob)
+    os.replace(tmp, path)
+    # A different extension than last time leaves the old file behind.
+    old = row["custom_logo"]
+    if old and old != path and os.path.exists(old):
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    with db.tx() as c:
+        c.execute("UPDATE channels SET custom_logo = ?, custom_logo_at = ? WHERE vcn = ?",
+                  (path, int(time.time()), vcn))
+    return JSONResponse({"ok": True, "message": f"Logo set for {vcn}.",
+                         "v": int(time.time())})
+
+
+@app.post("/settings/channels/{vcn}/logo/reset")
+def channel_logo_reset(vcn: str):
+    """Go back to whatever the guide provides for this channel."""
+    row = db.one("SELECT custom_logo FROM channels WHERE vcn = ?", (vcn,))
+    if not row:
+        return JSONResponse({"ok": False, "error": "unknown channel"}, status_code=404)
+    if row["custom_logo"] and os.path.exists(row["custom_logo"]):
+        try:
+            os.remove(row["custom_logo"])
+        except OSError:
+            pass
+    with db.tx() as c:
+        c.execute("UPDATE channels SET custom_logo = NULL, custom_logo_at = NULL "
+                  "WHERE vcn = ?", (vcn,))
+    has = db.one("SELECT logo_path FROM channels WHERE vcn = ?", (vcn,))
+    back = bool(has and has["logo_path"] and os.path.exists(has["logo_path"]))
+    return JSONResponse({"ok": True, "v": int(time.time()),
+                         "message": (f"{vcn} is back to the guide's logo." if back
+                                     else f"{vcn} has no logo again. The guide offers none.")})
 
 
 @app.post("/settings/logos")
@@ -1009,10 +1208,13 @@ _BLANK = bytes.fromhex(
 
 
 @app.get("/logo/{vcn}")
-def logo(vcn: str):
-    """Channel logo, served from the local cache."""
-    row = db.one("SELECT logo_path FROM channels WHERE vcn = ?", (vcn,))
-    path = row["logo_path"] if row else None
+def logo(vcn: str, v: str = ""):
+    """Channel logo. A logo you supplied wins over the guide's own."""
+    row = db.one("SELECT logo_path, custom_logo FROM channels WHERE vcn = ?", (vcn,))
+    path = None
+    if row:
+        path = row["custom_logo"] if (row["custom_logo"] and
+                                      os.path.exists(row["custom_logo"])) else row["logo_path"]
     if path and os.path.exists(path):
         return FileResponse(path, media_type="image/png",
                             headers={"Cache-Control": "public, max-age=604800"})

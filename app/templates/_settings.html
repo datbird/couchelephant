@@ -55,9 +55,14 @@
         </form>
         <div class="setblock" data-find="test connection dvr">
           <h3>Connection</h3>
-          <p class="dim">Checks the server answers, and reports how many DVRs it has.</p>
-          <form method="post" action="/settings/test" class="setform">
-            <button>Test connection</button><span class="saved"></span></form>
+          <p class="dim">Checks the server answers, accepts the token, and has a DVR.</p>
+          <form method="post" action="/settings/test" class="setform" data-verdict="1">
+            <button>Test connection</button>
+          </form>
+          <div class="verdict" id="plexverdict" hidden>
+            <span class="vmark" aria-hidden="true"></span>
+            <span class="vtext"></span>
+          </div>
         </div>
       </section>
 
@@ -221,17 +226,53 @@
           <button>Re-fetch all logos</button><span class="saved"></span></form>
       </section>
 
+      <section data-sec="channels" data-tab="art" data-tab-label="Artwork" hidden>
+        <h2>Channel artwork</h2>
+        <p class="dim">Use your own logo where the guide's is wrong, or missing. Yours wins
+          until you reset it, and a guide re-fetch never touches it.</p>
+        <input class="settings-search chq" id="chq" placeholder="Search channels..."
+               autocomplete="off" style="margin-bottom:12px">
+        <div class="chlist" id="chlist" data-find="channel logo artwork upload override reset">
+          {% for c in channels %}
+          <div class="chrow" data-vcn="{{ c.vcn }}"
+               data-find="{{ c.vcn }} {{ c.call_sign }} {{ c.network }}">
+            <img src="/logo/{{ c.vcn }}?v={{ c.v }}" alt="" class="chart">
+            <div class="chmeta">
+              <b>{{ c.vcn }} {{ c.call_sign }}</b>
+              <span class="dim tiny">{{ c.network or 'no network listed' }}</span>
+            </div>
+            <span class="pill {{ 'ce' if c.custom else '' }} chsrc">
+              {{ 'yours' if c.custom else ('guide' if c.has_logo else 'none') }}</span>
+            <div class="chacts">
+              <label class="chup">
+                <input type="file" accept="image/*" hidden>
+                <span class="btnlike">{{ 'Replace' if c.has_logo else 'Add' }}</span>
+              </label>
+              <button type="button" class="tiny chreset"
+                      {{ '' if c.custom else 'hidden' }}>Reset</button>
+            </div>
+            <span class="chsay"></span>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
       {# ---------------- About ---------------- #}
       <section data-sec="about" data-tab="about" data-tab-label="About" hidden>
         <h2>CouchElephant</h2>
         <p class="dim">A CouchElephant never forgets.</p>
         <table class="stack" data-find="about version licence third party">
+          <tr><td class="dim">Version</td><td>{{ version }}</td></tr>
           <tr><td class="dim">What it does</td>
-              <td>Reads the Plex guide into SQLite, then records a team or a programme
-                  from the live broadcast rather than a repeat.</td></tr>
-          <tr><td class="dim">Guide held</td>
-              <td>{{ logos.channels }} channels</td></tr>
-          <tr><td class="dim">Sign-in</td><td>{{ auth_mode }}</td></tr>
+              <td>Follow a team, or a programme, and it records every one that comes up.
+                  It always picks the live broadcast, not the repeat a day or two later,
+                  which is the part Plex gets wrong on its own.</td></tr>
+          <tr><td class="dim">Channels</td>
+              <td>{{ logos.channels }} in your guide</td></tr>
+          <tr><td class="dim">Sign-in</td>
+              <td>{% if auth_mode == 'none' %}Off
+                  {%- elif auth_mode == 'local' %}Accounts kept here
+                  {%- else %}Cloudflare Access{% endif %}</td></tr>
         </table>
       </section>
 
