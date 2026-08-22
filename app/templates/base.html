@@ -78,17 +78,36 @@ tr:hover td{background:var(--panel2)}
   white-space:nowrap}
 .growr{display:flex;border-bottom:1px solid var(--line)}
 .growr:last-child{border-bottom:none}
+/* Logo only, the way Plex does it. The number and callsign appear on hover,
+   and stay visible for the handful of channels with no logo. */
 .gch{position:sticky;left:0;z-index:2;flex:0 0 var(--chw);width:var(--chw);
-  display:flex;align-items:center;gap:9px;padding:0 12px;background:var(--panel);
-  border-right:1px solid var(--line)}
-.gch img{width:44px;height:26px;object-fit:contain;flex:0 0 44px;
-  background:rgba(255,255,255,.04);border-radius:4px;padding:2px}
-.gch .n{font-size:12px;line-height:1.15;color:var(--dim)}
+  display:flex;align-items:center;justify-content:center;padding:0 10px;
+  background:var(--panel);border-right:1px solid var(--line);cursor:default}
+.gch img{width:62px;height:38px;object-fit:contain;
+  background:rgba(255,255,255,.04);border-radius:4px;padding:3px}
+.gch .n{font-size:12px;line-height:1.2;color:var(--dim);text-align:center}
+.gch:not(.nologo) .n{position:absolute;left:calc(100% + 8px);top:50%;
+  transform:translateY(-50%);white-space:nowrap;background:var(--panel2);
+  border:1px solid var(--line);border-radius:6px;padding:5px 9px;z-index:6;
+  opacity:0;pointer-events:none;transition:opacity .12s ease;
+  box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.gch:not(.nologo):hover .n{opacity:1}
+.gch:not(.nologo):hover{background:var(--panel2)}
 .glane{position:relative;height:var(--rowh)}
-.gprog{position:absolute;top:4px;bottom:4px;overflow:hidden;padding:6px 9px;
+/* No overflow:hidden here. It would make the block its own scroll container,
+   which stops the sticky label below from tracking the guide's scrollport. */
+.gprog{position:absolute;top:4px;bottom:4px;padding:0;cursor:pointer;
   background:var(--panel2);border:1px solid var(--line);border-radius:5px;
   display:flex;flex-direction:column;justify-content:center}
 .gprog:hover{background:#1a2b3a;border-color:#2c4257}
+/* A long programme scrolls past the left edge, taking its title with it. This
+   pins the label just clear of the channel column so it stays readable for as
+   long as any part of the block is on screen. */
+/* align-self and a fit-content width matter: as a flex item it would otherwise
+   stretch to the full block width, leaving sticky no room to slide within it. */
+.gpin{position:sticky;left:calc(var(--chw) + 10px);padding:6px 9px;
+  align-self:flex-start;width:fit-content;max-width:100%;min-width:0;
+  box-sizing:border-box}
 .gprog .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .gprog .m{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;
@@ -97,7 +116,7 @@ tr:hover td{background:var(--panel2)}
 .gprog.drm{opacity:.5}
 .gnow{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);z-index:1;
   pointer-events:none}
-:root{--chw:150px;--rowh:62px}
+:root{--chw:92px;--rowh:62px}
 
 /* ---- programme overlay ---- */
 .ovl{position:fixed;inset:0;background:rgba(2,6,11,.72);z-index:50;display:none;
@@ -131,7 +150,7 @@ tr:hover td{background:var(--panel2)}
 .air .act{margin-left:auto}
 .ovlfoot{padding:16px 22px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .note{font-size:12px;color:var(--dim)}
-@media (max-width:700px){:root{--chw:96px}.gch img{display:none}}
+@media (max-width:700px){:root{--chw:70px}.gch img{width:48px;height:30px}}
 .tiny{font-size:12px}
 input,select,button{font:inherit;background:var(--panel2);color:var(--text);
   border:1px solid var(--line);border-radius:6px;padding:7px 10px}

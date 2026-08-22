@@ -211,9 +211,10 @@
     var row = document.createElement('div');
     row.className = 'growr';
     var label = document.createElement('div');
-    label.className = 'gch';
-    label.innerHTML = (c.logo ? '<img src="/logo/' + c.vcn + '" alt="" loading="lazy">' : '') +
-      '<span class="n">' + c.vcn + '<br>' + (c.call_sign || '') + '</span>';
+    label.className = 'gch' + (c.logo ? '' : ' nologo');
+    label.title = c.vcn + (c.call_sign ? ' ' + c.call_sign : '');
+    label.innerHTML = (c.logo ? '<img src="/logo/' + c.vcn + '" alt="' + esc(c.call_sign) + '" loading="lazy">' : '') +
+      '<span class="n">' + esc(c.vcn) + '<br>' + esc(c.call_sign || '') + '</span>';
     var lane = document.createElement('div');
     lane.className = 'glane';
     row.appendChild(label); row.appendChild(lane); rowsEl.appendChild(row);
@@ -235,9 +236,10 @@
     el.title = a.title + '\n' + hh + ':' + (mm < 10 ? '0' + mm : mm) + ' ' + ap +
                (a.summary ? '\n\n' + a.summary : '');
     el.dataset.aid = a.id;
-    el.innerHTML = '<div class="t">' + esc(a.title) + '</div>' +
+    el.innerHTML = '<div class="gpin">' +
+      '<div class="t">' + esc(a.title) + '</div>' +
       '<div class="m">' + esc(a.parent && a.parent !== a.title ? a.parent : '') +
-      (a.premiere ? ' &middot; LIVE' : '') + (a.drm ? ' &middot; DRM' : '') + '</div>';
+      (a.premiere ? ' &middot; LIVE' : '') + (a.drm ? ' &middot; DRM' : '') + '</div></div>';
     lane.appendChild(el);
   }
 
