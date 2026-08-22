@@ -117,8 +117,10 @@ header .wordmark{height:22px;width:auto;display:block}
 /* No overflow here. A scroll container clips both axes, and the sparks that
    fly downward out of the bar were being cut off at its edge. Two short tabs
    fit the narrowest phone, so there is nothing to scroll. */
-.pt-nav{position:relative;display:flex;gap:0;padding:0 22px;
-  background:var(--panel)}
+.pt-nav{position:relative;display:flex;gap:0;background:var(--panel)}
+/* Each tab takes an equal share of the full width, label centred, the way
+   Ludodex fills its main tab bar. The underline then spans the whole tab. */
+.pt-tab{flex:1 1 0;text-align:center}
 .pt-tab{display:inline-block;color:var(--text);opacity:.62;
   font-size:15px;font-weight:600;letter-spacing:.02em;
   padding:12px 18px;cursor:pointer;position:relative;white-space:nowrap;
@@ -552,8 +554,7 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   header .mark{height:44px;align-self:center}
   header .wordmark{height:19px}
   header .right{gap:4px;height:52px}
-  .pt-nav{padding:0 6px}
-  .pt-tab{font-size:14px;padding:10px 14px}
+  .pt-tab{font-size:14px;padding:10px 8px}
   /* A scrollbar under the day strip is noise on a touch screen, where the
      strip is dragged rather than scrolled by a bar. */
   .daybar{scrollbar-width:none}
