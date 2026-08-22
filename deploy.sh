@@ -6,22 +6,22 @@
 # again for new code to take effect.
 set -euo pipefail
 
-HOST="${SMARTPASS_HOST:-your-plex-host}"
-REMOTE_DIR="${SMARTPASS_REMOTE_DIR:-/mnt/data/smartpass}"
-PORT="${SMARTPASS_PORT:-8710}"
-TZ_NAME="${SMARTPASS_TZ:-America/Chicago}"
-TAG="smartpass:1.0"
+HOST="${COUCHELEPHANT_HOST:-your-plex-host}"
+REMOTE_DIR="${COUCHELEPHANT_REMOTE_DIR:-/mnt/data/couchelephant}"
+PORT="${COUCHELEPHANT_PORT:-8710}"
+TZ_NAME="${COUCHELEPHANT_TZ:-America/Chicago}"
+TAG="couchelephant:1.0"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "==> packaging"
-tar czf /tmp/smartpass.tgz -C "$HERE" Dockerfile requirements.txt app/
-scp -q /tmp/smartpass.tgz "$HOST:/tmp/smartpass.tgz"
+tar czf /tmp/couchelephant.tgz -C "$HERE" Dockerfile requirements.txt app/
+scp -q /tmp/couchelephant.tgz "$HOST:/tmp/couchelephant.tgz"
 
 echo "==> building on $HOST"
 ssh -o ConnectTimeout=60 "$HOST" "
   set -e
   rm -rf $REMOTE_DIR/src && mkdir -p $REMOTE_DIR/src $REMOTE_DIR/data
-  tar xzf /tmp/smartpass.tgz -C $REMOTE_DIR/src
+  tar xzf /tmp/couchelephant.tgz -C $REMOTE_DIR/src
   cd $REMOTE_DIR/src
   docker build -t $TAG . 2>&1 | tail -2
 "
@@ -29,14 +29,14 @@ ssh -o ConnectTimeout=60 "$HOST" "
 echo "==> recreating container"
 ssh -o ConnectTimeout=60 "$HOST" "
   set -e
-  docker rm -f smartpass >/dev/null 2>&1 || true
-  docker run -d --name smartpass --restart unless-stopped \
+  docker rm -f couchelephant >/dev/null 2>&1 || true
+  docker run -d --name couchelephant --restart unless-stopped \
     -p $PORT:8710 \
     -v $REMOTE_DIR/data:/data \
     -e TZ=$TZ_NAME \
     $TAG >/dev/null
   sleep 8
-  docker ps --filter name=smartpass --format '    {{.Status}}'
+  docker ps --filter name=couchelephant --format '    {{.Status}}'
 "
 
 echo "==> health"

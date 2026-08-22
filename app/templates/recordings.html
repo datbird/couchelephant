@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% set nav='recordings' %}
-{% block title %}Recordings - SmartPass{% endblock %}
+{% block title %}Recordings - CouchElephant{% endblock %}
 {% block body %}
 <h1>Recordings</h1>
 <div class="sub">Everything Plex is set up to record, read live from the server.</div>
@@ -27,7 +27,7 @@
         {% endif %}
       </td>
       <td class="tiny dim">section {{ s.target_section }}</td>
-      <td>{% if s.owned_by_us %}<span class="pill ok">SmartPass</span>{% else %}<span class="pill">Plex</span>{% endif %}</td>
+      <td>{% if s.owned_by_us %}<span class="pill ok">CouchElephant</span>{% else %}<span class="pill">Plex</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table>

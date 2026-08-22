@@ -1,4 +1,4 @@
-# SmartPass
+# CouchElephant
 
 A sidecar for a Plex DVR. It reads the guide into SQLite, shows you what Plex is
 set up to record, and does one thing Plex gets wrong: recording a team's games
@@ -18,7 +18,7 @@ The maddening part is that the guide already says which airing is live:
 38.1 WQFFDT  Sun 5:00PM   (no flag)       <- Plex picks this one
 ```
 
-SmartPass reads that flag, decides itself, and creates a **one-shot** recording
+CouchElephant reads that flag, decides itself, and creates a **one-shot** recording
 pinned to that exact channel and start time. Plex is left with nothing to choose
 between, so it cannot choose wrong.
 
@@ -54,9 +54,9 @@ burst on first run and almost nothing after.
 ## Run it
 
 ```bash
-docker build -t smartpass:1.0 .
-docker run -d --name smartpass --restart unless-stopped \
-  -p 8710:8710 -v /path/to/data:/data -e TZ=America/Chicago smartpass:1.0
+docker build -t couchelephant:1.0 .
+docker run -d --name couchelephant --restart unless-stopped \
+  -p 8710:8710 -v /path/to/data:/data -e TZ=America/Chicago couchelephant:1.0
 ```
 
 Then open the UI, go to **Settings**, and give it your Plex address and token.

@@ -10,7 +10,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 
-DB_PATH = os.environ.get("SMARTPASS_DB", "/data/smartpass.db")
+DB_PATH = os.environ.get("COUCHELEPHANT_DB", "/data/couchelephant.db")
 _local = threading.local()
 
 SCHEMA = """

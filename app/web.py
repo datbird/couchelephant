@@ -14,7 +14,7 @@ from .plex import Plex, PlexError
 
 BASE = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
-app = FastAPI(title="SmartPass", docs_url=None, redoc_url=None)
+app = FastAPI(title="CouchElephant", docs_url=None, redoc_url=None)
 
 
 # ---------- helpers ----------
