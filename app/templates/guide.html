@@ -1,4 +1,7 @@
 {% extends "base.html" %}{% set nav='guide' %}
+{% block bodyclass %}{{ '' if q else 'gridpage' }}{% endblock %}
+{# The grid owns the viewport, so the footer would only push it out of view. #}
+{% block footer %}{% if q %}{{ super() }}{% endif %}{% endblock %}
 {% block title %}{{ 'Search - CouchElephant' if q else 'Guide - CouchElephant' }}{% endblock %}
 {% block body %}
 
@@ -154,6 +157,14 @@
       rowsEl = document.getElementById('grows'),
       status = document.getElementById('gstatus');
 
+  // Fit the grid to whatever space is actually left below the controls.
+  function fit() {
+    var top = wrap.getBoundingClientRect().top;
+    wrap.style.height = Math.max(240, window.innerHeight - top - 18) + 'px';
+  }
+  fit();
+  window.addEventListener('resize', fit);
+
   var PX_PER_MIN = 5,          // 30 minutes = 150px
       SLOT = 30 * 60,          // tick every half hour
       CHUNK = 4 * 3600,        // fetch four hours at a time
@@ -300,6 +311,7 @@
   });
 
   loadChannels().then(function () {
+    fit();
     // Fill the viewport before waiting on a scroll event.
     var guard = 0;
     (function fill() {

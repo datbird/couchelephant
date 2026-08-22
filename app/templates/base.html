@@ -35,6 +35,10 @@ header nav a{color:var(--dim);padding:4px 0;border-bottom:2px solid transparent}
 header nav a.on,header nav a:hover{color:var(--text);border-bottom-color:var(--accent)}
 header .right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px;color:var(--dim)}
 main{padding:22px;max-width:1400px;margin:0 auto}
+/* The grid guide wants the whole width, and owns the only scrollbar on the
+   page: the body must not scroll behind it or you get two. */
+body.gridpage{overflow:hidden}
+body.gridpage main{max-width:none;padding-bottom:0}
 h1{font-size:20px;margin:0 0 4px}
 .sub{color:var(--dim);font-size:13px;margin-bottom:18px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:18px}
@@ -57,8 +61,10 @@ tr:hover td{background:var(--panel2)}
 .chtext{line-height:1.15;font-size:12px}
 
 /* ---- grid guide ---- */
+/* Height is set at runtime from the element's own position, because guessing
+   it with a calc() breaks the moment anything above it wraps or changes. */
 .gridwrap{overflow:auto;background:var(--panel);border:1px solid var(--line);
-  border-radius:8px;max-height:calc(100vh - 230px);position:relative}
+  border-radius:8px;position:relative;height:420px}
 .gridinner{position:relative;width:max-content;min-width:100%}
 .ghead{display:flex;position:sticky;top:0;z-index:3}
 .gcorner{position:sticky;left:0;z-index:4;flex:0 0 var(--chw);width:var(--chw);
@@ -136,7 +142,7 @@ footer{margin:38px 0 14px;text-align:center;font-size:12px;letter-spacing:1.6px;
 footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 </style>
 </head>
-<body>
+<body class="{% block bodyclass %}{% endblock %}">
 <header>
   <a class="brand" href="/" title="A CouchElephant never forgets.">
     <img src="/static/mark.png" alt="" class="mark">
@@ -167,10 +173,12 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   <div class="banner bad">Last sync failed: {{ last_sync.detail }}</div>
 {% endif %}
 {% block body %}{% endblock %}
+{% block footer %}
 <footer>
   <img src="/static/divider.png" alt="" class="divider">
   <div>A CouchElephant never forgets.</div>
 </footer>
+{% endblock %}
 </main>
 </body>
 </html>
