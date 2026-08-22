@@ -52,7 +52,10 @@
     </button>
     <div class="fmenu" id="fmenu">
       <div class="fhead"><span>Filters</span>
-        <button type="button" class="fclear" id="fclear">Clear</button></div>
+        <button type="button" class="fclear" id="fclear">Clear</button>
+        <!-- Only shown as a sheet on a phone, where there is no "click outside"
+             gesture that does not also hit something else. -->
+        <button type="button" class="fclose" id="fclose" aria-label="Close filters">&times;</button></div>
       <input class="fsearch" id="fq" placeholder="Search filters..." autocomplete="off">
       <div class="fapplied" id="fapplied"></div>
       <div class="fscroll"><div class="fgrid" id="fgrid">
@@ -84,9 +87,9 @@
 {# Grid guide: channels down, time across. Both axes load more as you reach
    the edge, and stop when the data runs out. #}
 <div class="legend">
-  <span><i style="background:var(--accent)"></i> Recording, scheduled by CouchElephant</span>
-  <span><i style="background:#8ba7bd"></i> Recording, scheduled in Plex</span>
-  <span><i style="background:#f3a30b;opacity:.45"></i> Live broadcast</span>
+  <span><i class="ce"></i> Recording, scheduled by CouchElephant</span>
+  <span><i class="plex"></i> Recording, scheduled in Plex</span>
+  <span><i class="ce" style="opacity:.45"></i> Live broadcast</span>
 </div>
 <div class="gridwrap" id="gw" data-day="{{ day }}"
      data-sports="{{ 1 if sports else 0 }}" data-channel="{{ channel }}">
@@ -181,13 +184,48 @@
     wrap.style.height = Math.max(240, window.innerHeight - top - 18) + 'px';
   }
   fit();
-  window.addEventListener('resize', function () { fit(); schedule(); });
 
-  var PX_PER_MIN = 5,          // 30 minutes = 150px
+  function blockW(b, e) { return Math.max(28, ((e - b) / 60) * PX_PER_MIN - 4); }
+
+  // Turning a phone sideways crosses the breakpoint and changes --pxmin. Every
+  // block is absolutely positioned, so redraw their coordinates from the times
+  // they were placed at. Cheaper and less jarring than reloading the page.
+  function rescale() {
+    var want = cssNum('--pxmin', 5);
+    if (want === PX_PER_MIN) return false;
+    PX_PER_MIN = want;
+    Array.prototype.forEach.call(rowsEl.querySelectorAll('.gprog'), function (el) {
+      var b = +el.dataset.b, e = +el.dataset.e, lx = x(b), w = blockW(b, e);
+      el.style.left = lx + 'px';
+      el.style.width = w + 'px';
+      el.dataset.x = String(lx);
+      el.dataset.w = String(w);
+    });
+    Array.prototype.forEach.call(timesEl.querySelectorAll('.gtick'), function (el) {
+      el.style.left = x(+el.dataset.t) + 'px';
+    });
+    widen();
+    return true;
+  }
+
+  window.addEventListener('resize', function () {
+    ROW_H = cssNum('--rowh', 62);
+    rescale(); fit(); schedule();
+  });
+
+  // Pixels per minute and row height live in the stylesheet, because the
+  // mobile breakpoint changes both. Reading them here keeps one source of
+  // truth; hardcoding 62 again is how the two drift apart.
+  var css = getComputedStyle(document.documentElement);
+  function cssNum(name, dflt) {
+    var v = parseFloat(css.getPropertyValue(name));
+    return isFinite(v) && v > 0 ? v : dflt;
+  }
+  var PX_PER_MIN = cssNum('--pxmin', 5),   // at 5, thirty minutes = 150px
       SLOT = 30 * 60,          // tick every half hour
       CHUNK = 4 * 3600,        // fetch four hours at a time
       CH_PAGE = 10,            // ten channels at a time
-      ROW_H = 62;
+      ROW_H = cssNum('--rowh', 62);
 
   var sports  = wrap.dataset.sports === '1',
       channel = wrap.dataset.channel || '',
@@ -222,6 +260,7 @@
           ap = h < 12 ? 'AM' : 'PM', hh = h % 12 || 12,
           el = document.createElement('div');
       el.className = 'gtick';
+      el.dataset.t = String(t);
       el.style.left = x(t) + 'px';
       el.textContent = hh + ':' + (m < 10 ? '0' + m : m) + ' ' + ap;
       timesEl.appendChild(el);
@@ -252,14 +291,16 @@
     el.className = 'gprog' + (a.premiere ? ' live' : '') + (a.drm ? ' drm' : '') +
       (a.sched === 'ce' ? ' sched-ce' : a.sched === 'plex' ? ' sched-plex' : '');
     el.style.left = x(a.b) + 'px';
-    el.style.width = Math.max(28, ((a.e - a.b) / 60) * PX_PER_MIN - 4) + 'px';
+    el.style.width = blockW(a.b, a.e) + 'px';
     var when = new Date(a.b * 1000), hh = when.getHours() % 12 || 12,
         mm = when.getMinutes(), ap = when.getHours() < 12 ? 'AM' : 'PM';
     el.title = a.title + '\n' + hh + ':' + (mm < 10 ? '0' + mm : mm) + ' ' + ap +
                (a.summary ? '\n\n' + a.summary : '');
     el.dataset.aid = a.id;
+    el.dataset.b = String(a.b);
+    el.dataset.e = String(a.e);
     el.dataset.x = String(x(a.b));
-    el.dataset.w = String(Math.max(28, ((a.e - a.b) / 60) * PX_PER_MIN - 4));
+    el.dataset.w = String(blockW(a.b, a.e));
     el.innerHTML = '<div class="gpin">' +
       '<div class="t">' + (a.sched ? '<i class="rec"></i>' : '') + esc(a.title) + '</div>' +
       '<div class="m">' + esc(a.parent && a.parent !== a.title ? a.parent : '') +
@@ -534,9 +575,17 @@
       });
   }
 
+  var closeBtn = document.getElementById('fclose');
+  // Autofocus on a phone throws up the keyboard over the sheet the user just
+  // opened, hiding the very list they came to read.
+  var coarse = window.matchMedia && window.matchMedia('(pointer:coarse)').matches;
+
   btn.addEventListener('click', function () {
     var open = menu.classList.toggle('open');
-    if (open) load().then(function () { fq.focus(); });
+    if (open) load().then(function () { if (!coarse) fq.focus(); });
+  });
+  if (closeBtn) closeBtn.addEventListener('click', function () {
+    menu.classList.remove('open');
   });
   document.addEventListener('click', function (e) {
     if (!wrap.contains(e.target)) menu.classList.remove('open');
@@ -584,6 +633,11 @@
   function render(d) {
     var best = pickBest(d.airings);
     var h = '';
+    if (d.dry_run) {
+      h += '<div class="banner warn ovlnote">Preview mode is on, so nothing is ' +
+           'sent to Plex. Turn it off in <a href="/settings"><b>Settings</b></a> ' +
+           'to record.</div>';
+    }
     h += '<div class="ovlhead">';
     if (d.thumb) h += '<img class="ovlthumb" src="' + esc(d.thumb) + '" alt="">';
     h += '<div class="ovlmeta">';
@@ -607,7 +661,9 @@
       h += '<div class="act">';
       if (a.ours) h += '<span class="pill ok">CouchElephant is recording this</span>';
       else if (a.drm) h += '<span class="pill bad">cannot record</span>';
-      else h += '<button data-rec="' + esc(a.id) + '">Record</button>';
+      else if (d.dry_run) {
+        h += '<button disabled title="Preview mode is on">Record</button>';
+      } else h += '<button data-rec="' + esc(a.id) + '">Record</button>';
       h += '</div></div>';
     });
     if (best && d.airings.length > 1) {
@@ -630,7 +686,6 @@
     h += '<div class="ovlfoot"><span class="note" id="ovlmsg">';
     if (d.scheduled_by_us) h += 'CouchElephant scheduled this.';
     else if (d.scheduled) h += 'Plex already has this: <b>' + esc(d.scheduled) + '</b>.';
-    else if (d.dry_run) h += 'Preview mode is on, so recording is disabled. Turn it off in Settings.';
     h += '</span></div>';
     box.innerHTML = h;
 
@@ -643,21 +698,45 @@
     });
   }
 
-  function post(url, data, btn) {
+  function say(text, kind) {
     var msg = document.getElementById('ovlmsg');
+    if (!msg) return;
+    msg.className = 'note said' + (kind ? ' ' + kind : '');
+    msg.textContent = text;
+    // The panel scrolls, and the reply sits at its foot. Bring it into view or
+    // a failure looks the same as no response at all.
+    if (msg.scrollIntoView) msg.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+  }
+
+  function post(url, data, btn) {
     btn.disabled = true;
     var old = btn.textContent;
     btn.textContent = 'Working...';
+    say('Working...', '');
     var body = new URLSearchParams(data);
     fetch(url, {method: 'POST', body: body})
-      .then(function (r) { return r.json().then(function (j) { return {ok: r.ok, j: j}; }); })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j;
+          try { j = JSON.parse(t); }
+          // A proxy error page or a traceback is not JSON. Show the status
+          // instead of dying in the parser, where nothing reaches the user.
+          catch (e) { j = {ok: false, error: 'HTTP ' + r.status + ': ' + t.slice(0, 200)}; }
+          return {ok: r.ok, j: j};
+        });
+      })
       .then(function (res) {
-        msg.innerHTML = esc(res.j.message || res.j.error || '');
-        if (res.j.ok) { btn.textContent = 'Done'; }
-        else { btn.disabled = false; btn.textContent = old; }
+        if (res.j.ok) {
+          say(res.j.message || 'Done.', 'ok');
+          btn.textContent = 'Done';
+        } else {
+          say(res.j.error || res.j.message || ('Request failed (HTTP ' + res.ok + ').'), 'bad');
+          btn.disabled = false; btn.textContent = old;
+        }
       })
       .catch(function (e) {
-        msg.textContent = String(e); btn.disabled = false; btn.textContent = old;
+        say('Could not reach CouchElephant: ' + e, 'bad');
+        btn.disabled = false; btn.textContent = old;
       });
   }
 
