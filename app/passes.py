@@ -165,7 +165,8 @@ def single_template(options):
     return None
 
 
-def _schedule(plex, row, target_section, source="pass", template=None, prefs=None):
+def _schedule(plex, row, target_section, source="pass", template=None, prefs=None,
+              pass_id=None):
     """Create a recording for this broadcast.
 
     With no template given this is the pinned one-shot the passes rely on.
@@ -205,22 +206,23 @@ def _schedule(plex, row, target_section, source="pass", template=None, prefs=Non
             key = plex.find_subscription(row["program_guid"], row["begins_at"], tries=3)
         except Exception:
             key = None
-    remember(row, source, key)
+    remember(row, source, key, pass_id)
     return chosen.get("targetLibrarySectionID")
 
 
-def remember(row, source, subscription=None):
-    """Record that this airing was scheduled by us, and by which subscription."""
+def remember(row, source, subscription=None, pass_id=None):
+    """Record that this airing was scheduled by us, and by what."""
     with db.tx() as c:
         c.execute(
             """INSERT INTO our_grabs (airing_id, program_guid, title, channel_vcn,
-                                      begins_at, source, subscription, created_at)
-               VALUES (?,?,?,?,?,?,?,?)
+                                      begins_at, source, subscription, pass_id, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
                ON CONFLICT(airing_id) DO UPDATE SET source=excluded.source,
                  subscription=COALESCE(excluded.subscription, our_grabs.subscription),
+                 pass_id=COALESCE(excluded.pass_id, our_grabs.pass_id),
                  created_at=excluded.created_at""",
             (row["id"], row["program_guid"], row["title"], row["channel_vcn"],
-             row["begins_at"], source, subscription, _now()))
+             row["begins_at"], source, subscription, pass_id, _now()))
 
 
 def forget(airing_id):
@@ -282,7 +284,7 @@ def run_passes(force_dry_run=None):
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
                 continue
             try:
-                _schedule(plex, pick, None)
+                _schedule(plex, pick, None, "pass", pass_id=p["id"])
                 _log(p["id"], pick, "scheduled", reason, False)
                 results.append({"pass": label, "game": pick["title"],
                                 "action": "scheduled", "reason": reason,

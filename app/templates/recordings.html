@@ -24,7 +24,7 @@
 <div class="pagehead">
   <div>
     <h1>Recordings</h1>
-    <div class="sub" style="margin:0">Every schedule on this server, whichever of us created it.</div>
+    <div class="sub" style="margin:0">What your Plex server will actually record.</div>
   </div>
   <button type="button" class="addbtn" id="addrule"
           title="Add a recording schedule" aria-label="Add a recording schedule">
@@ -32,125 +32,344 @@
          stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
   </button>
 </div>
-{# The same two colours the record options use, so the pages teach one thing. #}
-<div class="legend">
-  <span><i class="ce"></i> CouchElephant keeps the rule and books each airing</span>
-  <span><i class="plex"></i> Plex holds the rule and picks the airings</span>
+
+<div class="subtabs">
+  <button type="button" class="subtab on" data-sub="schedule">Schedule</button>
+  <button type="button" class="subtab" data-sub="passes">Passes<span class="n" id="pcount"></span></button>
 </div>
 
-<div class="card">
-  <div class="row" style="justify-content:space-between;align-items:baseline">
-    <div>
-      <h2 style="font-size:15px;margin:0 0 4px">Schedules</h2>
-      <div class="sub" style="margin:0">Rules that keep matching new airings on their own.</div>
+{# ---------------- Schedule ---------------- #}
+<div data-pane="schedule">
+  <div class="row" style="justify-content:space-between;margin-bottom:14px">
+    <div class="legend" style="margin:0">
+      <span><i class="ce"></i> CouchElephant booked it</span>
+      <span><i class="plex"></i> Scheduled in Plex</span>
     </div>
-    <form method="post" action="/passes/run" style="margin:0">
-      <button title="Work out every followed team's next game and schedule it">Run passes now</button>
-    </form>
+    <div class="viewsw">
+      <button type="button" class="on" data-view="agenda">Agenda</button>
+      <button type="button" data-view="calendar">Calendar</button>
+    </div>
   </div>
 
-  {% if rules %}
-  <table class="stack" style="margin-top:12px">
-    <tr><th style="width:28px"></th><th>Title</th><th>Matches</th><th>Source</th><th></th></tr>
-    {% for r in rules %}
-    <tr class="{{ '' if r.enabled else 'off' }}">
-      <td>{{ kindicon(r.kind) }}</td>
-      <td><b>{{ r.title }}</b>{% if not r.enabled %} <span class="pill">paused</span>{% endif %}</td>
-      <td class="tiny dim">{{ r.detail }}</td>
-      <td>{% if r.source == 'ce' %}<span class="pill ce">CouchElephant</span>
-          {% else %}<span class="pill plexsrc">Plex</span>{% endif %}
-          {% if r.limited %}<span class="pill ce" title="Plex rules take one channel. CouchElephant books each airing itself.">source limit</span>{% endif %}</td>
-      <td style="text-align:right;white-space:nowrap">
-        {% if r.pass_id %}
-        <form method="post" action="/passes/{{ r.pass_id }}/toggle" style="display:inline;margin:0">
-          <button class="tiny">{{ 'Resume' if not r.enabled else 'Pause' }}</button></form>
-        <form method="post" action="/passes/{{ r.pass_id }}/delete" style="display:inline;margin:0">
-          <button class="tiny danger">Remove</button></form>
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}<div class="empty">No rules yet. Press <b>+</b> above to follow a team or a
-    programme, or press record on something in the guide.</div>{% endif %}
+  <div data-view-pane="agenda">
+    <div class="agenda" id="agenda"></div>
+    <div class="agend" id="agmore" hidden>Loading more...</div>
+    <div class="agend" id="agdone" hidden>That is the whole schedule.</div>
+  </div>
 
+  <div data-view-pane="calendar" hidden>
+    <div class="calhead">
+      <button type="button" id="calprev" aria-label="Previous month">&lsaquo;</button>
+      <div class="m" id="calmonth"></div>
+      <button type="button" id="calnext" aria-label="Next month">&rsaquo;</button>
+      <button type="button" id="caltoday">Today</button>
+    </div>
+    <div class="calgrid" id="calgrid"></div>
+  </div>
 </div>
 
-{% if upcoming %}
-<div class="card">
-  <h2 style="font-size:15px;margin:0 0 4px">Next games, and the airing chosen</h2>
-  <div class="sub">Why each one was picked, so nothing is a black box.</div>
-  <table class="stack">
-    <tr><th style="width:28px"></th><th>Game</th><th>Chosen airing</th><th>Why</th><th>Status</th></tr>
-    {% for u in upcoming %}
-    <tr>
-      <td>{{ kindicon('sports') }}</td>
-      <td>{% if u.grandparent %}<span class="dim tiny">{{ u.grandparent }} &middot; {{ u.team }}</span><br>{% endif %}
-          <b>{{ u.title }}</b></td>
-      <td class="tiny dim" style="white-space:nowrap">{{ u.begins_at|fmt }}<br>{{ u.channel }}</td>
-      <td class="tiny dim">{{ u.reason }}{% if u.alternatives %}<br>{{ u.alternatives }} other airing(s) rejected{% endif %}</td>
-      <td class="tiny">{% if u.blocked %}<span class="pill ok">{{ u.blocked }}</span>
-          {% else %}<span class="pill warn">will schedule</span>{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table>
+{# ---------------- Passes ---------------- #}
+<div data-pane="passes" hidden>
+  <div class="sub">A pass keeps matching new airings on its own. Open one to see what
+    it will record next, and why it picked that broadcast.</div>
+  <div id="passlist"></div>
 </div>
-{% endif %}
-
-<div class="card">
-  <h2 style="font-size:15px;margin:0 0 4px">Upcoming and recent</h2>
-  <div class="sub">Individual recordings Plex has queued, is running, or has finished.</div>
-  {% if grabs %}
-  <table class="stack">
-    <tr><th style="width:28px"></th><th>When</th><th>Ch</th><th>Programme</th><th>Set by</th><th>Status</th></tr>
-    {% for g in grabs %}
-    <tr>
-      <td>{{ kindicon(g.kind) }}</td>
-      <td class="dim" style="white-space:nowrap">{{ g.begins_at|fmt if g.begins_at else '' }}</td>
-      <td class="dim">{{ g.channel_vcn or '' }}</td>
-      <td>
-        {% if g.parent_title %}<span class="dim tiny">{{ g.parent_title }}</span><br>{% endif %}
-        <b>{{ g.title }}</b>
-      </td>
-      <td>{% if g.source == 'ce' %}<span class="pill ce">CouchElephant</span>
-          {% else %}<span class="pill plexsrc">Plex</span>{% endif %}</td>
-      <td>
-        {% if g.status == 'scheduled' %}<span class="pill">scheduled</span>
-        {% elif g.status == 'inprogress' %}<span class="pill live">recording</span>
-        {% elif g.status == 'complete' %}<span class="pill ok">complete</span>
-        {% else %}<span class="pill">{{ g.status }}</span>{% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-  </table>
-  {% else %}<div class="empty">Nothing scheduled.</div>{% endif %}
-</div>
-
-{% if actions %}
-<details class="card">
-  <summary style="cursor:pointer;font-size:15px;font-weight:600">Activity</summary>
-  <div class="sub" style="margin-top:6px">Every decision a pass made, including the ones it declined.</div>
-  <table class="stack">
-    <tr><th>When</th><th>Game</th><th>Airing</th><th>Action</th><th>Reason</th></tr>
-    {% for a in actions %}
-    <tr>
-      <td class="tiny dim" style="white-space:nowrap">{{ a.created_at|fmt }}</td>
-      <td class="tiny">{{ a.program_title }}</td>
-      <td class="tiny dim" style="white-space:nowrap">
-        {{ a.channel_vcn }}{% if a.begins_at %} &middot; {{ a.begins_at|fmt('%a %-I:%M %p') }}{% endif %}</td>
-      <td class="tiny">
-        {% if a.action == 'scheduled' %}<span class="pill ok">scheduled</span>
-        {% elif a.action == 'failed' %}<span class="pill bad">failed</span>
-        {% elif a.dry_run %}<span class="pill warn">preview</span>
-        {% else %}<span class="pill">{{ a.action }}</span>{% endif %}</td>
-      <td class="tiny dim">{{ a.reason }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-</details>
-{% endif %}
 
 <script>
+// Shared helpers for this page.
+function esc(t) {
+  return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+  });
+}
+function fmtTime(ts) {
+  var d = new Date(ts * 1000), h = d.getHours() % 12 || 12, m = d.getMinutes();
+  return h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
+}
+function fmtDay(ts) {
+  var d = new Date(ts * 1000), t = new Date();
+  var same = function (a, b) { return a.toDateString() === b.toDateString(); };
+  var tm = new Date(t.getTime() + 86400000);
+  if (same(d, t)) return 'Today';
+  if (same(d, tm)) return 'Tomorrow';
+  return d.toLocaleDateString(undefined,
+    {weekday: 'long', month: 'long', day: 'numeric'});
+}
+var KIND_ICON = {
+  sports: '<span class="kind sports" title="From a sports pass">' +
+    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"' +
+    ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/>' +
+    '<path d="M7 6H4v1a4 4 0 0 0 3.4 3.9M17 6h3v1a4 4 0 0 1-3.4 3.9"/>' +
+    '<path d="M12 14v3M9 20h6M10 17h4l.5 3h-5z"/></svg></span>',
+  series: '<span class="kind series" title="A programme"><svg viewBox="0 0 24 24"' +
+    ' width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"' +
+    ' stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19"' +
+    ' height="13" rx="2"/><path d="M8 2.8L12 6l4-3.2"/></svg></span>',
+  one: '<span class="kind series" title="One broadcast"><svg viewBox="0 0 24 24"' +
+    ' width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">' +
+    '<circle cx="12" cy="12" r="6"/></svg></span>'
+};
+
+// ---- sub-tabs: Schedule and Passes ----
+(function () {
+  var tabs = document.querySelectorAll('.subtab');
+  if (!tabs.length) return;
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () {
+      tabs.forEach(function (x) { x.classList.toggle('on', x === t); });
+      document.querySelectorAll('[data-pane]').forEach(function (p) {
+        p.hidden = p.dataset.pane !== t.dataset.sub;
+      });
+      if (t.dataset.sub === 'passes') window.loadPasses();
+    });
+  });
+})();
+
+// ---- Schedule: agenda and calendar over the same data ----
+(function () {
+  var list = document.getElementById('agenda');
+  if (!list) return;
+  var more = document.getElementById('agmore'), done = document.getElementById('agdone');
+  var offset = 0, PAGE = 40, busy = false, ended = false, lastDay = '';
+
+  function row(r) {
+    var h = '<div class="agrow" data-aid="' + esc(r.airing_id || '') + '">';
+    h += '<div class="agwhen">' + (r.b ? fmtTime(r.b) : '') + '</div>';
+    h += r.logo ? '<img src="/logo/' + esc(r.vcn) + '" alt="">'
+                : '<span style="width:44px;flex:0 0 44px"></span>';
+    h += '<div class="agtitle">';
+    if (r.parent) h += '<span class="dim tiny">' + esc(r.parent) + '</span>';
+    h += '<b>' + esc(r.title) + '</b></div>';
+    h += '<div class="agwhy">' + (KIND_ICON[r.kind] || '') +
+         '<span>' + esc(r.reason) + '</span>' +
+         '<span class="pill ' + (r.status === 'complete' ? 'ok'
+           : r.status === 'inprogress' ? 'live' : '') + '">' +
+         esc(r.status === 'inprogress' ? 'recording' : r.status) + '</span></div>';
+    return h + '</div>';
+  }
+
+  function load() {
+    if (busy || ended) return;
+    busy = true; more.hidden = false;
+    fetch('/api/schedule?offset=' + offset + '&limit=' + PAGE)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var h = '';
+        (d.rows || []).forEach(function (r) {
+          var day = r.b ? fmtDay(r.b) : 'No time set';
+          if (day !== lastDay) { h += '<div class="agday">' + esc(day) + '</div>'; lastDay = day; }
+          h += row(r);
+        });
+        list.insertAdjacentHTML('beforeend', h);
+        offset += (d.rows || []).length;
+        ended = !d.more;
+        more.hidden = true;
+        done.hidden = !ended;
+        if (!offset) {
+          list.innerHTML = '<div class="agend">Nothing is scheduled yet. Press ' +
+            '<b>+</b> above, or record something from the guide.</div>';
+        }
+        busy = false;
+        // The first page may not fill the window, so keep going until it does
+        // or the data runs out; otherwise nothing ever triggers a scroll.
+        if (!ended && document.body.scrollHeight <= window.innerHeight + 40) load();
+      })
+      .catch(function () { busy = false; more.hidden = true; });
+  }
+
+  window.addEventListener('scroll', function () {
+    if (window.innerHeight + window.scrollY > document.body.scrollHeight - 400) load();
+  });
+  load();
+
+  // Clicking a scheduled programme opens the same panel the guide opens, which
+  // is where the reason and the airings live.
+  list.addEventListener('click', function (e) {
+    var r = e.target.closest('.agrow');
+    if (r && r.dataset.aid && window.openProgram) window.openProgram(r.dataset.aid);
+  });
+
+  // ---- calendar over the same schedule ----
+  var grid = document.getElementById('calgrid'), label = document.getElementById('calmonth');
+  var cur = new Date(); cur.setDate(1); cur.setHours(0, 0, 0, 0);
+
+  function drawMonth() {
+    var first = new Date(cur.getFullYear(), cur.getMonth(), 1);
+    var start = new Date(first); start.setDate(1 - first.getDay());
+    var end = new Date(start); end.setDate(start.getDate() + 42);
+    label.textContent = first.toLocaleDateString(undefined, {month: 'long', year: 'numeric'});
+    grid.innerHTML = '<div class="agend" style="grid-column:1/-1">Loading...</div>';
+    fetch('/api/schedule?limit=1000&start=' + Math.floor(start.getTime() / 1000) +
+          '&end=' + Math.floor(end.getTime() / 1000))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var byDay = {};
+        (d.rows || []).forEach(function (r) {
+          if (!r.b) return;
+          var k = new Date(r.b * 1000).toDateString();
+          (byDay[k] = byDay[k] || []).push(r);
+        });
+        var h = '';
+        ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(function (n) {
+          h += '<div class="caldow">' + n + '</div>';
+        });
+        var today = new Date().toDateString();
+        for (var i = 0; i < 42; i++) {
+          var day = new Date(start); day.setDate(start.getDate() + i);
+          var items = byDay[day.toDateString()] || [];
+          var cls = 'calday' + (day.getMonth() !== cur.getMonth() ? ' out' : '') +
+                    (day.toDateString() === today ? ' today' : '');
+          h += '<div class="' + cls + '"><div class="cald">' + day.getDate() + '</div>';
+          items.slice(0, 3).forEach(function (r) {
+            h += '<div class="calitem' + (r.who === 'ce' ? ' ce' : '') +
+                 '" data-aid="' + esc(r.airing_id || '') + '" title="' +
+                 esc(fmtTime(r.b) + '  ' + r.title + '  (' + r.reason + ')') + '">' +
+                 '<span>' + esc(r.title) + '</span></div>';
+          });
+          if (items.length > 3) {
+            h += '<div class="calmore">+' + (items.length - 3) + ' more</div>';
+          }
+          h += '</div>';
+        }
+        grid.innerHTML = h;
+      });
+  }
+
+  grid.addEventListener('click', function (e) {
+    var it = e.target.closest('.calitem');
+    if (it && it.dataset.aid && window.openProgram) window.openProgram(it.dataset.aid);
+  });
+  document.getElementById('calprev').addEventListener('click', function () {
+    cur.setMonth(cur.getMonth() - 1); drawMonth();
+  });
+  document.getElementById('calnext').addEventListener('click', function () {
+    cur.setMonth(cur.getMonth() + 1); drawMonth();
+  });
+  document.getElementById('caltoday').addEventListener('click', function () {
+    cur = new Date(); cur.setDate(1); cur.setHours(0, 0, 0, 0); drawMonth();
+  });
+
+  document.querySelectorAll('.viewsw button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('.viewsw button').forEach(function (x) {
+        x.classList.toggle('on', x === b);
+      });
+      document.querySelectorAll('[data-view-pane]').forEach(function (p) {
+        p.hidden = p.dataset.viewPane !== b.dataset.view;
+      });
+      if (b.dataset.view === 'calendar' && !grid.dataset.drawn) {
+        grid.dataset.drawn = '1'; drawMonth();
+      }
+    });
+  });
+})();
+
+// ---- Passes ----
+(function () {
+  var wrap = document.getElementById('passlist');
+  if (!wrap) return;
+  var open = null;
+
+  window.loadPasses = function () {
+    fetch('/api/rules').then(function (r) { return r.json(); }).then(function (d) {
+      var rules = d.rules || [];
+      var c = document.getElementById('pcount');
+      if (c) c.textContent = rules.length ? rules.length : '';
+      if (!rules.length) {
+        wrap.innerHTML = '<div class="empty">No passes yet. Press <b>+</b> above to ' +
+          'follow a team or a programme.</div>';
+        return;
+      }
+      var h = '';
+      rules.forEach(function (r) {
+        var where = r.networks.concat(r.channels);
+        h += '<div class="passrow" data-id="' + r.id + '">' + (KIND_ICON[r.icon] || '');
+        h += '<div class="pmeta"><b>' + esc(r.title) + '</b><span class="dim tiny">' +
+             (r.kind === 'team' ? 'Every game, from the live broadcast'
+                                : 'Every episode the guide carries') +
+             (where.length ? ' &middot; only on ' + esc(where.join(', ')) : '') +
+             ' &middot; ' + r.booked + ' booked</span></div>';
+        if (!r.enabled) h += '<span class="pill">paused</span>';
+        h += '<div class="pacts">' +
+             '<button type="button" class="tiny" data-act="edit">Edit</button>' +
+             '<button type="button" class="tiny" data-act="toggle">' +
+               (r.enabled ? 'Pause' : 'Resume') + '</button>' +
+             '<button type="button" class="tiny danger" data-act="remove">Remove</button>' +
+             '</div></div>';
+        h += '<div class="passdetail" data-detail="' + r.id + '" hidden></div>';
+      });
+      wrap.innerHTML = h;
+    });
+  };
+
+  wrap.addEventListener('click', function (e) {
+    var rowEl = e.target.closest('.passrow');
+    if (!rowEl) return;
+    var id = rowEl.dataset.id, act = (e.target.closest('[data-act]') || {}).dataset;
+
+    if (act && act.act === 'toggle') {
+      post('/passes/' + id + '/toggle');
+      return;
+    }
+    if (act && act.act === 'remove') {
+      post('/passes/' + id + '/delete');
+      return;
+    }
+    if (act && act.act === 'edit') {
+      if (window.editRule) window.editRule(id);
+      return;
+    }
+
+    // A plain click opens the pass and shows what it will record next.
+    var det = wrap.querySelector('[data-detail="' + id + '"]');
+    if (open === id) { det.hidden = true; rowEl.classList.remove('open'); open = null; return; }
+    wrap.querySelectorAll('.passdetail').forEach(function (d) { d.hidden = true; });
+    wrap.querySelectorAll('.passrow').forEach(function (r) { r.classList.remove('open'); });
+    open = id; rowEl.classList.add('open');
+    det.hidden = false;
+    det.innerHTML = '<div class="empty tiny">Working out what it records next...</div>';
+    fetch('/api/rules/' + id + '/upcoming').then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { det.innerHTML = '<div class="empty tiny">' + esc(d.error) + '</div>'; return; }
+        if (!d.upcoming.length) {
+          det.innerHTML = '<div class="empty tiny">Nothing coming up in the guide yet.</div>';
+          return;
+        }
+        var h = '<table class="stack"><tr><th>What</th><th>Chosen airing</th>' +
+                '<th>Why</th><th>Status</th></tr>';
+        d.upcoming.forEach(function (u) {
+          h += '<tr' + (u.airing_id ? ' data-aid="' + esc(u.airing_id) + '" ' +
+               'style="cursor:pointer"' : '') + '>';
+          h += '<td>' + (u.parent ? '<span class="dim tiny">' + esc(u.parent) +
+               '</span><br>' : '') + '<b>' + esc(u.title) + '</b></td>';
+          h += '<td class="tiny dim" style="white-space:nowrap">' +
+               (u.b ? new Date(u.b * 1000).toLocaleString(undefined,
+                 {weekday: 'short', month: 'short', day: 'numeric',
+                  hour: 'numeric', minute: '2-digit'}) : '') +
+               (u.vcn ? '<br>' + esc(u.vcn + ' ' + u.call_sign) : '') + '</td>';
+          h += '<td class="tiny dim">' + esc(u.reason) +
+               (u.rejected ? '<br>' + u.rejected + ' other airing(s) rejected' : '') + '</td>';
+          h += '<td class="tiny"><span class="pill ' +
+               (u.status === 'will schedule' ? 'warn' : 'ok') + '">' +
+               esc(u.status) + '</span></td></tr>';
+        });
+        det.innerHTML = h + '</table>';
+        det.querySelectorAll('[data-aid]').forEach(function (tr) {
+          tr.addEventListener('click', function () {
+            if (window.openProgram) window.openProgram(tr.dataset.aid);
+          });
+        });
+      });
+  });
+
+  function post(url) {
+    fetch(url, {method: 'POST'}).then(function () { window.loadPasses(); });
+  }
+
+  window.loadPasses();
+})();
+
 // Add a schedule. Both kinds are CouchElephant's own: it picks the airing and
 // pins it. The source limit is here too, because a rule that may only use
 // certain networks is the reason someone would make one here rather than in
@@ -192,19 +411,21 @@
     var btn = document.getElementById('multibtn');
     if (btn) btn.classList.toggle('set', !!(st.nets.length || st.chans.length));
     var go = document.getElementById('rgo');
-    if (go) go.disabled = !(st.kind === 'team' ? st.team : st.series);
+    if (go) go.disabled = !st.editing && !(st.kind === 'team' ? st.team : st.series);
   }
 
   function render() {
     var h = '';
     h += '<div class="ovlhead"><div class="ovlmeta">' +
-         '<div class="parent">Add</div><h2>A recording schedule</h2>' +
-         '</div><button class="ovlclose" id="rx" aria-label="Close">&times;</button></div>';
+         '<div class="parent">' + (st.editing ? 'Edit' : 'Add') + '</div><h2>' +
+         (st.editing ? esc(st.editing.title) : 'A recording schedule') +
+         '</h2></div><button class="ovlclose" id="rx" aria-label="Close">&times;</button></div>';
 
     h += '<div class="optbar ce"><i class="own ce"></i><span><b>CouchElephant ' +
          'schedule.</b> It watches the guide and books each airing itself, always ' +
          'from the live broadcast.</span></div>';
 
+    if (!st.editing) {
     h += '<div class="ovlsec"><h3>What to follow</h3>';
     [['team', 'A team', 'every game it plays'],
      ['series', 'A programme', 'every episode the guide carries']].forEach(function (k) {
@@ -222,6 +443,7 @@
          (st.kind === 'team' ? 'Search teams...' : 'Search programmes in the guide...') +
          '">' +
          '<div class="rlist" id="rlist"></div></div>';
+    }
 
     h += '<div class="ovlsec"><h3>Options</h3>' +
          '<div class="ownkey"><span><i class="own ce"></i>CouchElephant</span></div>' +
@@ -239,7 +461,9 @@
          '<input class="multiq" id="multiq" placeholder="Search..." autocomplete="off">' +
          '<span class="multibody" id="multibody"></span></span></span></label></div></div>';
 
-    h += '<div class="ovlfoot"><button class="primary" id="rgo" disabled>Create schedule</button>' +
+    h += '<div class="ovlfoot"><button class="primary" id="rgo"' +
+         (st.editing ? '' : ' disabled') + '>' +
+         (st.editing ? 'Save pass' : 'Create schedule') + '</button>' +
          '<button id="rcancel">Cancel</button>' +
          '<span class="note" id="ovlmsg"></span></div>';
     box.innerHTML = h;
@@ -252,8 +476,10 @@
       });
     });
     var q = document.getElementById('rq');
-    q.addEventListener('input', function () { search(q.value); });
-    search('');
+    if (q) {
+      q.addEventListener('input', function () { search(q.value); });
+      search('');
+    }
     wireMulti();
     document.getElementById('rgo').addEventListener('click', create);
     paint();
@@ -384,14 +610,19 @@
   function create(e) {
     var btn = e.target, msg = document.getElementById('ovlmsg');
     btn.disabled = true; btn.textContent = 'Working...';
-    var body = new URLSearchParams({
-      kind: st.kind,
-      team_id: st.team ? st.team.id : '',
-      series: st.series || '',
-      networks: JSON.stringify(st.nets),
-      channels: JSON.stringify(st.chans)
-    });
-    fetch('/api/rules', {method: 'POST', body: body})
+    var url = st.editing ? '/api/rules/' + st.editing.id : '/api/rules';
+    var body = st.editing
+      ? new URLSearchParams({networks: JSON.stringify(st.nets),
+                             channels: JSON.stringify(st.chans),
+                             enabled: st.editing.enabled ? '1' : '0'})
+      : new URLSearchParams({
+          kind: st.kind,
+          team_id: st.team ? st.team.id : '',
+          series: st.series || '',
+          networks: JSON.stringify(st.nets),
+          channels: JSON.stringify(st.chans)
+        });
+    fetch(url, {method: 'POST', body: body})
       .then(function (r) { return r.text().then(function (t) {
         var j; try { j = JSON.parse(t); }
         catch (err) { j = {ok: false, error: 'HTTP ' + r.status + ': ' + t.slice(0, 200)}; }
@@ -400,16 +631,35 @@
         msg.className = 'note said ' + (j.ok ? 'ok' : 'bad');
         msg.textContent = j.message || j.error || '';
         if (j.ok) { btn.textContent = 'Done'; setTimeout(function () { location.reload(); }, 900); }
-        else { btn.disabled = false; btn.textContent = 'Create schedule'; }
+        else { btn.disabled = false; btn.textContent = st.editing ? 'Save pass' : 'Create schedule'; }
       })
       .catch(function (err) {
         msg.className = 'note said bad';
         msg.textContent = 'Could not reach CouchElephant: ' + err;
-        btn.disabled = false; btn.textContent = 'Create schedule';
+        btn.disabled = false; btn.textContent = st.editing ? 'Save pass' : 'Create schedule';
       });
   }
 
-  open.addEventListener('click', function () { ovl.classList.add('show'); render(); });
+  open.addEventListener('click', function () {
+    st = {kind: 'team', team: null, series: null, nets: [], chans: [], src: st.src,
+          editing: null};
+    ovl.classList.add('show'); render();
+  });
+
+  // Editing a pass opens the same panel. What it follows is fixed by then, so
+  // only the source limit is offered; changing the team would be a new pass.
+  window.editRule = function (id) {
+    fetch('/api/rules').then(function (r) { return r.json(); }).then(function (d) {
+      var r = (d.rules || []).filter(function (x) { return String(x.id) === String(id); })[0];
+      if (!r) return;
+      st = {kind: r.kind === 'team' ? 'team' : 'series',
+            team: r.kind === 'team' ? {id: r.team_id, name: r.title} : null,
+            series: r.kind === 'team' ? null : r.title,
+            nets: r.networks.slice(), chans: r.channels.slice(),
+            src: st.src, editing: r};
+      ovl.classList.add('show'); render();
+    });
+  };
 })();
 </script>
 {% endblock %}

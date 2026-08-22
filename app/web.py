@@ -396,6 +396,36 @@ def api_facets():
     return JSONResponse(filters.facets())
 
 
+def _why_for(airing):
+    """Why this broadcast is set to record, in words, or nothing."""
+    r = db.one(
+        """SELECT o.source, o.pass_id, p.kind, p.team_name, p.series_title
+           FROM our_grabs o LEFT JOIN passes p ON p.id = o.pass_id
+           WHERE o.airing_id = ?""", (airing["id"],))
+    if r:
+        if r["pass_id"] and (r["team_name"] or r["series_title"]):
+            name = r["team_name"] or r["series_title"]
+            return {"who": "ce",
+                    "kind": "sports" if r["kind"] == "team" else "series",
+                    "text": f"CouchElephant booked this for the {name} pass.",
+                    "pass_id": r["pass_id"]}
+        return {"who": "ce", "kind": "one",
+                "text": "You recorded this one broadcast by hand.", "pass_id": None}
+    hit = db.one("SELECT subscription, status FROM plex_grabs WHERE channel_vcn = ? "
+                 "AND begins_at = ? LIMIT 1", (airing["channel_vcn"], airing["begins_at"]))
+    if hit:
+        sub = db.one("SELECT title FROM plex_subscriptions WHERE key = ?",
+                     (hit["subscription"] or "",))
+        title = sub["title"] if sub else None
+        if title and not title.startswith("This "):
+            return {"who": "plex", "kind": "series",
+                    "text": f"Plex is recording this under its own rule, {title}.",
+                    "pass_id": None}
+        return {"who": "plex", "kind": "one",
+                "text": "This was scheduled in Plex, not here.", "pass_id": None}
+    return None
+
+
 @app.get("/api/program")
 def api_program(airing_id: str):
     """Everything about one broadcast, plus every other airing of the same
@@ -431,6 +461,7 @@ def api_program(airing_id: str):
         "originally_available": a["originally_available"],
         "scheduled": scheduled["status"] if scheduled else None,
         "scheduled_by_us": bool(ours),
+        "why": _why_for(a),
         "dry_run": db.get_setting("dry_run") == "1",
         "airings": [{
             "id": r["id"], "vcn": r["channel_vcn"], "call_sign": r["channel_call_sign"] or "",
@@ -833,6 +864,97 @@ def passes_redirect():
     return RedirectResponse("/recordings", status_code=301)
 
 
+def _why_map():
+    """For each broadcast we booked, what booked it.
+
+    Keyed by (channel, start), because that pair names one broadcast and is the
+    only thing Plex's own grab list and our record of it share.
+    """
+    out = {}
+    for r in db.query(
+            """SELECT o.channel_vcn, o.begins_at, o.source, o.airing_id, o.pass_id,
+                      p.kind, p.team_name, p.series_title, p.enabled
+               FROM our_grabs o LEFT JOIN passes p ON p.id = o.pass_id"""):
+        if r["pass_id"] and (r["team_name"] or r["series_title"]):
+            out[(r["channel_vcn"], r["begins_at"])] = {
+                "who": "ce",
+                "kind": "sports" if r["kind"] == "team" else "series",
+                "reason": f"the {r['team_name'] or r['series_title']} pass",
+                "pass_id": r["pass_id"],
+                "airing_id": r["airing_id"],
+            }
+        else:
+            out[(r["channel_vcn"], r["begins_at"])] = {
+                "who": "ce", "kind": "one",
+                "reason": "recorded once, by hand",
+                "pass_id": None, "airing_id": r["airing_id"],
+            }
+    return out
+
+
+def _schedule_rows(limit=None, offset=0, start=None, end=None):
+    """The schedule actually in place on the Plex server.
+
+    Read from Plex's own grab list, not from our intentions, because that is
+    what will really record. How each one got there is added afterwards.
+    """
+    where, args = [], []
+    if start is not None:
+        where.append("COALESCE(g.begins_at, 0) >= ?")
+        args.append(start)
+    if end is not None:
+        where.append("COALESCE(g.begins_at, 0) < ?")
+        args.append(end)
+    sql = "SELECT g.* FROM plex_grabs g"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY COALESCE(g.begins_at, 0), g.id"
+    if limit is not None:
+        sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
+
+    why = _why_map()
+    subs = {s["key"]: s["title"] for s in db.query("SELECT key, title FROM plex_subscriptions")}
+    sports_titles = {r["title"] for r in db.query(
+        "SELECT DISTINCT title FROM programs WHERE teams IS NOT NULL AND teams != '[]'")}
+    logos = _logo_map()
+
+    out = []
+    for g in db.query(sql, tuple(args)):
+        w = why.get((g["channel_vcn"], g["begins_at"]))
+        if w:
+            who, kind, reason = w["who"], w["kind"], w["reason"]
+            pass_id, airing_id = w["pass_id"], w["airing_id"]
+        else:
+            who, pass_id, airing_id = "plex", None, None
+            title = subs.get(g["subscription"] or "")
+            kind = "sports" if g["title"] in sports_titles else "series"
+            reason = f"a Plex rule, {title}" if title and not title.startswith("This ") \
+                else "scheduled in Plex"
+        # Match the grab back to a broadcast in the guide, so clicking it opens
+        # the same panel the guide opens.
+        if not airing_id and g["begins_at"]:
+            a = db.one("SELECT id FROM airings WHERE channel_vcn = ? AND begins_at = ? "
+                       "LIMIT 1", (g["channel_vcn"], g["begins_at"]))
+            airing_id = a["id"] if a else None
+        out.append({
+            "id": g["id"], "title": g["title"], "parent": g["parent_title"] or "",
+            "vcn": g["channel_vcn"] or "", "logo": bool(logos.get(g["channel_vcn"])),
+            "b": g["begins_at"], "e": g["ends_at"], "status": g["status"],
+            "who": who, "kind": kind, "reason": reason,
+            "pass_id": pass_id, "airing_id": airing_id,
+        })
+    return out
+
+
+@app.get("/api/schedule")
+def api_schedule(offset: int = 0, limit: int = 40, start: int = 0, end: int = 0):
+    rows = _schedule_rows(limit=limit, offset=offset,
+                          start=start or None, end=end or None)
+    total = db.one("SELECT COUNT(*) c FROM plex_grabs")["c"]
+    return JSONResponse({"ok": True, "rows": rows, "total": total,
+                         "more": offset + len(rows) < total})
+
+
 @app.get("/api/series")
 def api_series(q: str = ""):
     """Programmes in the guide that a rule could follow.
@@ -886,6 +1008,89 @@ def api_sources():
                      sorted(nets.items(), key=lambda kv: kv[0].lower())],
         "channels": chans,
     })
+
+
+@app.get("/api/rules")
+def api_rules():
+    """Every pass, with what it follows and where it may record from."""
+    out = []
+    for p in db.query("SELECT * FROM passes ORDER BY COALESCE(team_name, series_title)"):
+        nets = db.unjs(p["networks"]) or []
+        chans = db.unjs(p["channels"]) or []
+        booked = db.one("SELECT COUNT(*) c FROM our_grabs WHERE pass_id = ?", (p["id"],))["c"]
+        out.append({
+            "id": p["id"], "kind": p["kind"],
+            "icon": "sports" if p["kind"] == "team" else "series",
+            "title": p["team_name"] or p["series_title"],
+            "team_id": p["team_id"], "series": p["series_title"],
+            "networks": nets, "channels": chans,
+            "enabled": bool(p["enabled"]), "booked": booked,
+        })
+    return JSONResponse({"ok": True, "rules": out})
+
+
+@app.get("/api/rules/{rule_id}/upcoming")
+def api_rule_upcoming(rule_id: int):
+    """What this pass will record next, and why it picked each one.
+
+    The same reasoning the pass itself uses, run live rather than remembered,
+    so the answer matches what would happen if it ran right now.
+    """
+    r = db.one("SELECT * FROM passes WHERE id = ?", (rule_id,))
+    if not r:
+        return JSONResponse({"ok": False, "error": "no such pass"}, status_code=404)
+    nets, chans = passes.allowed_sources(r)
+    logos = _logo_map()
+    out = []
+    for guid, airings in passes.group_by_game(passes.rule_airings(r)).items():
+        allowed = [a for a in airings if passes.in_sources(a, nets, chans)]
+        if not allowed:
+            out.append({
+                "title": airings[0]["title"],
+                "parent": airings[0]["grandparent_title"] or "",
+                "b": airings[0]["begins_at"], "vcn": "", "call_sign": "",
+                "logo": False, "airing_id": None,
+                "reason": "no airing is on " + " or ".join(nets + chans),
+                "rejected": len(airings), "status": "skipped",
+            })
+            continue
+        pick, reason = passes.choose_airing(allowed)
+        if not pick:
+            continue
+        if nets or chans:
+            reason += ", limited to " + " or ".join(nets + chans)
+        out.append({
+            "title": pick["title"], "parent": pick["grandparent_title"] or "",
+            "b": pick["begins_at"], "vcn": pick["channel_vcn"],
+            "call_sign": pick["channel_call_sign"] or "",
+            "logo": bool(logos.get(pick["channel_vcn"])),
+            "airing_id": pick["id"], "reason": reason,
+            "rejected": len(airings) - 1,
+            "status": passes.already_handled(guid, pick["id"]) or "will schedule",
+        })
+    out.sort(key=lambda x: x["b"] or 0)
+    return JSONResponse({"ok": True, "title": passes.rule_label(r), "upcoming": out})
+
+
+@app.post("/api/rules/{rule_id}")
+async def api_rule_edit(rule_id: int, networks: str = Form(""),
+                        channels: str = Form(""), enabled: str = Form("")):
+    """Change where a pass may record from, or pause it."""
+    r = db.one("SELECT * FROM passes WHERE id = ?", (rule_id,))
+    if not r:
+        return JSONResponse({"ok": False, "error": "no such pass"}, status_code=404)
+    nets = db.unjs(networks, []) or []
+    chans = db.unjs(channels, []) or []
+    with db.tx() as c:
+        c.execute("UPDATE passes SET networks=?, channels=?, enabled=? WHERE id=?",
+                  (db.js(nets), db.js(chans),
+                   1 if enabled not in ("0", "false") else 0, rule_id))
+    done = await asyncio.to_thread(passes.run_passes)
+    made = len([d for d in done if d["action"] == "scheduled"])
+    where = " or ".join(nets + chans)
+    return JSONResponse({"ok": True, "message":
+                         (f"Saved. Only from {where}. " if where else "Saved. ")
+                         + f"{made} new airing(s) scheduled."})
 
 
 @app.post("/api/rules")

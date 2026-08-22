@@ -223,6 +223,8 @@ MIGRATIONS = [
     # in its own column so a re-fetch of the guide's own art cannot touch it.
     ("channels", "custom_logo", "TEXT"),
     ("channels", "custom_logo_at", "INTEGER"),
+    # Which rule booked this, so the schedule can say why a thing records.
+    ("our_grabs", "pass_id", "INTEGER"),
     ("passes", "series_guid", "TEXT"),
     ("passes", "series_title", "TEXT"),
 ]
