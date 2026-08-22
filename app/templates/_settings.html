@@ -1,0 +1,241 @@
+{# The settings window: sections down the left, sub-tabs inside each, content
+   scrolling on the right. Shape taken from the same author's ludodex. Rendered
+   both inside the overlay and as a whole page, from this one file. #}
+<div class="settings-window" id="setwin">
+  <nav class="settings-nav">
+    <div class="settings-title">Settings</div>
+    <input class="settings-search" id="setq" placeholder="Search settings..."
+           autocomplete="off">
+    <div id="setnav">
+      <button type="button" class="nav-item sel" data-sec="plex">Plex</button>
+      <button type="button" class="nav-item" data-sec="recording">Recording</button>
+      <button type="button" class="nav-item" data-sec="accounts">Accounts</button>
+      <button type="button" class="nav-item" data-sec="channels">Channels</button>
+      <button type="button" class="nav-item" data-sec="about">About</button>
+    </div>
+    <div class="nav-none" id="setnone" hidden>Nothing matches.</div>
+  </nav>
+
+  <div class="settings-main">
+    <div class="settings-tabs" id="settabs"></div>
+    <div class="settings-content" id="setcontent">
+
+      {# ---------------- Plex ---------------- #}
+      <section data-sec="plex" data-tab="server" data-tab-label="Server">
+        <h2>Plex server</h2>
+        <p class="dim">The server CouchElephant rides on.</p>
+        {% if tested %}
+          <div class="banner {{ 'ok' if tested.startswith('OK') else 'bad' }}">{{ tested }}</div>
+        {% endif %}
+        <form method="post" action="/settings" class="setform">
+          <div class="field" data-find="plex server address url">
+            <label>Address</label>
+            <input name="plex_url" value="{{ settings.plex_url }}"
+                   placeholder="http://127.0.0.1:32400">
+            <span class="help">Use the address as seen from this container.</span>
+          </div>
+          <div class="field" data-find="plex token authentication">
+            <label>Token</label>
+            <input name="plex_token" type="password"
+                   value="{{ '*' * 12 if settings.plex_token else '' }}"
+                   placeholder="X-Plex-Token">
+            <span class="help">Kept in the local database, never logged. Leave the dots
+              alone to keep the current token. On the server it is the
+              <code>PlexOnlineToken</code> in Preferences.xml.</span>
+          </div>
+          {# These two live on the other tab, and a form only submits its own
+             fields. Carrying them here keeps a save from wiping them. #}
+          <input type="hidden" name="timezone" value="{{ settings.timezone }}">
+          <input type="hidden" name="sync_minutes" value="{{ settings.sync_minutes }}">
+          <input type="hidden" name="dry_run" value="{{ settings.dry_run }}">
+          <div class="row">
+            <button class="primary">Save</button>
+            <span class="saved"></span>
+          </div>
+        </form>
+        <div class="setblock" data-find="test connection dvr">
+          <h3>Connection</h3>
+          <p class="dim">Checks the server answers, and reports how many DVRs it has.</p>
+          <form method="post" action="/settings/test" class="setform">
+            <button>Test connection</button><span class="saved"></span></form>
+        </div>
+      </section>
+
+      <section data-sec="plex" data-tab="guide" data-tab-label="Guide" hidden>
+        <h2>Guide</h2>
+        <p class="dim">How time is read, and how often the guide is refreshed.</p>
+        <form method="post" action="/settings" class="setform">
+          <input type="hidden" name="plex_url" value="{{ settings.plex_url }}">
+          <input type="hidden" name="plex_token" value="{{ '*' * 12 if settings.plex_token else '' }}">
+          <input type="hidden" name="dry_run" value="{{ settings.dry_run }}">
+          <div class="field" data-find="timezone time zone clock">
+            <label>Timezone</label>
+            <select name="timezone">
+              {% for z in zones %}
+                <option value="{{ z }}" {{ 'selected' if z == settings.timezone }}>{{ z }}</option>
+              {% endfor %}
+            </select>
+            <span class="help">Every time here is shown in this zone. The guide itself is
+              stored as UTC, so changing this never moves a recording.</span>
+          </div>
+          <div class="field" data-find="sync interval minutes refresh">
+            <label>Sync interval (minutes)</label>
+            <input name="sync_minutes" value="{{ settings.sync_minutes }}" style="max-width:120px">
+            <span class="help">How often the guide is refreshed and the rules are re-run.</span>
+          </div>
+          <div class="row"><button class="primary">Save</button><span class="saved"></span></div>
+        </form>
+
+        <div class="setblock" data-find="epg provider sections discovered">
+          <h3>Discovered from the server</h3>
+          <p class="dim">Found on its own. Nothing to set.</p>
+          <table class="stack">
+            <tr><td class="dim">EPG provider</td>
+                <td><code>{{ settings.epg_provider or 'not discovered yet' }}</code></td></tr>
+            <tr><td class="dim">Shows section</td><td><code>{{ settings.shows_section or '-' }}</code></td></tr>
+            <tr><td class="dim">Sports section</td><td><code>{{ settings.sports_section or '-' }}</code></td></tr>
+            <tr><td class="dim">Movies section</td><td><code>{{ settings.movies_section or '-' }}</code></td></tr>
+          </table>
+        </div>
+
+        {% if last_sync %}
+        <div class="setblock" data-find="last sync result">
+          <h3>Last sync</h3>
+          <table class="stack">
+            <tr><td class="dim">Finished</td><td>{{ last_sync.ended_at|fmt }}</td></tr>
+            <tr><td class="dim">Result</td><td>
+              {% if last_sync.ok %}<span class="pill ok">ok</span>
+              {% else %}<span class="pill bad">failed</span>{% endif %}</td></tr>
+            <tr><td class="dim">Detail</td><td class="tiny">{{ last_sync.detail }}</td></tr>
+          </table>
+        </div>
+        {% endif %}
+      </section>
+
+      {# ---------------- Recording ---------------- #}
+      <section data-sec="recording" data-tab="behaviour" data-tab-label="Behaviour" hidden>
+        <h2>Recording</h2>
+        <p class="dim">What CouchElephant is allowed to do to your DVR.</p>
+        <form method="post" action="/settings" class="setform">
+          <input type="hidden" name="plex_url" value="{{ settings.plex_url }}">
+          <input type="hidden" name="plex_token" value="{{ '*' * 12 if settings.plex_token else '' }}">
+          <input type="hidden" name="timezone" value="{{ settings.timezone }}">
+          <input type="hidden" name="sync_minutes" value="{{ settings.sync_minutes }}">
+          <div class="field" data-find="preview mode dry run safety">
+            <label>Preview mode</label>
+            <label class="row">
+              <input type="checkbox" name="dry_run" value="1"
+                     {{ 'checked' if settings.dry_run == '1' }}>
+              <span>Do not write anything to Plex</span>
+            </label>
+            <span class="help">On for a new install. Rules still work out which airing they
+              would choose and show it, but nothing is created. Turn it off once the
+              choices look right.</span>
+          </div>
+          <div class="row"><button class="primary">Save</button><span class="saved"></span></div>
+        </form>
+      </section>
+
+      {# ---------------- Accounts ---------------- #}
+      <section data-sec="accounts" data-tab="signin" data-tab-label="Sign-in" hidden>
+        <h2>Sign-in</h2>
+        <p class="dim">Who may use this. A fresh install asks nobody.</p>
+        {% if autherror %}<div class="banner bad">{{ autherror }}</div>{% endif %}
+        <form method="post" action="/settings/auth" class="setform">
+          <div class="field" data-find="sign in login authentication mode none local cloudflare">
+            <label for="am">Sign-in</label>
+            <select id="am" name="auth_mode">
+              <option value="none" {{ 'selected' if auth_mode == 'none' }}>
+                Off. Anyone who can reach this page can use it</option>
+              <option value="local" {{ 'selected' if auth_mode == 'local' }}>
+                Local accounts, kept here</option>
+              <option value="cloudflare" {{ 'selected' if auth_mode == 'cloudflare' }}>
+                Cloudflare Access</option>
+            </select>
+            <span class="help">Off suits a box on your own network. Turn it on before this
+              is reachable from anywhere else.</span>
+          </div>
+          <div class="field" data-find="cloudflare access team domain">
+            <label for="cfd">Cloudflare team domain</label>
+            <input id="cfd" name="cf_team_domain" value="{{ settings.cf_team_domain or '' }}"
+                   placeholder="yourteam.cloudflareaccess.com">
+            <span class="help">The signing keys live under it.</span>
+          </div>
+          <div class="field" data-find="cloudflare aud audience application">
+            <label for="cfa">Cloudflare application AUD</label>
+            <input id="cfa" name="cf_aud" value="{{ settings.cf_aud or '' }}"
+                   placeholder="the Access application's Audience tag">
+            <span class="help">The token Cloudflare sends is verified against this. The
+              email header on its own is never trusted, so a request that skips
+              Cloudflare cannot claim to be you.</span>
+          </div>
+          <div class="row">
+            <button class="primary">Save</button><span class="saved"></span>
+            {% if not cf_ready %}
+              <span class="note">PyJWT is missing from this image, so Cloudflare Access
+                cannot be verified here.</span>
+            {% endif %}
+          </div>
+        </form>
+      </section>
+
+      <section data-sec="accounts" data-tab="people" data-tab-label="People" hidden>
+        <h2>People</h2>
+        <p class="dim">Accounts on this install.</p>
+        {% if users %}
+        <table class="stack" data-find="users accounts people remove">
+          <tr><th>User</th><th>Role</th><th></th></tr>
+          {% for u in users %}
+          <tr>
+            <td><b>{{ u.username }}</b>{% if user and u.id == user.id %}
+              <span class="pill ok">you</span>{% endif %}</td>
+            <td class="tiny dim">{{ u.role }}</td>
+            <td style="text-align:right">
+              {% if not (user and u.id == user.id) %}
+              <form method="post" action="/settings/users/{{ u.id }}/delete"
+                    class="setform" style="margin:0">
+                <button class="tiny danger">Remove</button></form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% elif auth_mode != 'none' %}
+          <div class="empty tiny">No accounts yet. The next visitor is asked to create one.</div>
+        {% else %}
+          <div class="empty tiny">Sign-in is off, so there are no accounts.</div>
+        {% endif %}
+      </section>
+
+      {# ---------------- Channels ---------------- #}
+      <section data-sec="channels" data-tab="logos" data-tab-label="Logos" hidden>
+        <h2>Channel logos</h2>
+        <p class="dim">Taken from the guide on every sync. A logo is fetched again if its
+          URL changes, the file goes missing, or the copy passes 30 days old.</p>
+        <table class="stack" data-find="logos channels artwork">
+          <tr><td class="dim">Channels</td><td>{{ logos.channels }}</td></tr>
+          <tr><td class="dim">With a logo</td><td>{{ logos.with_logo }}</td></tr>
+          <tr><td class="dim">No logo offered upstream</td><td>{{ logos.no_logo_upstream }}</td></tr>
+        </table>
+        <form method="post" action="/settings/logos" class="setform" style="margin-top:12px">
+          <button>Re-fetch all logos</button><span class="saved"></span></form>
+      </section>
+
+      {# ---------------- About ---------------- #}
+      <section data-sec="about" data-tab="about" data-tab-label="About" hidden>
+        <h2>CouchElephant</h2>
+        <p class="dim">A CouchElephant never forgets.</p>
+        <table class="stack" data-find="about version licence third party">
+          <tr><td class="dim">What it does</td>
+              <td>Reads the Plex guide into SQLite, then records a team or a programme
+                  from the live broadcast rather than a repeat.</td></tr>
+          <tr><td class="dim">Guide held</td>
+              <td>{{ logos.channels }} channels</td></tr>
+          <tr><td class="dim">Sign-in</td><td>{{ auth_mode }}</td></tr>
+        </table>
+      </section>
+
+    </div>
+  </div>
+  <button type="button" class="setclose" id="setclose" aria-label="Close">&times;</button>
+</div>

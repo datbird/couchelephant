@@ -103,7 +103,7 @@ a{color:inherit;text-decoration:none}
 .topbar{position:sticky;top:0;z-index:10;background:var(--panel);
   border-bottom:1px solid var(--line)}
 header{display:flex;align-items:center;gap:22px;padding:0 22px;height:64px;
-  background:var(--panel)}
+  background:var(--panel);border-bottom:1px solid var(--line)}
 header .brand{display:flex;align-items:center;gap:9px;height:100%}
 /* Fills the bar edge to edge. The artwork is cropped to its own bounds, so
    height:100% leaves no gap above or below. */
@@ -568,6 +568,80 @@ body.signin .pt-nav{display:none}
 .signin-card .field{max-width:none}
 .signin-card button.primary{width:100%;padding:10px}
 
+/* ---- settings window ----
+   Sections down the left, sub-tabs across the top of each, content scrolling
+   on the right. Shape taken from the same author's ludodex. The gear opens it
+   over whatever page you were on; /settings renders the same file whole. */
+.settings-window{position:relative;display:flex;width:100%;max-width:940px;
+  height:80vh;max-height:700px;background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;overflow:hidden}
+.settings-nav{flex:0 0 202px;background:var(--bg);border-right:1px solid var(--line);
+  padding:16px 10px;display:flex;flex-direction:column;gap:4px;overflow:auto}
+.settings-title{font-size:12px;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--dim);padding:4px 10px 10px}
+.settings-search{width:100%;margin:2px 0 8px;padding:8px 10px;font-size:13px}
+.nav-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:9px 11px;background:none;border:none;border-radius:8px;color:var(--text);
+  font:inherit;font-size:14px;cursor:pointer}
+.nav-item:hover{background:var(--panel2)}
+.nav-item.sel{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.nav-item .hits{margin-left:auto;font-size:11px;color:var(--dim);font-weight:400}
+.nav-none{padding:10px;font-size:13px;color:var(--dim)}
+.settings-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.settings-tabs{display:flex;gap:4px;padding:14px 24px 0;
+  border-bottom:1px solid var(--line);flex:0 0 auto}
+.settings-tabs:empty{display:none}
+.settings-tabs .tab{padding:8px 14px;background:none;border:none;
+  border-bottom:2px solid transparent;color:var(--dim);font:inherit;font-size:14px;
+  cursor:pointer;margin-bottom:-1px;white-space:nowrap}
+.settings-tabs .tab:hover{color:var(--text)}
+.settings-tabs .tab.sel{color:var(--accent-ink);border-bottom-color:var(--accent)}
+.settings-content{padding:18px 24px 24px;overflow-y:auto;overscroll-behavior:contain;
+  flex:1 1 auto;min-height:0;-webkit-overflow-scrolling:touch}
+.settings-content h2{margin:0 0 6px;font-size:19px}
+.settings-content h3{margin:0 0 5px;font-size:14px}
+.settings-content p.dim{color:var(--dim);font-size:13px;margin:0 0 18px}
+.settings-content .field{max-width:none}
+.setblock{border-top:1px solid var(--line);margin-top:22px;padding-top:18px}
+.setclose{position:absolute;top:10px;right:12px;background:transparent;border:none;
+  color:var(--dim);font-size:24px;line-height:1;cursor:pointer;padding:0 4px;z-index:2}
+.setclose:hover{color:var(--text)}
+.saved{font-size:12px;color:var(--ok-fg);opacity:0;transition:opacity .15s ease}
+.saved.on{opacity:1}
+.saved.bad{color:var(--bad-fg)}
+/* A hit from the search, so a match is visible without hunting the panel. */
+.sethit{outline:2px solid var(--accent);outline-offset:6px;border-radius:4px}
+
+/* On its own page the window fills what is left below the tabs. */
+body.setpage main{max-width:none;padding:18px;display:flex;justify-content:center}
+body.setpage .settings-window{height:calc(100vh - 190px);max-height:none}
+/* In the overlay it is the whole dialog, so the usual panel chrome is dropped. */
+.ovl.settings .ovlbox{background:transparent;border:none;box-shadow:none;
+  width:min(940px,100%);max-height:none;overflow:visible}
+
+@media (max-width:860px){
+  .settings-window{flex-direction:column;height:auto;max-height:none}
+  /* One scrolling row, not a wrapped block. Without nowrap the search box
+     takes the first line and pushes every section under it. */
+  .settings-nav{flex:0 0 auto;flex-direction:row;flex-wrap:nowrap;align-items:center;
+    overflow-x:auto;gap:6px;padding:10px;border-right:none;
+    border-bottom:1px solid var(--line);scrollbar-width:none}
+  .settings-nav>#setnav{display:flex;gap:6px;flex:0 0 auto}
+  .settings-nav::-webkit-scrollbar{display:none}
+  .settings-title{display:none}
+  .settings-search{flex:0 0 190px;width:190px;margin:0}
+  .nav-item{flex:0 0 auto;white-space:nowrap;padding:9px 13px}
+  .settings-tabs{overflow-x:auto;padding:12px 16px 0;scrollbar-width:none}
+  .settings-tabs::-webkit-scrollbar{display:none}
+  .settings-content{padding:16px 16px 24px}
+  body.setpage main{padding:0}
+  body.setpage .settings-window{height:auto;border-radius:0;border-left:none;
+    border-right:none}
+  .ovl.settings{padding:0;align-items:stretch}
+  .ovl.settings .ovlbox{border-radius:0;height:100%}
+  .settings-window{border-radius:0}
+}
+
 footer{margin:38px 0 14px;text-align:center;font-size:12px;letter-spacing:1.6px;
   text-transform:uppercase;color:var(--dim);opacity:.7}
 footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
@@ -720,7 +794,7 @@ Click to sync the guide now." aria-label="Sync the guide now">
       </button>
     </form>
 
-    <a href="/settings" class="iconbtn {{ 'on' if nav=='settings' }}"
+    <a href="/settings" class="iconbtn {{ 'on' if nav=='settings' }}" id="gearbtn"
        title="Settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -915,6 +989,138 @@ Click to sync the guide now." aria-label="Sync the guide now">
   });
 
   window.addEventListener('resize', function () { sit(active, false); });
+})();
+
+// The settings window. One file renders it, so the gear can show it over the
+// page you are on while /settings still serves the same thing whole.
+window.wireSettings = function (root) {
+  var nav = root.querySelector('#setnav'), tabs = root.querySelector('#settabs'),
+      content = root.querySelector('#setcontent'), q = root.querySelector('#setq'),
+      none = root.querySelector('#setnone');
+  if (!nav || !tabs || !content) return;
+  var secs = Array.prototype.slice.call(content.querySelectorAll('section'));
+
+  function show(sec, tab) {
+    nav.querySelectorAll('.nav-item').forEach(function (b) {
+      b.classList.toggle('sel', b.dataset.sec === sec);
+    });
+    var mine = secs.filter(function (s) { return s.dataset.sec === sec; });
+    if (!mine.length) return;
+    tab = tab || mine[0].dataset.tab;
+    // A section with one tab shows no tab strip. A single tab is not a choice.
+    tabs.innerHTML = mine.length > 1 ? mine.map(function (s) {
+      return '<button type="button" class="tab' + (s.dataset.tab === tab ? ' sel' : '') +
+             '" data-tab="' + s.dataset.tab + '">' + s.dataset.tabLabel + '</button>';
+    }).join('') : '';
+    tabs.querySelectorAll('.tab').forEach(function (b) {
+      b.addEventListener('click', function () { show(sec, b.dataset.tab); });
+    });
+    secs.forEach(function (s) {
+      s.hidden = !(s.dataset.sec === sec && s.dataset.tab === tab);
+    });
+    content.scrollTop = 0;
+  }
+
+  nav.querySelectorAll('.nav-item').forEach(function (b) {
+    b.addEventListener('click', function () { show(b.dataset.sec); });
+  });
+
+  // Search across every section, not just the one on screen, and say where
+  // each match lives so the answer is one click away.
+  function search() {
+    var term = (q.value || '').trim().toLowerCase();
+    root.querySelectorAll('.sethit').forEach(function (e) { e.classList.remove('sethit'); });
+    if (!term) {
+      nav.querySelectorAll('.nav-item').forEach(function (b) {
+        b.hidden = false;
+        var h = b.querySelector('.hits'); if (h) h.remove();
+      });
+      if (none) none.hidden = true;
+      return;
+    }
+    var any = false;
+    nav.querySelectorAll('.nav-item').forEach(function (b) {
+      var hits = 0;
+      secs.filter(function (s) { return s.dataset.sec === b.dataset.sec; })
+        .forEach(function (s) {
+          s.querySelectorAll('[data-find]').forEach(function (f) {
+            var hay = (f.dataset.find + ' ' + f.textContent).toLowerCase();
+            if (hay.indexOf(term) !== -1) { hits++; f.classList.add('sethit'); }
+          });
+        });
+      b.hidden = hits === 0;
+      if (hits) any = true;
+      var h = b.querySelector('.hits');
+      if (hits) {
+        if (!h) { h = document.createElement('span'); h.className = 'hits'; b.appendChild(h); }
+        h.textContent = hits;
+      } else if (h) h.remove();
+    });
+    if (none) none.hidden = any;
+    // Jump to the first section that matched, so a search answers itself.
+    var first = nav.querySelector('.nav-item:not([hidden])');
+    if (first) show(first.dataset.sec);
+  }
+  if (q) q.addEventListener('input', search);
+
+  // Saving stays in the window. The endpoints redirect back to the settings
+  // page, which a fetch follows and reads as success.
+  root.querySelectorAll('form.setform').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = f.querySelector('button'), tell = f.querySelector('.saved') ||
+        (f.parentElement && f.parentElement.querySelector('.saved'));
+      var old = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
+      fetch(f.action, {method: 'POST', body: new URLSearchParams(new FormData(f))})
+        .then(function (r) {
+          if (tell) {
+            tell.className = 'saved on' + (r.ok ? '' : ' bad');
+            tell.textContent = r.ok ? 'Saved' : 'Failed';
+            setTimeout(function () { tell.className = 'saved'; }, 2400);
+          }
+          if (btn) { btn.disabled = false; btn.textContent = old; }
+          // A connection test and a user removal both change what the window
+          // shows, so those reload it rather than leaving a stale panel.
+          if (f.action.indexOf('/settings/test') !== -1 ||
+              f.action.indexOf('/delete') !== -1) location.reload();
+        })
+        .catch(function () {
+          if (tell) { tell.className = 'saved on bad'; tell.textContent = 'Failed'; }
+          if (btn) { btn.disabled = false; btn.textContent = old; }
+        });
+    });
+  });
+
+  show('plex');
+};
+
+(function () {
+  var gear = document.getElementById('gearbtn');
+  var ovl = document.getElementById('ovl'), box = document.getElementById('ovlbox');
+  var here = document.getElementById('setwin');
+  if (here) { window.wireSettings(here); return; }   // already the whole page
+  if (!gear || !ovl || !box) return;
+  gear.addEventListener('click', function (e) {
+    // A plain click opens it here. Anything modified keeps the link honest.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    box.innerHTML = '<div class="empty">Loading...</div>';
+    ovl.classList.add('show', 'settings');
+    fetch('/partial/settings').then(function (r) { return r.text(); })
+      .then(function (html) {
+        box.innerHTML = html;
+        window.wireSettings(box);
+        var x = box.querySelector('#setclose');
+        if (x) x.addEventListener('click', shut);
+      })
+      .catch(function (err) { box.innerHTML = '<div class="empty">' + err + '</div>'; });
+  });
+  function shut() { ovl.classList.remove('show', 'settings'); box.innerHTML = ''; }
+  ovl.addEventListener('click', function (e) { if (e.target === ovl) shut(); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && ovl.classList.contains('settings')) shut();
+  });
 })();
 
 // The account menu.

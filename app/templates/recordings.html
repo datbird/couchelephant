@@ -270,7 +270,15 @@
         var list = document.getElementById('rlist');
         if (!list) return;
         var h = '', rows = st.kind === 'team' ? (d.teams || []) : (d.series || []);
-        if (!rows.length) { list.innerHTML = '<div class="fempty">Nothing matches.</div>'; return; }
+        if (!rows.length) {
+          // A team only exists while the guide carries a game it plays, so an
+          // empty result usually means the season has not reached it yet.
+          list.innerHTML = '<div class="fempty">Nothing matches. ' +
+            (st.kind === 'team'
+              ? 'Only teams playing in your guide are listed.'
+              : 'Only programmes still to air are listed.') + '</div>';
+          return;
+        }
         rows.forEach(function (r2) {
           if (st.kind === 'team') {
             h += '<button type="button" class="rrow" data-team="' + r2.id + '" data-name="' +
@@ -300,6 +308,7 @@
       });
     }, 180);
   }
+
 
   function wireMulti() {
     var btn = document.getElementById('multibtn'), menu = document.getElementById('multimenu'),

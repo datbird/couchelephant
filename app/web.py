@@ -803,11 +803,16 @@ def api_series(q: str = ""):
 @app.get("/api/teams")
 def api_teams(q: str = ""):
     q = (q or "").strip()
+    # No low cap here. Teams only exist while the guide carries a game they
+    # play, so the whole list is short, and silently showing 60 of 82 would
+    # look like a team had gone missing.
     rows = db.query(
         "SELECT t.id, t.name, EXISTS(SELECT 1 FROM passes p WHERE p.team_id = t.id) "
         "AS followed FROM teams t WHERE ? = '' OR t.name LIKE ? COLLATE NOCASE "
-        "ORDER BY t.name LIMIT 60", (q, f"%{q}%"))
-    return JSONResponse({"ok": True, "teams": [dict(r) for r in rows]})
+        "ORDER BY t.name LIMIT 400", (q, f"%{q}%"))
+    total = db.one("SELECT COUNT(*) c FROM teams")["c"]
+    return JSONResponse({"ok": True, "total": total,
+                         "teams": [dict(r) for r in rows]})
 
 
 @app.get("/api/sources")
@@ -910,6 +915,15 @@ async def passes_run():
 def settings_page(request: Request, tested: str = "", autherror: str = ""):
     zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
     return page(request, "settings.html", zones=zones, tested=tested,
+                autherror=autherror, logos=sync.logo_coverage(),
+                users=auth.list_users(), cf_ready=cf_access.available())
+
+
+@app.get("/partial/settings", response_class=HTMLResponse)
+def settings_partial(request: Request, tested: str = "", autherror: str = ""):
+    """The settings window on its own, for the overlay the gear opens."""
+    zones = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
+    return page(request, "_settings.html", zones=zones, tested=tested,
                 autherror=autherror, logos=sync.logo_coverage(),
                 users=auth.list_users(), cf_ready=cf_access.available())
 
