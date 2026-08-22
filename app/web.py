@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import db, passes, sync
+from . import db, filters, passes, sync
 from .plex import Plex, PlexError
 
 BASE = os.path.dirname(__file__)
@@ -94,7 +94,8 @@ async def sync_loop():
 PAGE_SIZE = 80
 
 
-def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, limit: int):
+def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, limit: int,
+                   f: str = "", x: str = ""):
     """Rows for the guide, whether that is one day or a search.
 
     Ordering ends with a.id so paging is deterministic. Without a unique tie
@@ -126,6 +127,9 @@ def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, lim
         args.append(channel)
     if sports:
         sql.append("AND p.section = 'sports'")
+    frags, fargs = filters.build(filters.parse(f), filters.parse(x))
+    sql += frags
+    args += fargs
     sql.append(f"{order} LIMIT ? OFFSET ?")
     args += [limit, offset]
     return db.query(" ".join(sql), tuple(args))
@@ -133,7 +137,7 @@ def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, lim
 
 @app.get("/api/grid")
 def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
-             sports: int = 0, channel: str = ""):
+             sports: int = 0, channel: str = "", f: str = "", x: str = ""):
     """A window of the guide grid: some channels, over some span of time.
 
     The client asks for more channels when it scrolls down and for more time
@@ -150,6 +154,14 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
         csql.append("""AND vcn IN (SELECT a.channel_vcn FROM airings a
                                    JOIN programs p ON p.guid = a.program_guid
                                    WHERE p.section = 'sports')""")
+    chosen = [t.split(":", 1)[1] for t in filters.parse(f) if t.startswith("channel:")]
+    if chosen:
+        csql.append("AND vcn IN (" + ",".join("?" for _ in chosen) + ")")
+        cargs += chosen
+    dropped = [t.split(":", 1)[1] for t in filters.parse(x) if t.startswith("channel:")]
+    if dropped:
+        csql.append("AND vcn NOT IN (" + ",".join("?" for _ in dropped) + ")")
+        cargs += dropped
     csql.append("ORDER BY CAST(vcn AS REAL) LIMIT ? OFFSET ?")
     cargs += [chlimit + 1, choffset]
     crows = db.query(" ".join(csql), tuple(cargs))
@@ -164,6 +176,7 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
     plex_titles = {r["title"] for r in db.query(
         "SELECT title FROM plex_grabs WHERE status IN ('scheduled','inprogress')")}
 
+    frags, fargs = filters.build(filters.parse(f), filters.parse(x))
     airings = []
     if vcns:
         marks = ",".join("?" for _ in vcns)
@@ -172,8 +185,9 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
                        p.title, p.grandparent_title, p.summary, p.section
                 FROM airings a JOIN programs p ON p.guid = a.program_guid
                 WHERE a.channel_vcn IN ({marks}) AND a.begins_at < ? AND a.ends_at > ?
+                {' '.join(frags)}
                 ORDER BY a.channel_vcn, a.begins_at, a.id""",
-            tuple(vcns) + (end, start))
+            tuple(vcns) + (end, start) + tuple(fargs))
         for r in rows:
             if sports and r["section"] != "sports":
                 continue
@@ -199,6 +213,11 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
         "guide_start": span["lo"], "guide_end": span["hi"],
         "start": start, "end": end,
     })
+
+
+@app.get("/api/facets")
+def api_facets():
+    return JSONResponse(filters.facets())
 
 
 @app.get("/api/program")
@@ -287,9 +306,9 @@ def api_pass(team_id: int = Form(...)):
 
 @app.get("/partial/airings", response_class=HTMLResponse)
 def airings_partial(request: Request, day: str = "", channel: str = "", sports: int = 0,
-                    q: str = "", offset: int = 0):
+                    q: str = "", offset: int = 0, f: str = "", x: str = ""):
     """Just the rows, for infinite scroll. Empty response means the end."""
-    rows = _airings_query(day, channel, sports, q, offset, PAGE_SIZE)
+    rows = _airings_query(day, channel, sports, q, offset, PAGE_SIZE, f, x)
     if not rows:
         return HTMLResponse("")
     return templates.TemplateResponse(
@@ -297,7 +316,8 @@ def airings_partial(request: Request, day: str = "", channel: str = "", sports: 
 
 
 @app.get("/", response_class=HTMLResponse)
-def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q: str = ""):
+def guide(request: Request, day: str = "", channel: str = "", sports: int = 0,
+          q: str = "", f: str = "", x: str = ""):
     """Guide and search are the same page.
 
     A query switches the view from one day's grid to matches across the whole
@@ -305,7 +325,7 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q
     tabs made you navigate to find out what is on.
     """
     now = int(time.time())
-    rows = _airings_query(day, channel, sports, q, 0, PAGE_SIZE)
+    rows = _airings_query(day, channel, sports, q, 0, PAGE_SIZE, f, x)
 
     days = []
     if not q.strip():
@@ -319,7 +339,8 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0, q
     return page(request, "guide.html", rows=rows, days=days,
                 day=(day or (days[0]["key"] if days else "")),
                 channels=_channel_list(), channel=channel, sports=sports,
-                q=q, logos=_logo_map())
+                q=q, logos=_logo_map(), f=f, x=x,
+                nfilters=len(filters.parse(f)) + len(filters.parse(x)))
 
 
 @app.get("/search")

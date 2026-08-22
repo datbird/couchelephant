@@ -23,9 +23,11 @@
 </div>
 {% endif %}
 
-{# One form. Search, channel and sports narrow the same result set together. #}
+{# One form. Search and the filter panel narrow the same result set. #}
 <form method="get" action="/" class="row filterbar" id="sb">
   {% if not q %}<input type="hidden" name="day" value="{{ day }}">{% endif %}
+  <input type="hidden" name="f" id="f_inc" value="{{ f }}">
+  <input type="hidden" name="x" id="f_exc" value="{{ x }}">
 
   <div class="searchbox {{ 'open' if q }}" id="sbox">
     <button type="button" class="iconbtn" id="sbtoggle" title="Search the guide (/)" aria-label="Search">
@@ -35,24 +37,31 @@
     <input name="q" id="sbinput" value="{{ q }}"
            placeholder="Search programmes, teams, descriptions..." autocomplete="off">
     {% if q %}
-      <a class="iconbtn" href="/{% if channel %}?channel={{ channel }}{% endif %}"
-         title="Clear search" aria-label="Clear">
+      <a class="iconbtn" href="/" title="Clear search" aria-label="Clear">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></a>
     {% endif %}
   </div>
 
-  <select name="channel" onchange="this.form.submit()">
-    <option value="">All channels</option>
-    {% for c in channels %}
-      <option value="{{ c.vcn }}" {{ 'selected' if c.vcn == channel }}>{{ c.vcn }} {{ c.cs or '' }}</option>
-    {% endfor %}
-  </select>
-
-  <label class="row tiny dim">
-    <input type="checkbox" name="sports" value="1" {{ 'checked' if sports }} onchange="this.form.submit()">
-    Sports only
-  </label>
+  <div class="fwrap" id="fwrap">
+    <button type="button" class="fbtn {{ 'on' if nfilters }}" id="fbtn">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+      Filters{% if nfilters %} ({{ nfilters }}){% endif %}
+    </button>
+    <div class="fmenu" id="fmenu">
+      <div class="fhead"><span>Filters</span>
+        <button type="button" class="fclear" id="fclear">Clear</button></div>
+      <input class="fsearch" id="fq" placeholder="Search filters..." autocomplete="off">
+      <div class="fapplied" id="fapplied"></div>
+      <div class="fscroll"><div class="fgrid" id="fgrid">
+        <div class="fgh">Name</div>
+        <div class="fgh c" title="Include: keep only airings that match. Several includes narrow further.">Incl</div>
+        <div class="fgh c" title="Exclude: hide airings that match, whatever else they matched. Exclude wins.">Excl</div>
+      </div></div>
+    </div>
+  </div>
 </form>
 
 {% if q %}
@@ -409,6 +418,134 @@
       if (wrap.scrollHeight <= wrap.clientHeight + 40 && moreChannels) return loadChannels().then(fill);
     })();
   });
+})();
+
+// ---- filter panel ----
+// Same shape as the Ludodex one: sections that collapse, a search that filters
+// the rows and auto-expands whatever matched, and a tri-state per row.
+(function () {
+  var wrap = document.getElementById('fwrap');
+  if (!wrap) return;
+  var btn = document.getElementById('fbtn'), menu = document.getElementById('fmenu'),
+      grid = document.getElementById('fgrid'), fq = document.getElementById('fq'),
+      applied = document.getElementById('fapplied'), form = document.getElementById('sb'),
+      incEl = document.getElementById('f_inc'), excEl = document.getElementById('f_exc'),
+      clear = document.getElementById('fclear');
+
+  var inc = new Set((incEl.value || '').split(',').filter(Boolean));
+  var exc = new Set((excEl.value || '').split(',').filter(Boolean));
+  var sections = null, openSecs = {}, names = {};
+
+  function esc(t) {
+    return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+    });
+  }
+
+  function apply() {
+    incEl.value = Array.from(inc).join(',');
+    excEl.value = Array.from(exc).join(',');
+    form.submit();
+  }
+
+  function setState(id, state) {
+    inc.delete(id); exc.delete(id);
+    if (state === 'inc') inc.add(id);
+    if (state === 'exc') exc.add(id);
+    render();
+  }
+
+  function renderApplied() {
+    var all = [];
+    inc.forEach(function (id) { all.push({id: id, s: 'incl'}); });
+    exc.forEach(function (id) { all.push({id: id, s: 'excl'}); });
+    applied.innerHTML = all.length ? all.map(function (a) {
+      return '<button type="button" class="fchip ' + a.s + '" data-clear="' + esc(a.id) + '">' +
+'<span class="tag">' + (a.s === 'incl' ? 'Incl' : 'Excl') + '</span>' +
+        '<span>' + esc(names[a.id] || a.id) + '</span><span class="xx">&times;</span>'  + '</button>';
+    }).join('') : '';
+    applied.querySelectorAll('[data-clear]').forEach(function (b) {
+      b.addEventListener('click', function () { setState(b.dataset.clear, null); });
+    });
+  }
+
+  function render() {
+    if (!sections) return;
+    var q = (fq.value || '').trim().toLowerCase();
+    var html = '<div class="fgh">Name</div>' +
+      '<div class="fgh c" title="Include: keep only airings that match.">Incl</div>' +
+      '<div class="fgh c" title="Exclude: hide airings that match. Exclude wins.">Excl</div>';
+    var any = false;
+    sections.forEach(function (sec) {
+      var rows = q ? sec.rows.filter(function (r) {
+        return r.name.toLowerCase().indexOf(q) >= 0;
+      }) : sec.rows;
+      if (!rows.length) return;
+      any = true;
+      var open = q ? true : !!openSecs[sec.title];
+      html += '<button type="button" class="fsec" data-sec="' + esc(sec.title) + '">' +
+        '<span class="chev' + (open ? ' open' : '') + '">&#9656;</span>' +
+        '<span>' + esc(sec.title) + '</span><span class="n">' + rows.length + '</span></button>';
+      if (!open) return;
+      rows.forEach(function (r) {
+        var isI = inc.has(r.id), isE = exc.has(r.id);
+        html += '<div class="frow-name">' +
+          (r.logo ? '<img src="/logo/' + esc(r.id.split(":")[1]) + '" alt="">' : '') +
+          '<span class="t">' + esc(r.name) + '</span>' +
+          '<span class="c">' + r.count + '</span></div>' +
+          '<div class="fcell"><span class="fbox' + (isI ? ' on' : '') +
+            '" data-id="' + esc(r.id) + '" data-k="inc"></span></div>' +
+          '<div class="fcell"><span class="fbox ex' + (isE ? ' on' : '') +
+            '" data-id="' + esc(r.id) + '" data-k="exc"></span></div>';
+      });
+    });
+    grid.innerHTML = any ? html : html + '<div class="fempty" style="grid-column:1/-1">No filters match.</div>';
+    grid.querySelectorAll('[data-sec]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        openSecs[b.dataset.sec] = !openSecs[b.dataset.sec]; render();
+      });
+    });
+    grid.querySelectorAll('.fbox').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.dataset.id, k = b.dataset.k;
+        var now = inc.has(id) ? 'inc' : exc.has(id) ? 'exc' : null;
+        setState(id, now === k ? null : k);
+        apply();
+      });
+    });
+    renderApplied();
+  }
+
+  function load() {
+    if (sections) return Promise.resolve();
+    return fetch('/api/facets').then(function (r) { return r.json(); })
+      .then(function (d) {
+        sections = d;
+        d.forEach(function (sec) {
+          sec.rows.forEach(function (r) { names[r.id] = r.name; });
+        });
+        // Open the section holding anything already applied.
+        d.forEach(function (sec) {
+          if (sec.rows.some(function (r) { return inc.has(r.id) || exc.has(r.id); }))
+            openSecs[sec.title] = true;
+        });
+        if (!Object.keys(openSecs).length && d.length) openSecs[d[0].title] = true;
+        render();
+      });
+  }
+
+  btn.addEventListener('click', function () {
+    var open = menu.classList.toggle('open');
+    if (open) load().then(function () { fq.focus(); });
+  });
+  document.addEventListener('click', function (e) {
+    if (!wrap.contains(e.target)) menu.classList.remove('open');
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') menu.classList.remove('open');
+  });
+  fq.addEventListener('input', render);
+  clear.addEventListener('click', function () { inc.clear(); exc.clear(); apply(); });
 })();
 
 // ---- programme overlay ----
