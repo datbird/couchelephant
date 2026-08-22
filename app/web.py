@@ -160,6 +160,10 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
     channels = [{"vcn": r["vcn"], "call_sign": r["call_sign"] or "",
                  "logo": bool(r["logo_path"])} for r in crows]
 
+    ours = {r["airing_id"] for r in db.query("SELECT airing_id FROM our_grabs")}
+    plex_titles = {r["title"] for r in db.query(
+        "SELECT title FROM plex_grabs WHERE status IN ('scheduled','inprogress')")}
+
     airings = []
     if vcns:
         marks = ",".join("?" for _ in vcns)
@@ -173,7 +177,13 @@ def api_grid(start: int, end: int, choffset: int = 0, chlimit: int = 12,
         for r in rows:
             if sports and r["section"] != "sports":
                 continue
+            sched = None
+            if r["id"] in ours:
+                sched = "ce"
+            elif r["title"] in plex_titles:
+                sched = "plex"
             airings.append({
+                "sched": sched,
                 "id": r["id"], "vcn": r["channel_vcn"],
                 "b": r["begins_at"], "e": r["ends_at"],
                 "premiere": bool(r["premiere"]), "drm": bool(r["drm"]),
@@ -209,6 +219,8 @@ def api_program(airing_id: str):
     scheduled = db.one(
         "SELECT status FROM plex_grabs WHERE title = ? AND status IN "
         "('scheduled','inprogress','complete') LIMIT 1", (a["title"],))
+    ours = {r["airing_id"] for r in db.query(
+        "SELECT airing_id FROM our_grabs WHERE program_guid = ?", (a["program_guid"],))}
     my_passes = {r["team_id"] for r in db.query("SELECT team_id FROM passes")}
 
     teams = db.unjs(a["teams"])
@@ -223,6 +235,7 @@ def api_program(airing_id: str):
         "section": a["section"],
         "originally_available": a["originally_available"],
         "scheduled": scheduled["status"] if scheduled else None,
+        "scheduled_by_us": bool(ours),
         "dry_run": db.get_setting("dry_run") == "1",
         "airings": [{
             "id": r["id"], "vcn": r["channel_vcn"], "call_sign": r["channel_call_sign"] or "",
@@ -230,6 +243,7 @@ def api_program(airing_id: str):
             "b": r["begins_at"], "e": r["ends_at"],
             "premiere": bool(r["premiere"]), "drm": bool(r["drm"]),
             "chosen": r["id"] == a["id"],
+            "ours": r["id"] in ours,
         } for r in siblings],
     })
 
@@ -250,7 +264,7 @@ async def api_record(airing_id: str = Form(...)):
                              "This airing is DRM encrypted and cannot be recorded."}, status_code=400)
     try:
         plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        await asyncio.to_thread(passes._schedule, plex, row, None)
+        await asyncio.to_thread(passes._schedule, plex, row, None, "manual")
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
     await asyncio.to_thread(sync.sync_recordings, Plex(db.get_setting("plex_url"),

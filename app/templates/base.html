@@ -103,17 +103,47 @@ tr:hover td{background:var(--panel2)}
 /* A long programme scrolls past the left edge, taking its title with it. This
    pins the label just clear of the channel column so it stays readable for as
    long as any part of the block is on screen. */
-/* align-self and a fit-content width matter: as a flex item it would otherwise
-   stretch to the full block width, leaving sticky no room to slide within it. */
-.gpin{position:sticky;left:calc(var(--chw) + 10px);padding:6px 9px;
-  align-self:flex-start;width:fit-content;max-width:100%;min-width:0;
-  box-sizing:border-box}
+/* Nudged by script rather than position:sticky. Sticky fails on exactly the
+   case that matters: when the title is wider than the block, fit-content
+   clamps to max-width:100%, the label fills the block and has nowhere to
+   slide. A transform has no such limit. */
+.gpin{padding:6px 9px;width:100%;min-width:0;box-sizing:border-box;
+  will-change:transform}
 .gprog .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .gprog .m{font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;
   text-overflow:ellipsis}
 .gprog.live{border-color:#f3a30b66}
 .gprog.drm{opacity:.5}
+/* Who asked for the recording. Amber is CouchElephant's own colour, so its
+   recordings wear it; Plex's own get its blue-grey. The dot repeats the
+   distinction for anyone who cannot separate the two hues. */
+.gprog.sched-ce{border-color:var(--accent);background:rgba(243,163,11,.12)}
+.gprog.sched-plex{border-color:#5e7990;background:rgba(94,121,144,.14)}
+.gprog .rec{display:inline-block;width:7px;height:7px;border-radius:50%;
+  margin-right:5px;vertical-align:middle}
+.gprog.sched-ce .rec{background:var(--accent)}
+.gprog.sched-plex .rec{background:#8ba7bd}
+.legend{display:flex;gap:16px;align-items:center;margin:0 0 10px;font-size:12px;
+  color:var(--dim)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+
+/* Loading state while another slice of guide is on its way. Sits over the edge
+   being extended, so it reads as "more is coming here" rather than a page-wide
+   spinner that hides what you were already reading. */
+.gload{position:absolute;z-index:5;display:flex;align-items:center;
+  justify-content:center;gap:9px;font-size:12px;letter-spacing:.4px;
+  color:var(--dim);pointer-events:none;opacity:0;transition:opacity .15s ease}
+.gload.on{opacity:1}
+.gload.bottom{left:0;right:0;bottom:0;height:96px;
+  background:linear-gradient(to bottom,rgba(4,12,21,0),rgba(4,12,21,.88) 55%)}
+.gload.right{top:0;bottom:0;right:0;width:150px;flex-direction:column;
+  background:linear-gradient(to right,rgba(4,12,21,0),rgba(4,12,21,.88) 55%)}
+.spin{width:16px;height:16px;border-radius:50%;border:2px solid rgba(243,163,11,.25);
+  border-top-color:var(--accent);animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2s}}
 .gnow{position:absolute;top:0;bottom:0;width:2px;background:var(--accent);z-index:1;
   pointer-events:none}
 :root{--chw:92px;--rowh:62px}

@@ -103,7 +103,7 @@ def _log(pass_id, row, action, reason, dry_run, subscription=None):
         )
 
 
-def _schedule(plex, row, target_section):
+def _schedule(plex, row, target_section, source="pass"):
     """Create a one-shot recording pinned to exactly this broadcast."""
     options = plex.template(row["rating_key"])
     single = None
@@ -130,7 +130,21 @@ def _schedule(plex, row, target_section):
         int(single.get("type") or 4),
         prefs,
     )
+    remember(row, source)
     return single.get("targetLibrarySectionID")
+
+
+def remember(row, source):
+    """Record that this airing was scheduled by us."""
+    with db.tx() as c:
+        c.execute(
+            """INSERT INTO our_grabs (airing_id, program_guid, title, channel_vcn,
+                                      begins_at, source, created_at)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(airing_id) DO UPDATE SET source=excluded.source,
+                 created_at=excluded.created_at""",
+            (row["id"], row["program_guid"], row["title"], row["channel_vcn"],
+             row["begins_at"], source, _now()))
 
 
 def run_passes(force_dry_run=None):

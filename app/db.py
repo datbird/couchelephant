@@ -132,6 +132,19 @@ CREATE TABLE IF NOT EXISTS pass_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_actions_pass ON pass_actions(pass_id, created_at DESC);
 
+-- Recordings CouchElephant created. Plex has no field saying who asked, so
+-- the distinction has to be kept here.
+CREATE TABLE IF NOT EXISTS our_grabs (
+    airing_id    TEXT PRIMARY KEY,
+    program_guid TEXT,
+    title        TEXT,
+    channel_vcn  TEXT,
+    begins_at    INTEGER,
+    source       TEXT,
+    created_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_ourgrabs_guid ON our_grabs(program_guid);
+
 CREATE TABLE IF NOT EXISTS sync_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at INTEGER,

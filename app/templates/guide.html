@@ -74,6 +74,11 @@
 {% else %}
 {# Grid guide: channels down, time across. Both axes load more as you reach
    the edge, and stop when the data runs out. #}
+<div class="legend">
+  <span><i style="background:var(--accent)"></i> Recording, scheduled by CouchElephant</span>
+  <span><i style="background:#8ba7bd"></i> Recording, scheduled in Plex</span>
+  <span><i style="background:#f3a30b;opacity:.45"></i> Live broadcast</span>
+</div>
 <div class="gridwrap" id="gw" data-day="{{ day }}"
      data-sports="{{ 1 if sports else 0 }}" data-channel="{{ channel }}">
   <div class="gridinner" id="gi">
@@ -83,6 +88,8 @@
     </div>
     <div class="grows" id="grows"></div>
   </div>
+  <div class="gload bottom" id="loadv"><span class="spin"></span> Loading channels</div>
+  <div class="gload right" id="loadh"><span class="spin"></span> Loading later</div>
 </div>
 <div id="gstatus" class="empty tiny">Loading guide...</div>
 {% endif %}
@@ -153,7 +160,9 @@
 (function () {
   var wrap = document.getElementById('gw');
   if (!wrap) return;
-  var timesEl = document.getElementById('gtimes'),
+  var loadV = document.getElementById('loadv'),
+      loadH = document.getElementById('loadh'),
+      timesEl = document.getElementById('gtimes'),
       rowsEl = document.getElementById('grows'),
       status = document.getElementById('gstatus');
 
@@ -163,7 +172,7 @@
     wrap.style.height = Math.max(240, window.innerHeight - top - 18) + 'px';
   }
   fit();
-  window.addEventListener('resize', fit);
+  window.addEventListener('resize', function () { fit(); schedule(); });
 
   var PX_PER_MIN = 5,          // 30 minutes = 150px
       SLOT = 30 * 60,          // tick every half hour
@@ -228,7 +237,8 @@
     if (!lane) return;
     seen[a.id] = 1;
     var el = document.createElement('div');
-    el.className = 'gprog' + (a.premiere ? ' live' : '') + (a.drm ? ' drm' : '');
+    el.className = 'gprog' + (a.premiere ? ' live' : '') + (a.drm ? ' drm' : '') +
+      (a.sched === 'ce' ? ' sched-ce' : a.sched === 'plex' ? ' sched-plex' : '');
     el.style.left = x(a.b) + 'px';
     el.style.width = Math.max(28, ((a.e - a.b) / 60) * PX_PER_MIN - 4) + 'px';
     var when = new Date(a.b * 1000), hh = when.getHours() % 12 || 12,
@@ -236,8 +246,10 @@
     el.title = a.title + '\n' + hh + ':' + (mm < 10 ? '0' + mm : mm) + ' ' + ap +
                (a.summary ? '\n\n' + a.summary : '');
     el.dataset.aid = a.id;
+    el.dataset.x = String(x(a.b));
+    el.dataset.w = String(Math.max(28, ((a.e - a.b) / 60) * PX_PER_MIN - 4));
     el.innerHTML = '<div class="gpin">' +
-      '<div class="t">' + esc(a.title) + '</div>' +
+      '<div class="t">' + (a.sched ? '<i class="rec"></i>' : '') + esc(a.title) + '</div>' +
       '<div class="m">' + esc(a.parent && a.parent !== a.title ? a.parent : '') +
       (a.premiere ? ' &middot; LIVE' : '') + (a.drm ? ' &middot; DRM' : '') + '</div></div>';
     lane.appendChild(el);
@@ -278,7 +290,7 @@
   // More channels: same time window, next slice of the channel list.
   function loadChannels() {
     if (busy || !moreChannels) return Promise.resolve();
-    busy = true; status.style.display = 'block'; status.textContent = 'Loading channels...';
+    busy = true; busyV(true);
     var from = startTs, to = endTs > startTs ? endTs : startTs + CHUNK;
     return fetchWindow(from, to, chOffset, CH_PAGE).then(function (d) {
       if (guideEnd === null) guideEnd = d.guide_end;
@@ -288,24 +300,27 @@
       moreChannels = d.more_channels;
       d.airings.forEach(place);
       widen();
+      schedule();
       status.textContent = moreChannels ? '' : 'End of the channel list.';
       status.style.display = moreChannels ? 'none' : 'block';
-    }).finally(function () { busy = false; });
+      pinOverlays();
+    }).finally(function () { busy = false; busyV(false); });
   }
 
   // More time: every channel already on screen, next chunk to the right.
   function loadTime() {
     if (busy || !moreTime || !channels.length) return Promise.resolve();
     if (guideEnd && endTs >= guideEnd) { moreTime = false; return Promise.resolve(); }
-    busy = true;
+    busy = true; busyH(true);
     var from = endTs, to = endTs + CHUNK;
     return fetchWindow(from, to, 0, chOffset).then(function (d) {
       endTs = to;
       drawTicks(from, to);
       d.airings.forEach(place);
       widen();
+      schedule();
       if (guideEnd && endTs >= guideEnd) moreTime = false;
-    }).finally(function () { busy = false; });
+    }).finally(function () { busy = false; busyH(false); });
   }
 
   rowsEl.addEventListener('click', function (e) {
@@ -313,7 +328,62 @@
     if (blk && blk.dataset.aid) window.openProgram(blk.dataset.aid);
   });
 
+  // Keep every visible title inside the visible part of its block. Reads only
+  // cached numbers, so it stays cheap with hundreds of blocks on screen.
+  var chw = parseFloat(getComputedStyle(document.documentElement)
+              .getPropertyValue('--chw')) || 92;
+  var pending = false;
+
+  function pinOverlays() {
+    // The overlays live inside the scrolling box, so they have to be moved to
+    // stay on the visible edge rather than the content edge.
+    loadV.style.transform = 'translate(' + wrap.scrollLeft + 'px,' + wrap.scrollTop + 'px)';
+    loadV.style.width = wrap.clientWidth + 'px';
+    loadV.style.bottom = 'auto';
+    loadV.style.top = (wrap.clientHeight - 96) + 'px';
+    loadH.style.transform = 'translate(' + wrap.scrollLeft + 'px,' + wrap.scrollTop + 'px)';
+    loadH.style.height = wrap.clientHeight + 'px';
+    loadH.style.right = 'auto';
+    loadH.style.left = (wrap.clientWidth - 150) + 'px';
+  }
+
+  function busyV(on) { loadV.classList.toggle('on', on); if (on) pinOverlays(); }
+  function busyH(on) { loadH.classList.toggle('on', on); if (on) pinOverlays(); }
+
+  function nudge() {
+    pending = false;
+    pinOverlays();
+    var sl = wrap.scrollLeft, vis = sl + wrap.clientWidth, edge = sl + chw + 10;
+    var blocks = rowsEl.querySelectorAll('.gprog');
+    for (var i = 0; i < blocks.length; i++) {
+      var el = blocks[i], bx = +el.dataset.x, bw = +el.dataset.w;
+      if (bx + bw < sl || bx > vis) continue;          // off screen, leave it
+      var pin = el.firstChild;
+      if (!pin) continue;
+      // Slide the label to the visible edge and shrink it by the same amount,
+      // so the text keeps ellipsising against the block's real right edge.
+      var want = edge - bx;
+      if (want < 0) want = 0;
+      var max = bw - 40;                 // always leave room for a few characters
+      if (max < 0) max = 0;
+      if (want > max) want = max;
+      var cur = +(el.dataset.off || -1);
+      if (Math.abs(cur - want) > 0.5) {
+        pin.style.transform = 'translateX(' + want + 'px)';
+        pin.style.width = (bw - want) + 'px';
+        el.dataset.off = String(want);
+      }
+    }
+  }
+
+  function schedule() {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(nudge);
+  }
+
   wrap.addEventListener('scroll', function () {
+    schedule();
     if (wrap.scrollTop + wrap.clientHeight > wrap.scrollHeight - ROW_H * 3) loadChannels();
     if (wrap.scrollLeft + wrap.clientWidth > wrap.scrollWidth - 400) loadTime();
   });
@@ -387,7 +457,8 @@
            '<div class="ch">' + esc(a.vcn) + ' ' + esc(a.call_sign) +
            (a.premiere ? ' &middot; <b>LIVE</b>' : '') + (a.drm ? ' &middot; DRM' : '') + '</div></div>';
       h += '<div class="act">';
-      if (a.drm) h += '<span class="pill bad">cannot record</span>';
+      if (a.ours) h += '<span class="pill ok">CouchElephant is recording this</span>';
+      else if (a.drm) h += '<span class="pill bad">cannot record</span>';
       else h += '<button data-rec="' + esc(a.id) + '">Record</button>';
       h += '</div></div>';
     });
@@ -409,7 +480,8 @@
     }
 
     h += '<div class="ovlfoot"><span class="note" id="ovlmsg">';
-    if (d.scheduled) h += 'Plex already has this: <b>' + esc(d.scheduled) + '</b>.';
+    if (d.scheduled_by_us) h += 'CouchElephant scheduled this.';
+    else if (d.scheduled) h += 'Plex already has this: <b>' + esc(d.scheduled) + '</b>.';
     else if (d.dry_run) h += 'Preview mode is on, so recording is disabled. Turn it off in Settings.';
     h += '</span></div>';
     box.innerHTML = h;
