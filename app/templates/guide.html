@@ -24,7 +24,7 @@
 <form method="get" action="/" class="row filterbar" id="sb">
   {% if not q %}<input type="hidden" name="day" value="{{ day }}">{% endif %}
 
-  <div class="searchbox {{ 'open' if q }}">
+  <div class="searchbox {{ 'open' if q }}" id="sbox">
     <button type="button" class="iconbtn" id="sbtoggle" title="Search the guide (/)" aria-label="Search">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
@@ -87,23 +87,34 @@
 </div>
 
 <script>
-// The box collapses to an icon until it is wanted, so the day bar keeps the width.
+// The form and the box are different elements: the class that expands the input
+// lives on .searchbox, while submitting has to happen on the <form>. Toggling
+// the class onto the form is a silent no-op, which is exactly what it did.
 (function () {
-  var box = document.getElementById('sb'),
-      btn = document.getElementById('sbtoggle'),
-      inp = document.getElementById('sbinput');
+  var form = document.getElementById('sb'),
+      box  = document.getElementById('sbox'),
+      btn  = document.getElementById('sbtoggle'),
+      inp  = document.getElementById('sbinput');
+  if (!form || !box || !btn || !inp) return;
+
+  function open()  { box.classList.add('open'); inp.focus(); }
+  function close() { box.classList.remove('open'); }
+
   btn.addEventListener('click', function () {
-    if (box.classList.contains('open') && inp.value.trim()) { box.submit(); return; }
-    box.classList.toggle('open');
-    if (box.classList.contains('open')) inp.focus();
+    if (!box.classList.contains('open')) { open(); return; }
+    if (inp.value.trim()) { form.submit(); return; }
+    close();
   });
+
   inp.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') { inp.value = ''; box.classList.remove('open'); }
+    if (e.key === 'Escape') { inp.value = ''; close(); inp.blur(); }
   });
+
   // "/" focuses search, the way every guide should behave.
   document.addEventListener('keydown', function (e) {
-    if (e.key === '/' && document.activeElement !== inp) {
-      e.preventDefault(); box.classList.add('open'); inp.focus();
+    var t = e.target.tagName;
+    if (e.key === '/' && t !== 'INPUT' && t !== 'SELECT' && t !== 'TEXTAREA') {
+      e.preventDefault(); open();
     }
   });
 })();
