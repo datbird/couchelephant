@@ -43,6 +43,7 @@
   --accent:#f3a30b;          /* brand fill: buttons, the now line, active tabs */
   --accent-ink:#f3a30b;      /* the same amber as text, adjusted per theme */
   --on-accent:#1a1a1a;       /* text drawn on top of an accent fill */
+  --on-solid:#fff;           /* text on a saturated green or red chip */
   --accent-soft:rgba(243,163,11,.12);
   --accent-bd:rgba(243,163,11,.40);
   --accent-glow:rgba(243,163,11,.55);
@@ -69,6 +70,7 @@
   --accent:#e0940a;
   --accent-ink:#96620a;       /* amber text needs to darken or it vanishes on paper */
   --on-accent:#1a1a1a;
+  --on-solid:#fff;
   --accent-soft:rgba(224,148,10,.16);
   --accent-bd:rgba(176,116,8,.55);
   --accent-glow:rgba(176,116,8,.45);
@@ -708,9 +710,9 @@ body.signin .pt-nav{display:none}
 .vmark{flex:0 0 20px;width:20px;height:20px;border-radius:50%;
   display:inline-flex;align-items:center;justify-content:center;
   font-size:13px;font-weight:700;line-height:1;margin-top:1px}
-.verdict.ok .vmark{background:var(--ok);color:#fff}
+.verdict.ok .vmark{background:var(--ok);color:var(--on-solid)}
 .verdict.ok .vmark::before{content:"\2713"}
-.verdict.bad .vmark{background:var(--bad);color:#fff}
+.verdict.bad .vmark{background:var(--bad);color:var(--on-solid)}
 .verdict.bad .vmark::before{content:"\2715"}
 .verdict.busy .vmark{background:var(--panel);border:2px solid var(--accent-ring);
   border-top-color:var(--accent);animation:spin .7s linear infinite}

@@ -138,6 +138,18 @@ Accounts** before this is reachable from anywhere else.
 
 Full instructions are in [docs/INSTALL.md](docs/INSTALL.md).
 
+## Tests
+
+```bash
+./scripts/test.sh
+```
+
+195 checks: the airing choice, the pin, the Plex client against a fake server
+that reproduces the real one's quirks, every endpoint, and a browser suite that
+drives the guide, the record panel, the recordings page, settings, the phone
+layout and first run. It refuses to start unless every path it would write to
+is scratch. See [docs/DEVELOPING.md](docs/DEVELOPING.md).
+
 ## Documentation
 
 | | |
@@ -147,7 +159,7 @@ Full instructions are in [docs/INSTALL.md](docs/INSTALL.md).
 | [Architecture](docs/ARCHITECTURE.md) | Modules, the database, the sync loop |
 | [HTTP API](docs/API.md) | Every endpoint |
 | [Accounts](docs/AUTH.md) | Off, local, or Cloudflare Access |
-| [Developing](docs/DEVELOPING.md) | Running it locally, the deploy script, conventions |
+| [Developing](docs/DEVELOPING.md) | Running it locally, the test suite, the deploy script |
 | [Plex API notes](docs/PLEX-NOTES.md) | What the server really returns, and the traps in it |
 
 ## Licence

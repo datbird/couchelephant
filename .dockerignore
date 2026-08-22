@@ -1,0 +1,8 @@
+.env
+.git
+docs/images
+*.db
+*.db-wal
+*.db-shm
+dev-logos
+.venv

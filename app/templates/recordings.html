@@ -84,6 +84,10 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
   function row(r) {
     var h = '<div class="agrow" data-aid="' + esc(r.airing_id || '') + '">';
+    // The legend above promises a colour per side. It has to appear on the
+    // rows too, or it is a key to nothing.
+    h += '<i class="own ' + (r.who === 'ce' ? 'ce' : 'plex') + '" title="' +
+         (r.who === 'ce' ? 'CouchElephant booked it' : 'Scheduled in Plex') + '"></i>';
     h += '<div class="agwhen">' + (r.b ? fmtTime(r.b) : '') + '</div>';
     h += r.logo ? '<img src="/logo/' + esc(r.vcn) + '" alt="">'
                 : '<span style="width:44px;flex:0 0 44px"></span>';

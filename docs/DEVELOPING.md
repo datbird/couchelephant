@@ -75,11 +75,81 @@ body does. A careless replace over the whole file puts your script in the
 hour. It is correct in the container this ships in, and breaks on Windows and
 the BSDs. If you run the app outside Linux, that is the line to change.
 
+## The test suite
+
+```bash
+./scripts/test.sh              # everything
+./scripts/test.sh --unit       # no browser
+./scripts/test.sh --ui         # only the browser checks
+./scripts/test.sh --unit -k passes -x
+```
+
+It runs in a throwaway container built from `Dockerfile.test`, which is the
+shipping image plus pytest and Playwright. The working tree is mounted read
+only and copied into the container's own scratch, so a run checks what you have
+edited and cannot write back over it.
+
+### It refuses to run anywhere real
+
+`tests/isolation.py` is checked before a single test is collected. It rejects
+any database or logo path under `/data`, `/config`, `/mnt` or `/var/lib`, any
+path that does not name itself scratch, any path left unset, and any Plex
+address that is not on localhost.
+
+This is not caution for its own sake. The same pattern without this guard, in
+another project by the same author, inherited a live data directory from the
+container it ran in and deleted 66,000 rows. A suite that can reach production
+will eventually reach production.
+
+### There is no real Plex in it
+
+`tests/fake_plex.py` is a small HTTP server that answers like a Plex Media
+Server, including the parts that are wrong: a bulk listing that carries genres
+but not teams, a guid that is answered 400 when it arrives encoded twice, a
+create that returns a key and then discards the subscription, `oneShot` coming
+back as the string `'true'`, `mediaIndex` as a string.
+
+Those quirks are the point. They are each a debugging round that happened once,
+and the client is exercised through httpx against a real socket rather than
+mocked, so a regression in `plex.py` is caught here instead of in front of a
+DVR.
+
+Its guide is anchored just ahead of the current time, because the app's own
+horizons are relative: passes look thirty days ahead and the grid draws around
+now. `COUCHELEPHANT_FAKE_ANCHOR` overrides the anchor.
+
+### What is covered
+
+| | |
+| --- | --- |
+| `test_isolation.py` | that the guard above actually refuses |
+| `test_plex_client.py` | the client, against the fake server's quirks |
+| `test_passes.py` | choosing the airing, source limits, the pin |
+| `test_sync.py` | the pull, enrichment, attribution |
+| `test_filters.py` | guide filter tokens |
+| `test_auth.py` | hashing, sessions, the three modes |
+| `test_api.py` | every endpoint, in process |
+| `test_conventions.py` | rules the code holds itself to, checked not remembered |
+| `ui/` | the browser: guide, record, recordings, settings, phone, first run |
+
+The UI suite fails a test on any uncaught page error, so an exception that
+leaves a panel half drawn is a failure even when the assertions would pass.
+
+### Running it without Docker
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+playwright install chromium
+pytest --ignore=tests/ui        # unit and API
+pytest tests/ui                 # browser
+```
+
+Playwright is optional: without it the `ui/` tests skip with a reason rather
+than failing.
+
 ## Testing against a real server
 
-There is no test suite. The app talks to a live Plex DVR, and the interesting
-failures are all in what that server actually returns, so the checks that
-matter are made against one.
-
-If you test against your own server, remember that creating a recording is
-real. Clean up what you make.
+The suite covers the app. It cannot cover your server, and the interesting
+failures are all in what a particular Plex returns. If you test against your
+own, remember that creating a recording is real. Clean up what you make.

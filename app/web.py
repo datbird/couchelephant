@@ -298,6 +298,11 @@ def api_theme(request: Request, theme: str = Form("dark")):
 @app.on_event("startup")
 async def startup():
     db.init()
+    # A test drives sync itself and asserts on the result. A loop waking up
+    # underneath it rewrites the database mid-assertion, which is a flake that
+    # takes an afternoon to explain.
+    if os.environ.get("COUCHELEPHANT_NO_SYNC_LOOP") == "1":
+        return
     asyncio.create_task(sync_loop())
 
 

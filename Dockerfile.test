@@ -1,0 +1,20 @@
+# The suite's own image. It is the shipping image plus the test tools, so what
+# the tests exercise is what the container runs, not a lookalike built from a
+# different base.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+WORKDIR /app
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+
+# Chromium and its system libraries. This is the slow layer; it is cached and
+# only rebuilds when requirements-dev.txt changes.
+RUN playwright install --with-deps chromium
+
+# No COPY of the source. The runner mounts the working tree, so a test run
+# checks what you have edited rather than what you last committed.
+CMD ["pytest"]

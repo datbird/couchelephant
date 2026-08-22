@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Tests
+
+- A test suite, 195 checks, in `tests/`. It runs against a fake Plex server
+  that reproduces the real one's quirks, and a browser suite drives the pages
+  themselves.
+- `tests/isolation.py` refuses to run unless every path is scratch and Plex is
+  on localhost. A suite that can reach production eventually reaches it.
+- `scripts/test.sh` runs the whole thing in a throwaway container.
+
+### Fixed
+
+- The Schedule legend named a colour per side, and the rows it described had
+  no marker on them.
+- Two colours in the verdict chip were written as hex instead of coming from
+  the token block. There is now an `--on-solid` token, and a test that fails if
+  another one appears.
+
 ## 0.90
 
 The first release worth showing anyone. It records the live broadcast, and it
