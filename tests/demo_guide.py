@@ -13,6 +13,8 @@ one person's viewing.
 Set COUCHELEPHANT_DEMO_GUIDE=1 before importing fake_plex.
 """
 
+# The call signs are invented. A real lineup names one person's market and
+# their tuner, which is not the demo's business.
 CHANNELS = {
     "2.1": ("KQAADT", "2.1 KQAADT (FOX)"),
     "4.1": ("WQBBDT", "4.1 WQBBDT (FOX)"),
