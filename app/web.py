@@ -79,6 +79,21 @@ templates.env.filters["fmt_day"] = fmt_day
 templates.env.filters["unjs"] = db.unjs
 
 
+def _int(v, default=0):
+    """A form field as an int, or the default. Never a 500 for a bad query."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _plex():
+    """The configured server. Use it as a context manager, so the connection
+    pool is closed when the request is done rather than when the garbage
+    collector gets round to it."""
+    return Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+
+
 def _logo_map():
     """vcn -> True when a logo is cached, so the template can skip the <img>."""
     return {r["vcn"]: True for r in db.query(
@@ -150,6 +165,21 @@ _OPEN_EXACT = frozenset(("/login", "/setup", "/logout", "/healthz", "/welcome",
 _OPEN_PREFIX = ("/static/",)
 
 
+# What a signed-in non-administrator may not change: the Plex connection,
+# accounts, artwork, and anything that copies or replaces the database. They
+# keep the guide, the schedule and the passes, which is what the app is for.
+_ADMIN_PREFIX = ("/settings", "/api/backups", "/api/backingstore", "/api/import",
+                 "/api/export")
+
+
+def _admin_only(path, method):
+    if path.startswith("/api/theme"):
+        return False
+    if path in ("/settings", "/partial/settings") and method == "GET":
+        return False          # reading settings is fine; changing them is not
+    return path.startswith(_ADMIN_PREFIX)
+
+
 def _is_open(path):
     """A prefix match let /loginanything past the gate. Match the path itself."""
     return path in _OPEN_EXACT or path.startswith(_OPEN_PREFIX)
@@ -205,7 +235,13 @@ async def _auth_gate(request: Request, call_next):
     path = request.url.path
     if auth.mode() == "none" or _is_open(path):
         return await call_next(request)
-    if current_user(request):
+    user = current_user(request)
+    if user:
+        if _admin_only(path, request.method) and user.get("role") != "admin":
+            if path.startswith("/api/"):
+                return JSONResponse({"ok": False, "error": "administrators only"},
+                                    status_code=403)
+            return HTMLResponse("Administrators only.", status_code=403)
         return await call_next(request)
     # A fresh switch to local sign-in has no accounts yet, so send the first
     # visitor to create one rather than to a login they cannot pass.
@@ -586,8 +622,9 @@ def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, lim
               FROM airings a JOIN programs p ON p.guid = a.program_guid"""]
     args = []
     if q.strip():
-        like = f"%{q.strip()}%"
-        sql.append("""WHERE (p.title LIKE ? OR p.grandparent_title LIKE ? OR p.summary LIKE ?)
+        like = f"%{smartfilter.like(q.strip())}%"
+        sql.append("""WHERE (p.title LIKE ? ESCAPE '\\' OR p.grandparent_title LIKE ? ESCAPE '\\'
+                            OR p.summary LIKE ? ESCAPE '\\')
                         AND a.ends_at > ?""")
         args += [like, like, like, now]
         order = "ORDER BY a.begins_at, CAST(a.channel_vcn AS REAL), a.id"
@@ -879,8 +916,8 @@ async def api_record_options(airing_id: str):
         return JSONResponse({"error": "This airing is DRM encrypted and cannot be recorded."},
                             status_code=400)
     try:
-        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        options = await asyncio.to_thread(passes.templates, plex, row)
+        with _plex() as plex:
+            options = await asyncio.to_thread(passes.templates, plex, row)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=502)
 
@@ -1034,30 +1071,32 @@ async def api_record(airing_id: str = Form(...), template: int = Form(0),
     nets = db.unjs(networks, []) or []
     chans = db.unjs(channels, []) or []
     try:
-        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        options = await asyncio.to_thread(passes.templates, plex, row)
-        if not options:
-            raise PlexError("Plex offered no recording options")
-        chosen = options[template] if 0 <= template < len(options) else options[0]
-        one_shot = (chosen.get("title") or "").lower().startswith("this ")
+        with _plex() as plex:
+            options = await asyncio.to_thread(passes.templates, plex, row)
+            if not options:
+                raise PlexError("Plex offered no recording options")
+            chosen = options[template] if 0 <= template < len(options) else options[0]
+            one_shot = (chosen.get("title") or "").lower().startswith("this ")
 
-        prefs = dict(db.unjs(settings, {}) or {})
-        prefs = {k: v for k, v in prefs.items() if v is not None}
+            prefs = dict(db.unjs(settings, {}) or {})
+            prefs = {k: v for k, v in prefs.items() if v is not None}
 
-        if (nets or chans) and not one_shot:
-            # The settings the user just filled in belong to the pass too, or
-            # padding and quality are silently lost by choosing a source limit.
-            return await asyncio.to_thread(_make_ce_rule, row, chosen, nets, chans,
-                                           prefs)
+            if (nets or chans) and not one_shot:
+                # The settings the user just filled in belong to the pass too,
+                # or padding and quality are silently lost by choosing a
+                # source limit.
+                return await asyncio.to_thread(_make_ce_rule, row, chosen, nets,
+                                               chans, prefs)
 
-        # oneShot is never shown, and it is what separates one game from every
-        # future airing of the same programme. It follows the template.
-        prefs["oneShot"] = "1" if one_shot else "0"
+            # oneShot is never shown, and it is what separates one game from
+            # every future airing of the same programme. It follows the template.
+            prefs["oneShot"] = "1" if one_shot else "0"
 
-        await asyncio.to_thread(passes._schedule, plex, row, None, "manual", chosen, prefs)
+            await asyncio.to_thread(passes._schedule, plex, row, None, "manual",
+                                    chosen, prefs)
+            await asyncio.to_thread(sync.sync_recordings, plex)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
-    await asyncio.to_thread(sync.sync_recordings, plex)
     return JSONResponse({"ok": True, "message": "Recording scheduled."})
 
 
@@ -1069,25 +1108,26 @@ async def api_record_cancel(airing_id: str = Form(...)):
         return JSONResponse({"ok": False, "error": "CouchElephant did not schedule this."},
                             status_code=404)
     key = mine["subscription"]
-    plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-    if not key:
-        # Scheduled before the key was being stored, or Plex was slow to list
-        # it. Look it up again rather than refusing to cancel.
+    with _plex() as plex:
+        if not key:
+            # Scheduled before the key was being stored, or Plex was slow to
+            # list it. Look it up again rather than refusing to cancel.
+            try:
+                key = await asyncio.to_thread(plex.find_subscription,
+                                              mine["program_guid"], mine["begins_at"])
+            except Exception:
+                key = None
+        if not key:
+            return JSONResponse({"ok": False, "error":
+                                 "Cannot find this recording in Plex. It may already "
+                                 "be gone."}, status_code=404)
         try:
-            key = await asyncio.to_thread(plex.find_subscription,
-                                          mine["program_guid"], mine["begins_at"])
-        except Exception:
-            key = None
-    if not key:
-        return JSONResponse({"ok": False, "error":
-                             "Cannot find this recording in Plex. It may already be gone."},
-                            status_code=404)
-    try:
-        await asyncio.to_thread(plex.delete_subscription, key)
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
-    await asyncio.to_thread(passes.forget, airing_id)
-    await asyncio.to_thread(sync.sync_recordings, plex)
+            await asyncio.to_thread(plex.delete_subscription, key)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"},
+                                status_code=500)
+        await asyncio.to_thread(passes.forget, airing_id)
+        await asyncio.to_thread(sync.sync_recordings, plex)
     # Deleting the subscription stops Plex recording, but a recording already
     # under way leaves the part it captured in the library. Say so rather than
     # letting the user find a stray file later.
@@ -1165,7 +1205,7 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0,
 @app.get("/search")
 def search_redirect(q: str = ""):
     """Search used to be its own tab. Keep the URL working."""
-    return RedirectResponse(f"/?q={q}" if q else "/", status_code=307)
+    return RedirectResponse(f"/?q={urllib.parse.quote(q)}" if q else "/", status_code=307)
 
 
 # ---------- recordings ----------
@@ -1303,13 +1343,13 @@ def api_series(q: str = ""):
     the guide can no longer record.
     """
     q = (q or "").strip()
-    like = f"%{q}%"
+    like = f"%{smartfilter.like(q)}%"
     rows = db.query(
         """SELECT COALESCE(NULLIF(p.grandparent_title,''), p.title) AS name,
                   COUNT(DISTINCT a.id) AS airings,
                   MIN(a.begins_at) AS next_at
            FROM airings a JOIN programs p ON p.guid = a.program_guid
-           WHERE a.begins_at > ? AND (? = '' OR name LIKE ? COLLATE NOCASE)
+           WHERE a.begins_at > ? AND (? = '' OR name LIKE ? ESCAPE '\\' COLLATE NOCASE)
            GROUP BY name ORDER BY airings DESC, name LIMIT 40""",
         (int(time.time()), q, like))
     return JSONResponse({"ok": True, "series": [dict(r) for r in rows]})
@@ -1465,7 +1505,7 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
         # Plex, not to the filter.
         rows = rows or passes.any_airing()
     elif kind == "team":
-        rows = passes.candidate_airings(int(team_id or 0)) or (
+        rows = passes.candidate_airings(_int(team_id)) or (
             passes.any_airing() if ce_pass else [])
     else:
         rows = passes.series_airings((series or "").strip()) or (
@@ -1476,8 +1516,8 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
                              "options to offer for it."})
     row = rows[0]
     try:
-        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        options = passes.templates(plex, row)
+        with _plex() as plex:
+            options = passes.templates(plex, row)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"})
 
@@ -1640,11 +1680,13 @@ async def api_rule_edit(rule_id: int, networks: str = Form(""),
     if tree is not None and not (name or "").strip():
         label = smartfilter.describe(tree)
 
+    # Not sent means unchanged. A settings save must not quietly resume a
+    # paused pass.
+    on = r["enabled"] if enabled == "" else (0 if enabled in ("0", "false") else 1)
     with db.tx() as c:
         c.execute("UPDATE passes SET networks=?, channels=?, prefs=?, filter=?, "
                   "label=?, enabled=? WHERE id=?",
-                  (db.js(nets), db.js(chans), keep, filt, label,
-                   1 if enabled not in ("0", "false") else 0, rule_id))
+                  (db.js(nets), db.js(chans), keep, filt, label, on, rule_id))
     done = await asyncio.to_thread(passes.run_passes)
     made = len([d for d in done if d["action"] == "scheduled"])
     where = " or ".join(nets + chans)
@@ -1878,33 +1920,43 @@ async def _make_smart_rule(filter_json, name, nets, chans, prefs, confirm):
 
 
 def _make_plex_rule(label, rows, template, prefs):
-    """Hand the rule to Plex, which is all it needs when nothing narrows it."""
+    """Hand the rule to Plex, which is all it needs when nothing narrows it.
+
+    `template` is Plex's own index into the full template list, the `index`
+    each payload entry carries. It is NOT a position in the list the panel
+    showed, which is sorted to put the named team first. Indexing the sorted
+    list by position once turned "follow the Chiefs" into a rule for every
+    NFL game, because Plex lists the league before the team.
+    """
     if not rows:
         return JSONResponse({"ok": False, "error":
                              f"Nothing from {label} is in the guide yet, so there is "
                              "nothing for Plex to make a rule from."}, status_code=400)
     row = rows[0]
     try:
-        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        options = [t for t in passes.templates(plex, row)
-                   if not (t.get("title") or "").lower().startswith("this ")]
-        if not options:
-            raise PlexError("Plex offered no recurring rule for this")
-        chosen = options[template] if 0 <= template < len(options) else options[0]
-        prefs = dict(prefs)
-        prefs["oneShot"] = "0"
-        key = plex.create_recording(
-            chosen["parameters"],
-            chosen.get("targetLibrarySectionID") or 2,
-            int(chosen.get("type") or 2), prefs)
-        # `is False` on purpose: None means the check failed, not that the
-        # rule is gone.
-        if key and plex.subscription_exists(key) is False:
-            raise PlexError("Plex accepted the rule and then discarded it. It may "
-                            "already have one for this.")
+        with _plex() as plex:
+            every = passes.templates(plex, row)
+            recurring = [t for t in every
+                         if not (t.get("title") or "").lower().startswith("this ")]
+            if not recurring:
+                raise PlexError("Plex offered no recurring rule for this")
+            chosen = every[template] if 0 <= template < len(every) else None
+            if chosen is None or chosen not in recurring:
+                chosen = recurring[0]
+            prefs = dict(prefs)
+            prefs["oneShot"] = "0"
+            key = plex.create_recording(
+                chosen["parameters"],
+                chosen.get("targetLibrarySectionID") or 2,
+                int(chosen.get("type") or 2), prefs)
+            # `is False` on purpose: None means the check failed, not that the
+            # rule is gone.
+            if key and plex.subscription_exists(key) is False:
+                raise PlexError("Plex accepted the rule and then discarded it. It "
+                                "may already have one for this.")
+            sync.sync_recordings(plex)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
-    sync.sync_recordings(plex)
     return JSONResponse({"ok": True, "ce_rule": False, "message":
                          f"Plex is now recording {chosen.get('title') or label}. "
                          "It appears in the schedule as Plex's own rule."})
@@ -1914,9 +1966,9 @@ def _make_plex_rule(label, rows, template, prefs):
 def api_plexrule_delete(key: str):
     """Remove one of Plex's own recurring rules."""
     try:
-        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
-        plex.delete_subscription(key)
-        sync.sync_recordings(plex)
+        with _plex() as plex:
+            plex.delete_subscription(key)
+            sync.sync_recordings(plex)
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"}, status_code=500)
     return JSONResponse({"ok": True, "message": "Removed from Plex."})
@@ -2040,7 +2092,11 @@ def _test_plex(url=None, token=None):
     if not token:
         return False, "No token set. Paste the token above and save."
 
-    plex = Plex(url, token)
+    with Plex(url, token) as plex:
+        return _probe(plex, url)
+
+
+def _probe(plex, url):
     try:
         info = plex.server_info()
     except PlexError as e:

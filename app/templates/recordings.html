@@ -907,7 +907,10 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
          series: st.series || '',
          networks: JSON.stringify(st.nets),
          channels: JSON.stringify(st.chans),
-         template: st.pick,
+         // Plex's own index, not the position in the list shown here. The
+         // list is sorted to put the named team first; Plex lists the league
+         // first. Sending the position booked every NFL game once.
+         template: (st.tpl && st.tpl[st.pick]) ? st.tpl[st.pick].index : 0,
          settings: JSON.stringify(vals)};
     if (st.kind === 'smart') {
       fields.filter = JSON.stringify(st.tree);

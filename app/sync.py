@@ -344,6 +344,22 @@ def sync_channels(plex, dvr_key=None):
     return n
 
 
+KEEP_HISTORY_DAYS = 60
+
+
+def prune_history(days=KEEP_HISTORY_DAYS):
+    """Drop pass bookkeeping for broadcasts long past.
+
+    our_grabs and pass_actions grow by one row per booking and were never
+    trimmed. Two months keeps the pass detail's recent history and the
+    already-booked check honest without the tables growing forever.
+    """
+    cutoff = _now() - days * 86400
+    with db.tx() as c:
+        c.execute("DELETE FROM our_grabs WHERE begins_at < ?", (cutoff,))
+        c.execute("DELETE FROM pass_actions WHERE begins_at < ?", (cutoff,))
+
+
 def sync_recordings(plex):
     """Mirror Plex's subscriptions and scheduled grabs.
 
@@ -352,8 +368,9 @@ def sync_recordings(plex):
     """
     now = _now()
     subs = plex.subscriptions()
-    ours = {r["plex_subscription"] for r in db.query(
-        "SELECT DISTINCT plex_subscription FROM pass_actions WHERE plex_subscription IS NOT NULL")}
+    # our_grabs holds the subscription key of everything a pass booked.
+    ours = {r["subscription"] for r in db.query(
+        "SELECT DISTINCT subscription FROM our_grabs WHERE subscription IS NOT NULL")}
     with db.tx() as c:
         for s in subs:
             key = str(s.get("key"))
@@ -432,7 +449,24 @@ def full_sync():
     detail = ""
     ok = 0
     try:
-        plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+        with Plex(db.get_setting("plex_url"), db.get_setting("plex_token")) as plex:
+            ok, detail = _sync_everything(plex)
+    except Exception as e:
+        # Keep the frame that actually failed. A bare type+message sent me
+        # chasing the wrong module once already.
+        tb = traceback.extract_tb(e.__traceback__)
+        where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(tb[-4:]))
+        detail = f"{type(e).__name__}: {e} [{where}]"
+    with db.tx() as c:
+        c.execute("INSERT INTO sync_log (started_at, ended_at, ok, detail) VALUES (?,?,?,?)",
+                  (started, _now(), ok, detail))
+        c.execute("DELETE FROM sync_log WHERE id NOT IN "
+                  "(SELECT id FROM sync_log ORDER BY id DESC LIMIT 50)")
+    return ok, detail
+
+
+def _sync_everything(plex):
+    if True:
         provider, shows, sports, movies = discover(plex)
         db.set_setting("epg_provider", provider)
         db.set_setting("shows_section", shows or "")
@@ -448,6 +482,7 @@ def full_sync():
         enriched = enrich_sports(plex, provider)
         got, bad, tried = cache_logos()
         subs = sync_recordings(plex)
+        prune_history()
 
         cov = logo_coverage()
         nch = cov["channels"]
@@ -458,16 +493,4 @@ def full_sync():
                   + (f" (+{got} fetched)" if got else "")
                   + (f" ({bad} failed)" if bad else "")
                   + f", {subs} subscriptions")
-        ok = 1
-    except Exception as e:
-        # Keep the frame that actually failed. A bare type+message sent me
-        # chasing the wrong module once already.
-        tb = traceback.extract_tb(e.__traceback__)
-        where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(tb[-4:]))
-        detail = f"{type(e).__name__}: {e} [{where}]"
-    with db.tx() as c:
-        c.execute("INSERT INTO sync_log (started_at, ended_at, ok, detail) VALUES (?,?,?,?)",
-                  (started, _now(), ok, detail))
-        c.execute("DELETE FROM sync_log WHERE id NOT IN "
-                  "(SELECT id FROM sync_log ORDER BY id DESC LIMIT 50)")
-    return ok, detail
+        return 1, detail

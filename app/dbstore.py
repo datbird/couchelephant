@@ -33,6 +33,7 @@ FOUR RULES, each of them a bug somewhere else first:
 """
 import hashlib
 import json
+import os
 import time
 
 from . import auth, db
@@ -93,7 +94,7 @@ STORES = {
 
 # Kept out of an export unless the user asks. A token in a file is a token in
 # whatever the file lands in.
-SECRET_SETTINGS = frozenset(("plex_token", "cf_aud"))
+SECRET_SETTINGS = frozenset(("plex_token", "cf_aud", "pg_password", "my_password"))
 
 # Never durable, whoever asks. These describe what this machine last did, not
 # anything anybody decided. `backingstore_status` in particular is written by
@@ -152,8 +153,16 @@ def read(name, include_secrets=False):
                 continue
             if not include_secrets and rec["key"] in SECRET_SETTINGS:
                 continue
+        if name == "channel_art":
+            # The row holds an absolute path. Only its name travels: the other
+            # install keeps its logos wherever it keeps them.
+            rec["custom_logo"] = os.path.basename(rec["custom_logo"])
         out[_key(spec, rec)] = rec
     return out
+
+
+def _logo_dir():
+    return os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
 
 
 def _key(spec, rec):
@@ -196,6 +205,9 @@ def apply(name, rows, delete_missing=False):
             if uid is None:
                 continue        # its account did not come with it
             rec["user_id"] = uid
+        if name == "channel_art" and rec.get("custom_logo"):
+            rec["custom_logo"] = os.path.join(_logo_dir(),
+                                              os.path.basename(rec["custom_logo"]))
         rec = {k: v for k, v in rec.items() if k in have}
         if not rec:
             continue

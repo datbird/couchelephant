@@ -23,6 +23,11 @@ your own network.
 Turn it on and the next visitor is asked to create the first account, which is
 the administrator. After that, `/login`.
 
+Every account can use the guide, the schedule and the passes. Only an
+administrator can change settings, manage accounts or artwork, run backups,
+configure the backing store, or export and import. The first account is the
+administrator; with Cloudflare Access, later visitors arrive as plain users.
+
 Passwords are scrypt hashed with a per-user random salt. Session tokens are
 random, stored hashed, and last 30 days. A copy of `auth.db` grants no logins.
 

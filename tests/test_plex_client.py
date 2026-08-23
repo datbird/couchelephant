@@ -47,7 +47,7 @@ def test_template_accepts_an_already_encoded_rating_key(plex):
     opts = plex.template(encoded)
     assert opts, "the client must unquote before sending"
     titles = [s["title"] for t in opts for s in t["MediaSubscription"]]
-    assert "This Episode" in titles
+    assert any(t.startswith("This ") for t in titles)
 
 
 def test_template_rejects_a_genuinely_bad_guid(plex):

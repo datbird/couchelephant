@@ -85,10 +85,8 @@ class SqliteBackend(Backend):
         return con
 
     def test(self):
-        con = self._con()
-        with con:
-            con.execute(f"CREATE TABLE IF NOT EXISTS {PREFIX}probe "
-                        "(k TEXT PRIMARY KEY, data TEXT)")
+        # read_all creates the store tables as it goes, so a good test leaves
+        # the file exactly as a sync would, with nothing extra in it.
         n = sum(len(self.read_all(s)) for s in dbstore.STORES)
         return f"Wrote to {self._path()}. It holds {n} record(s)."
 
@@ -160,7 +158,6 @@ class _SqlBackend(Backend):
                 pass
 
     def test(self):
-        self._run("connect", lambda cur: cur.execute(self._ddl(PREFIX + "probe")))
         n = sum(len(self.read_all(s)) for s in dbstore.STORES)
         return f"Connected. It holds {n} record(s)."
 
@@ -313,10 +310,12 @@ def sync_all(dry_run=False):
             _delete_local(name, key)
 
         # What both sides look like now, so the next run can tell a change
-        # from a re-read.
+        # from a re-read. The remote is what it held plus what was just
+        # written, so there is no need to ask it again.
+        remote = {k: v for k, v in remote.items() if k not in del_remote}
+        remote.update(to_remote)
         local = dbstore.read(name, include_secrets=True)
-        dbstore.save_shadow(backend.name, name,
-                            dbstore.new_shadow(local, backend.read_all(name)))
+        dbstore.save_shadow(backend.name, name, dbstore.new_shadow(local, remote))
 
     if not dry_run:
         dbstore.relink_passes()

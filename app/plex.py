@@ -48,8 +48,11 @@ class Plex:
         so constructing a Plex object stays free.
         """
         if self._http is None:
+            # The token travels as a header, never in the URL. A URL ends up
+            # in exception messages, logs and error pages; a header does not.
             self._http = httpx.Client(timeout=TIMEOUT,
-                                      headers={"Accept": "application/json"})
+                                      headers={"Accept": "application/json",
+                                               "X-Plex-Token": self.token})
         return self._http
 
     def close(self):
@@ -64,9 +67,7 @@ class Plex:
         self.close()
 
     def _get(self, path, params=None):
-        params = dict(params or {})
-        params["X-Plex-Token"] = self.token
-        r = self._client().get(self.base + path, params=params)
+        r = self._client().get(self.base + path, params=dict(params or {}))
         if r.status_code >= 400:
             raise PlexError(f"GET {path} -> HTTP {r.status_code}: {r.text[:200]}",
                             r.status_code)
@@ -148,7 +149,6 @@ class Plex:
             key = urllib.parse.quote(str(k), safe="")
             val = urllib.parse.quote(str(v), safe="")
             url += f"&prefs%5B{key}%5D={val}"
-        url += f"&X-Plex-Token={self.token}"
         r = self._client().post(url)
         if r.status_code >= 400:
             raise PlexError(f"create recording -> HTTP {r.status_code}: {r.text[:300]}",
@@ -175,8 +175,7 @@ class Plex:
         reported as "Plex discarded it".
         """
         try:
-            r = self._client().get(f"{self.base}/media/subscriptions/{key}",
-                                   params={"X-Plex-Token": self.token})
+            r = self._client().get(f"{self.base}/media/subscriptions/{key}")
         except Exception:
             return None
         if r.status_code == 404:
@@ -220,8 +219,7 @@ class Plex:
         return None
 
     def delete_subscription(self, key):
-        r = self._client().delete(f"{self.base}/media/subscriptions/{key}",
-                                  params={"X-Plex-Token": self.token})
+        r = self._client().delete(f"{self.base}/media/subscriptions/{key}")
         if r.status_code >= 400:
             raise PlexError(f"delete subscription {key} -> HTTP {r.status_code}",
                             r.status_code)

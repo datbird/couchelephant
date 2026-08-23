@@ -664,3 +664,90 @@ def test_the_sports_route_gets_its_padding_whatever_stands_in(client, synced):
     plain = client.get("/api/rules/options",
                        params={"kind": "any", "ce_pass": 1}).json()
     assert plain["ok"]
+
+
+# ---- review regressions ----
+
+def test_following_a_team_as_a_plex_rule_picks_the_team_not_the_league(client, synced):
+    """Plex lists the league template before the team's. The panel shows the
+    team first, so a position in the shown list is the wrong thing to send.
+    The payload carries Plex's own index; that is what must come back."""
+    opts = client.get("/api/rules/options",
+                      params={"kind": "team", "team_id": "236"}).json()
+    first = opts["templates"][0]
+    assert "Chiefs" in first["title"], "the panel leads with the named team"
+    assert first["index"] != 0, "which is not where Plex lists it"
+    r = client.post("/api/rules", data={
+        "kind": "team", "team_id": "236", "networks": "[]", "channels": "[]",
+        "template": first["index"], "settings": "{}"}).json()
+    assert r["ok"] and r["ce_rule"] is False
+    titles = [s["title"] for s in fake_plex.STATE.subscriptions.values()]
+    assert titles == ["All Kansas City Chiefs Events"], titles
+
+
+def test_a_position_that_names_a_one_shot_falls_back_to_a_recurring_rule(client, synced):
+    r = client.post("/api/rules", data={
+        "kind": "team", "team_id": "236", "networks": "[]", "channels": "[]",
+        "template": 0, "settings": "{}"}).json()
+    assert r["ok"]
+    sub = list(fake_plex.STATE.subscriptions.values())[0]
+    assert sub["type"] == 2, "never a single event from the pass panel"
+
+
+def test_saving_settings_does_not_resume_a_paused_pass(client, synced):
+    client.post("/api/pass", data={"team_id": "236"})
+    rid = db.one("SELECT id FROM passes")["id"]
+    client.post(f"/passes/{rid}/toggle", follow_redirects=False)
+    assert db.one("SELECT enabled FROM passes")["enabled"] == 0
+    client.post(f"/api/rules/{rid}", data={"settings": '{"endOffsetMinutes":"45"}'})
+    assert db.one("SELECT enabled FROM passes")["enabled"] == 0, "not sent means unchanged"
+    client.post(f"/api/rules/{rid}", data={"enabled": "1"})
+    assert db.one("SELECT enabled FROM passes")["enabled"] == 1
+
+
+def test_a_search_with_awkward_characters_redirects_intact(client):
+    r = client.get("/search", params={"q": "Tom & Jerry #2"}, follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == "/?q=Tom%20%26%20Jerry%20%232"
+
+
+def test_a_bad_team_id_is_a_clean_answer_not_a_crash(client, synced):
+    r = client.get("/api/rules/options", params={"kind": "team", "team_id": "abc"})
+    assert r.status_code == 200
+
+
+def test_the_plex_token_never_appears_in_a_url(client, synced):
+    """A URL ends up in logs and error pages. The token travels as a header."""
+    fake_plex.STATE.seen_urls = []
+    aid = db.one("SELECT id FROM airings WHERE program_guid = ?",
+                 (fake_plex.GAME_GUID,))["id"]
+    assert client.get("/api/record/options", params={"airing_id": aid}).json()["ok"]
+    assert fake_plex.STATE.seen_urls
+    assert all("X-Plex-Token" not in u for u in fake_plex.STATE.seen_urls)
+
+
+def test_old_pass_history_is_pruned(client, synced):
+    from app import sync as s
+    old = s._now() - 120 * 86400
+    with db.tx() as c:
+        c.execute("INSERT INTO our_grabs (channel_vcn, begins_at) VALUES ('1.1', ?)", (old,))
+        c.execute("INSERT INTO pass_actions (pass_id, program_guid, begins_at, action, "
+                  "dry_run) VALUES (1, 'x', ?, 'scheduled', 0)", (old,))
+    s.prune_history()
+    assert not db.query("SELECT 1 FROM our_grabs WHERE begins_at = ?", (old,))
+    assert not db.query("SELECT 1 FROM pass_actions WHERE begins_at = ?", (old,))
+
+
+def test_a_signed_in_viewer_cannot_change_settings(client, synced):
+    """Cloudflare lets the household in; only the first account administers."""
+    from app import auth
+    db.set_setting("auth_mode", "local")
+    admin = auth.create_user("owner", "a-good-password")
+    viewer = auth.create_user("kid", "a-good-password", role="user")
+    for uid, code in ((viewer, 403), (admin, 200)):
+        client.cookies.set(auth.SESSION_COOKIE, auth.create_session(uid))
+        assert client.get("/settings").status_code == 200, "reading is fine"
+        assert client.get("/api/schedule").status_code == 200
+        r = client.post("/api/backingstore/config", data={"backend": ""})
+        assert r.status_code == code, (uid, r.status_code)
+        assert client.get("/api/export").status_code == code

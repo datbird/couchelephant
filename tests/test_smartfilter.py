@@ -180,3 +180,9 @@ def test_a_filter_that_names_the_programme_is_not_loose():
     assert not smartfilter.is_loose({"op": "all", "nodes": [
         {"field": "hd", "cmp": "yes"},
         {"field": "title", "cmp": "contains", "value": "Quiz"}]})
+
+
+def test_a_percent_sign_in_a_title_is_not_a_wildcard():
+    frag, args = smartfilter.build({"field": "title", "cmp": "contains", "value": "100% Hot"})
+    assert "ESCAPE" in frag
+    assert args == ["%100\\% Hot%"]

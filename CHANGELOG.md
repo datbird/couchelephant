@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Following a team as a plain Plex rule made a rule for the whole league.**
+  The panel lists the named team first; Plex lists the league first. The
+  position in the shown list was sent where Plex's own index belonged, so
+  "All Kansas City Chiefs Events" became "All NFL Football Events". The payload
+  already carried the right index; it is now the thing sent. The fake server
+  lists templates in Plex's order so the suite covers it.
+- Saving a paused pass's settings no longer resumes it. A field that is not
+  sent means unchanged.
+- Channel artwork now exports and imports by file name. A row used to carry the
+  absolute path of the machine it came from, which put `logos//data/logos/...`
+  in the zip and a foreign path in the restored row.
+- The backing store's own passwords (`pg_password`, `my_password`) are secrets
+  like the Plex token, and stay out of an export unless asked for.
+- The Plex token travels as a header, never in a URL, so it cannot end up in
+  an error message or a log line.
+- `%` and `_` in a search or a smart-filter value are literal, not wildcards.
+- A search with `&` or `#` in it survives the redirect.
+
+### Changed
+
+- Every Plex client is closed when its request is done. A handful of routes
+  used to leak one connection each.
+- Pass airings are selected in SQL (`json_each` on the team list) instead of
+  loading every future airing and sifting it in Python. A pass list of forty
+  no longer reads twenty thousand rows each.
+- Pass history (`our_grabs`, `pass_actions`) is trimmed to sixty days after
+  each sync. It was never trimmed.
+- A signed-in account with the `user` role can use the guide, the schedule and
+  the passes, and is refused at settings, accounts, backups, the backing store
+  and export/import. Until now the role was recorded and nothing read it.
+- The default timezone is UTC, not one person's. A fresh install asks anyway.
+- The backing-store test no longer leaves a `couchelephant_probe` table behind,
+  and a sync reads the remote once per store rather than twice.
+
 ### Added
 
 - **Plex's own settings on every pass, smart filters included.** Padding before

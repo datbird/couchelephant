@@ -56,7 +56,7 @@ def export_bytes(include_secrets=False, version="", note=""):
         # The artwork itself, not just the row that names it. A restore with
         # no image files is a list of broken channel logos.
         for rec in stores.get("channel_art", {}).values():
-            name = rec.get("custom_logo")
+            name = os.path.basename(rec.get("custom_logo") or "")
             if not name:
                 continue
             path = os.path.join(_logo_dir(), name)

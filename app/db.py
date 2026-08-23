@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS sync_log (
 DEFAULTS = {
     "plex_url": "",
     "plex_token": "",
-    "timezone": "America/Chicago",
+    "timezone": "UTC",
     "sync_minutes": "60",
     # Start in preview. Nothing is written to Plex until this is turned off,
     # so the first run can be inspected before it is trusted.

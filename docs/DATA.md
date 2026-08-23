@@ -41,9 +41,11 @@ logos/41.1.png          the channel artwork you supplied
 A backup only its own program can read is not much of a backup, and being able
 to look at what you are about to restore is worth more than a clever format.
 
-**The Plex token is left out unless you ask.** It is a credential, and an export
-is a file that ends up in an email. Tick the box if you are moving to a new
-machine and want it to come too.
+**Secrets are left out unless you ask.** The Plex token, the Cloudflare AUD
+and the backing-store passwords are credentials, and an export is a file that
+ends up in an email. Tick the box if you are moving to a new machine and want
+them to come too. Channel artwork travels by file name; the other install puts
+it in its own logo folder.
 
 Importing offers two ways in:
 

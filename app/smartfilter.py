@@ -97,16 +97,25 @@ WEEKDAYS = [(0, "Sunday"), (1, "Monday"), (2, "Tuesday"), (3, "Wednesday"),
 
 # ---------------------------------------------------------------- compiling
 
+def like(v):
+    """A value made safe inside a LIKE pattern. Pair with ESCAPE '\\'.
+
+    Without this a title containing % or _ is a wildcard, and "100% Hotter"
+    matches every programme with "100" and "Hotter" in it.
+    """
+    return str(v or "").replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _text(sql, cmp_, value):
     v = str(value or "")
     if cmp_ in ("is", "!is"):
         frag, args = f"{sql} = ?", [v]
     elif cmp_ in ("contains", "!contains"):
-        frag, args = f"{sql} LIKE ?", [f"%{v}%"]
+        frag, args = f"{sql} LIKE ? ESCAPE '\\'", [f"%{like(v)}%"]
     elif cmp_ == "starts":
-        frag, args = f"{sql} LIKE ?", [f"{v}%"]
+        frag, args = f"{sql} LIKE ? ESCAPE '\\'", [f"{like(v)}%"]
     elif cmp_ == "ends":
-        frag, args = f"{sql} LIKE ?", [f"%{v}"]
+        frag, args = f"{sql} LIKE ? ESCAPE '\\'", [f"%{like(v)}"]
     else:
         raise FilterError(f"{cmp_} is not something a text field can be asked")
     return frag, args, cmp_.startswith("!")
@@ -118,7 +127,7 @@ def _tag(sql, cmp_, value):
     The quotes are part of the pattern on purpose: without them "Drama" also
     matches "Docudrama".
     """
-    return f"{sql} LIKE ?", [f'%"{value}"%'], cmp_.startswith("!")
+    return f"{sql} LIKE ? ESCAPE '\\'", [f'%"{like(value)}"%'], cmp_.startswith("!")
 
 
 def _choice(sql, cmp_, value):

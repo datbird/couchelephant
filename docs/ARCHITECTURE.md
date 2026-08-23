@@ -47,8 +47,8 @@ take the other with it.
 | `airings` | **One row per broadcast.** The same game appears several times |
 | `teams` | Every team seen in the guide, kept after it stops playing. `in_guide` says which are on this week |
 | `passes` | Our rules: a team, a programme or a smart filter, with an optional source limit. `uid` names one on any machine; `id` does not |
-| `pass_actions` | Every decision a pass made, including the ones it declined |
-| `our_grabs` | Broadcasts we booked, and what booked them |
+| `pass_actions` | Every decision a pass made, including the ones it declined. Trimmed to 60 days |
+| `our_grabs` | Broadcasts we booked, and what booked them. Trimmed to 60 days |
 | `plex_subscriptions` | Mirror of Plex's own rules |
 | `plex_grabs` | Mirror of Plex's own scheduled recordings |
 | `sync_log` | One row per sync |

@@ -37,7 +37,7 @@ CHANNELS = {
     "5.1": ("KQCCDT", "5.1 KQCCDT (CBS)", "id-5-1"),
 }
 
-# The guide has to sit inside the app's own horizons: `_future_airings` looks
+# The guide has to sit inside the app's own horizons: `passes._future` looks
 # thirty days ahead, and the grid draws around the current time. So the anchor
 # is soon rather than a fixed far-future epoch, and every other time is derived
 # from it, which keeps assertions exact without pinning them to a date.
@@ -183,6 +183,7 @@ class State:
         self.deleted = []
         self.metadata_calls = 0
         self.drop_next_create = False   # make Plex discard what it just made
+        self.seen_urls = []        # every request line, to check what leaks
         self.reset()
 
     def reset(self):
@@ -192,6 +193,7 @@ class State:
         self.deleted = []
         self.metadata_calls = 0
         self.drop_next_create = False
+        self.seen_urls = []
 
 
 STATE = State()
@@ -213,6 +215,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send({"MediaContainer": dict(kw)})
 
     def do_GET(self):
+        STATE.seen_urls.append(self.path)
         u = urllib.parse.urlsplit(self.path)
         q = urllib.parse.parse_qs(u.query)
         p = u.path
@@ -274,15 +277,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send({"error": "bad guid"}, 400)
             if not guid.startswith("plex://"):
                 return self._send({"error": "bad guid"}, 400)
+            g = urllib.parse.quote(guid, safe='')
+            tags = TEAM_TAGS.get(guid)
+            if tags:
+                # A game, in the real server's order: the single event, then
+                # the whole league, then one rule per team. The league sitting
+                # in front of the team is what once turned "follow the
+                # Chiefs" into "record every NFL game".
+                league = next((m.get("grandparentTitle") for src in (SPORTS_ITEMS,)
+                               for m in src if m["guid"] == guid), "Sport")
+                subs = [{"title": "This Event", "type": 4, "targetLibrarySectionID": 2,
+                         "parameters": f"hints%5Bguid%5D={g}", "Setting": _settings()},
+                        {"title": f"All {league} Events", "type": 2,
+                         "targetLibrarySectionID": 2,
+                         "parameters": f"hints%5Bguid%5D={g}&hints%5Bleague%5D=1",
+                         "Setting": _settings()}]
+                for t in tags:
+                    subs.append({"title": f"All {t['tag']} Events", "type": 2,
+                                 "targetLibrarySectionID": 2,
+                                 "parameters": f"hints%5Bguid%5D={g}&hints%5Bteam%5D={t['id']}",
+                                 "Setting": _settings()})
+                return self._container(SubscriptionTemplate=[{"MediaSubscription": subs}])
             return self._container(SubscriptionTemplate=[{
                 "MediaSubscription": [
                     {"title": "This Episode", "type": 4,
                      "targetLibrarySectionID": 2,
-                     "parameters": f"hints%5Bguid%5D={urllib.parse.quote(guid, safe='')}",
+                     "parameters": f"hints%5Bguid%5D={g}",
                      "Setting": _settings()},
                     {"title": "All Episodes", "type": 2,
                      "targetLibrarySectionID": 2,
-                     "parameters": f"hints%5Bguid%5D={urllib.parse.quote(guid, safe='')}",
+                     "parameters": f"hints%5Bguid%5D={g}",
                      "Setting": _settings()},
                 ]}])
 
@@ -314,6 +338,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send({"error": "not found"}, 404)
 
     def do_POST(self):
+        STATE.seen_urls.append(self.path)
         u = urllib.parse.urlsplit(self.path)
         if u.path != "/media/subscriptions":
             return self._send({"error": "not found"}, 404)
@@ -340,10 +365,17 @@ class Handler(BaseHTTPRequestHandler):
         if pinned and pinned != "-1":
             media = [m for m in media if str(m["beginsAt"]) == str(pinned)] or media
 
+        title = "This Episode" if one_shot else "All Episodes"
+        if q.get("hints[league]"):
+            title = f"All {(meta or {}).get('grandparentTitle')} Events"
+        elif q.get("hints[team]"):
+            names = {str(t["id"]): t["tag"] for t in TEAM_TAGS.get(guid, [])}
+            title = f"All {names.get(q['hints[team]'][0], '?')} Events"
+        elif one_shot and meta in SPORTS_ITEMS:
+            title = "This Event"
         sub = {
             "key": key, "type": 4 if one_shot else 2,
-            "targetLibrarySectionID": 2,
-            "title": "This Episode" if one_shot else "All Episodes",
+            "targetLibrarySectionID": 2, "title": title,
             # oneShot comes back as a string, not a 1.
             "Setting": [{"id": k, "value": ("true" if v in ("1", "true") else v)}
                         for k, v in prefs.items()],

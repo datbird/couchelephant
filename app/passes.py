@@ -28,31 +28,35 @@ def _now():
     return int(time.time())
 
 
-def _future_airings(horizon_days=30):
-    cutoff = _now() - LEAD_SECONDS
-    limit = _now() + horizon_days * 86400
-    return db.query(
-        """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary,
+_AIRING_SQL = """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary,
                   p.section, c.network AS channel_network
            FROM airings a
            JOIN programs p ON p.guid = a.program_guid
            LEFT JOIN channels c ON c.vcn = a.channel_vcn
-           WHERE a.begins_at BETWEEN ? AND ?
-           ORDER BY a.begins_at""",
-        (cutoff, limit),
-    )
+           WHERE a.begins_at BETWEEN ? AND ?"""
+
+
+def _future(extra="", args=(), horizon_days=30, limit=None):
+    """Future airings with a WHERE fragment applied by SQLite, not by Python.
+
+    The guide holds around twenty thousand future airings. Pulling them all in
+    to keep a dozen is how a pass list of forty took a second to draw.
+    """
+    cutoff = _now() - LEAD_SECONDS
+    until = _now() + horizon_days * 86400
+    sql = _AIRING_SQL + (f" AND {extra}" if extra else "") + " ORDER BY a.begins_at"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return db.query(sql, (cutoff, until, *args))
 
 
 def candidate_airings(team_id, horizon_days=30):
     """Future airings of games featuring this team, newest guide data only."""
     if not team_id:
         return []
-    out = []
-    for r in _future_airings(horizon_days):
-        teams = db.unjs(r["teams"])
-        if any(int(t.get("id") or -1) == int(team_id) for t in teams):
-            out.append(r)
-    return out
+    return _future("EXISTS (SELECT 1 FROM json_each(p.teams) t "
+                   "WHERE json_extract(t.value, '$.id') = ?)",
+                   (int(team_id),), horizon_days)
 
 
 def series_airings(series_guid, horizon_days=30):
@@ -61,11 +65,10 @@ def series_airings(series_guid, horizon_days=30):
     Matched on the show rather than the episode, so a rule follows the series
     across every episode the guide holds.
     """
-    out = []
-    for r in _future_airings(horizon_days):
-        if r["program_guid"] == series_guid or r["grandparent_title"] == series_guid:
-            out.append(r)
-    return out
+    if not series_guid:
+        return []
+    return _future("(a.program_guid = ? OR p.grandparent_title = ?)",
+                   (series_guid, series_guid), horizon_days)
 
 
 def smart_airings(tree, horizon_days=30):
@@ -76,18 +79,7 @@ def smart_airings(tree, horizon_days=30):
     of the count in the panel is that it comes back before the user has given up.
     """
     frag, args = smartfilter.build(tree)
-    cutoff = _now() - LEAD_SECONDS
-    limit = _now() + horizon_days * 86400
-    return db.query(
-        f"""SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary,
-                   p.section, c.network AS channel_network
-            FROM airings a
-            JOIN programs p ON p.guid = a.program_guid
-            LEFT JOIN channels c ON c.vcn = a.channel_vcn
-            WHERE a.begins_at BETWEEN ? AND ? AND {frag}
-            ORDER BY a.begins_at""",
-        (cutoff, limit, *args),
-    )
+    return _future(f"({frag})", args, horizon_days)
 
 
 def any_airing(horizon_days=30):
@@ -98,8 +90,7 @@ def any_airing(horizon_days=30):
     what it follows, which is the difference between an options panel and an
     empty box that says come back later.
     """
-    rows = [r for r in _future_airings(horizon_days) if not r["drm"]]
-    return rows[:1]
+    return _future("COALESCE(a.drm, 0) = 0", (), horizon_days, limit=1)
 
 
 def rule_airings(rule, horizon_days=30):
@@ -315,7 +306,15 @@ def run_passes(force_dry_run=None):
     plex = None
     if not dry:
         plex = Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+    try:
+        _evaluate(rows, plex, dry, results)
+    finally:
+        if plex is not None:
+            plex.close()
+    return results
 
+
+def _evaluate(rows, plex, dry, results):
     for p in rows:
         label = rule_label(p)
         networks, channels = allowed_sources(p)
@@ -372,4 +371,3 @@ def run_passes(force_dry_run=None):
                 results.append({"pass": label, "game": pick["title"],
                                 "action": "failed", "reason": msg,
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
-    return results
