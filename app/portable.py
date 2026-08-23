@@ -36,7 +36,7 @@ def _logo_dir():
     return os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
 
 
-def export_bytes(include_secrets=False, version="", note=""):
+def export_bytes(include_secrets: bool = False, version: str = "", note: str = "") -> bytes:
     """The whole export, as bytes ready to send."""
     stores = dbstore.snapshot(include_secrets=include_secrets)
     manifest = {
@@ -65,7 +65,7 @@ def export_bytes(include_secrets=False, version="", note=""):
     return buf.getvalue()
 
 
-def describe(blob):
+def describe(blob: bytes) -> dict:
     """What is in this file, without changing anything. For the confirm step."""
     manifest = _manifest(blob)
     return {
@@ -85,14 +85,14 @@ def _manifest(blob):
     try:
         z = zipfile.ZipFile(io.BytesIO(blob))
     except zipfile.BadZipFile:
-        raise ImportError_("that is not a CouchElephant export. It is not a zip file.")
+        raise ImportError_("that is not a CouchElephant export. It is not a zip file.") from None
     with z:
         if MANIFEST not in z.namelist():
             raise ImportError_("that zip has no CouchElephant export in it.")
         try:
             manifest = json.loads(z.read(MANIFEST))
         except ValueError:
-            raise ImportError_("the export inside that file is damaged.")
+            raise ImportError_("the export inside that file is damaged.") from None
     if manifest.get("app") != "couchelephant":
         raise ImportError_("that export was made by a different program.")
     if int(manifest.get("format") or 0) > FORMAT:
@@ -103,7 +103,7 @@ def _manifest(blob):
     return manifest
 
 
-def import_bytes(blob, replace=False, include_secrets=True):
+def import_bytes(blob: bytes, replace: bool = False, include_secrets: bool = True) -> dict:
     """Read an export back in.
 
     `replace` deletes what the file does not carry, so the result is exactly

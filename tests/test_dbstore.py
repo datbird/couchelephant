@@ -6,8 +6,8 @@ import zipfile
 
 import pytest
 
-from app import auth, backingstore, backups, db, dbstore, passes, portable, web
-from tests import fake_plex
+from app import auth, db, dbstore, portable
+from app.routes import record as record_routes
 
 
 def _fp(**kw):
@@ -228,7 +228,7 @@ def test_an_import_relinks_a_grab_to_the_pass_it_belongs_to(client, synced):
 def test_merging_leaves_alone_what_the_file_does_not_carry(client, synced):
     client.post("/api/pass", data={"team_id": "236"})
     blob = portable.export_bytes()
-    web._make_pass("series", series="Quiz Show")
+    record_routes._make_pass("series", series="Quiz Show")
     portable.import_bytes(blob, replace=False)
     assert db.one("SELECT COUNT(*) c FROM passes")["c"] == 2
 
@@ -236,7 +236,7 @@ def test_merging_leaves_alone_what_the_file_does_not_carry(client, synced):
 def test_replacing_makes_the_result_exactly_what_was_exported(client, synced):
     client.post("/api/pass", data={"team_id": "236"})
     blob = portable.export_bytes()
-    web._make_pass("series", series="Quiz Show")
+    record_routes._make_pass("series", series="Quiz Show")
     portable.import_bytes(blob, replace=True)
     rows = db.query("SELECT team_name FROM passes")
     assert [r["team_name"] for r in rows] == ["Kansas City Chiefs"]

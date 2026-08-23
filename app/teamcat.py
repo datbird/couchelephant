@@ -25,7 +25,7 @@ _lock = threading.Lock()
 _cache = None
 
 
-def norm(name):
+def norm(name: str) -> str:
     """The form two spellings of one team have in common.
 
     This must stay identical to `norm` in scripts/build_teams.py. A catalogue
@@ -66,16 +66,16 @@ def _load():
     return _cache
 
 
-def all_teams():
+def all_teams() -> list[dict]:
     return _load()[0]
 
 
-def find(name):
+def find(name: str) -> dict | None:
     """The catalogue entry a Plex team name belongs to, or None."""
     return _load()[1].get(norm(name))
 
 
-def leagues():
+def leagues() -> list[str]:
     """Every league in the catalogue, in the order they should be offered."""
     order, seen = [], set()
     for t in all_teams():
@@ -84,5 +84,5 @@ def leagues():
             order.append(t["league"])
     # The ones most people mean first, then the rest as they come.
     front = ["NFL", "NBA", "MLB", "NHL", "NCAA", "WNBA", "MLS", "NWSL"]
-    return ([l for l in front if l in seen] +
-            [l for l in order if l not in front])
+    return ([name for name in front if name in seen] +
+            [name for name in order if name not in front])

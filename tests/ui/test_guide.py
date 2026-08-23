@@ -1,5 +1,4 @@
 """The guide grid, and opening a programme from it."""
-from tests import fake_plex
 
 
 def test_the_grid_draws_channels_and_programmes(guide):

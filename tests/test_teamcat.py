@@ -1,11 +1,8 @@
 """The shipped team catalogue, and how it meets Plex's own list."""
 import importlib.util
-import json
 import os
-import re
 
-from app import db, passes, sync, teamcat
-from tests import fake_plex
+from app import db, sync, teamcat
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

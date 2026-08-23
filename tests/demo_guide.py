@@ -12,7 +12,6 @@ one person's viewing.
 
 Set COUCHELEPHANT_DEMO_GUIDE=1 before importing fake_plex.
 """
-import time
 
 CHANNELS = {
     "2.1": ("KQAADT", "2.1 KQAADT (FOX)"),

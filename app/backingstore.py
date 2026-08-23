@@ -44,15 +44,15 @@ class Backend:
     def __init__(self, cfg):
         self.cfg = cfg
 
-    def test(self):
+    def test(self) -> str:
         """Connect and touch a store. Returns a sentence for the user."""
         raise NotImplementedError
 
-    def read_all(self, store):
+    def read_all(self, store: str) -> dict[str, dict]:
         """{k: record}. MUST raise rather than return a short set."""
         raise NotImplementedError
 
-    def write(self, store, records, deletes):
+    def write(self, store: str, records: dict[str, dict], deletes) -> None:
         raise NotImplementedError
 
 
@@ -80,7 +80,7 @@ class SqliteBackend(Backend):
         try:
             con = sqlite3.connect(path, timeout=30)
         except sqlite3.Error as e:
-            raise BackendError(f"Could not open {path}: {e}")
+            raise BackendError(f"Could not open {path}: {e}") from e
         con.row_factory = sqlite3.Row
         return con
 
@@ -100,7 +100,7 @@ class SqliteBackend(Backend):
                 rows = con.execute(f"SELECT k, data FROM {table}").fetchall()
         except sqlite3.Error as e:
             # Raise. Never hand back a short set. See the module docstring.
-            raise BackendError(f"Could not read {table}: {e}")
+            raise BackendError(f"Could not read {table}: {e}") from e
         return {r["k"]: json.loads(r["data"]) for r in rows}
 
     def write(self, store, records, deletes):
@@ -118,7 +118,7 @@ class SqliteBackend(Backend):
                 for k in deletes:
                     con.execute(f"DELETE FROM {table} WHERE k = ?", (k,))
         except sqlite3.Error as e:
-            raise BackendError(f"Could not write {table}: {e}")
+            raise BackendError(f"Could not write {table}: {e}") from e
 
 
 class _SqlBackend(Backend):
@@ -150,7 +150,7 @@ class _SqlBackend(Backend):
                 con.rollback()
             except Exception:
                 pass
-            raise BackendError(f"Could not {what}: {e}")
+            raise BackendError(f"Could not {what}: {e}") from e
         finally:
             try:
                 con.close()
@@ -201,7 +201,7 @@ class PostgresBackend(_SqlBackend):
             import psycopg
         except ImportError:
             raise BackendError("PostgreSQL support needs the psycopg driver, which "
-                               "is not in this image.")
+                               "is not in this image.") from None
         try:
             return psycopg.connect(
                 host=self.cfg.get("pg_host") or "127.0.0.1",
@@ -211,7 +211,7 @@ class PostgresBackend(_SqlBackend):
                 password=self.cfg.get("pg_password") or "",
                 connect_timeout=15)
         except Exception as e:
-            raise BackendError(f"Could not reach PostgreSQL: {e}")
+            raise BackendError(f"Could not reach PostgreSQL: {e}") from e
 
 
 class MysqlBackend(_SqlBackend):
@@ -227,7 +227,7 @@ class MysqlBackend(_SqlBackend):
             import pymysql
         except ImportError:
             raise BackendError("MySQL support needs the PyMySQL driver, which is "
-                               "not in this image.")
+                               "not in this image.") from None
         try:
             return pymysql.connect(
                 host=self.cfg.get("my_host") or "127.0.0.1",
@@ -237,7 +237,7 @@ class MysqlBackend(_SqlBackend):
                 password=self.cfg.get("my_password") or "",
                 connect_timeout=15)
         except Exception as e:
-            raise BackendError(f"Could not reach MySQL: {e}")
+            raise BackendError(f"Could not reach MySQL: {e}") from e
 
 
 BACKENDS = {b.name: b for b in (SqliteBackend, PostgresBackend, MysqlBackend)}
@@ -250,11 +250,11 @@ SECRET_KEYS = frozenset(
     f[0] for b in BACKENDS.values() for f in b.fields if f[2] == "secret")
 
 
-def config():
+def config() -> dict[str, str]:
     return {k: db.get_setting(k) or "" for k in CONFIG_KEYS}
 
 
-def chosen():
+def chosen() -> Backend | None:
     """The configured backend, ready to use, or None."""
     name = (db.get_setting("backingstore_backend") or "").strip()
     if name not in BACKENDS:
@@ -269,14 +269,14 @@ def _status(**kw):
     return kw
 
 
-def status():
+def status() -> dict:
     try:
         return json.loads(db.get_setting("backingstore_status") or "{}")
     except ValueError:
         return {}
 
 
-def sync_all(dry_run=False):
+def sync_all(dry_run: bool = False) -> dict:
     """Reconcile every durable store, both ways. Returns a per-store report."""
     backend = chosen()
     if backend is None:
@@ -342,7 +342,7 @@ def _delete_local(name, key):
     con.commit()
 
 
-def restore_from_remote(dry_run=False):
+def restore_from_remote(dry_run: bool = False) -> dict:
     """Pull everything down, and write nothing back.
 
     A plain sync would be wrong here. Restoring onto an empty machine, the

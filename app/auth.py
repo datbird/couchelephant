@@ -106,23 +106,23 @@ def _tok_hash(token):
 
 # ---------- mode ----------
 
-def mode():
+def mode() -> str:
     m = db.get_setting("auth_mode") or "none"
     return m if m in MODES else "none"
 
 
-def needs_setup():
+def needs_setup() -> bool:
     """True when sign-in is on but nobody has an account yet."""
     return mode() != "none" and user_count() == 0
 
 
 # ---------- users ----------
 
-def user_count():
+def user_count() -> int:
     return _con().execute("SELECT COUNT(*) FROM users").fetchone()[0]
 
 
-def create_user(username, password, role="admin"):
+def create_user(username: str, password: str, role: str = "admin") -> int:
     username = (username or "").strip()
     if not username:
         raise ValueError("a username is required")
@@ -135,12 +135,12 @@ def create_user(username, password, role="admin"):
                     "VALUES (?,?,?,?,?)", (username, ph, salt, role, _now()))
         con.commit()
     except sqlite3.IntegrityError:
-        raise ValueError("that username is taken")
+        raise ValueError("that username is taken") from None
     return con.execute("SELECT id FROM users WHERE username=? COLLATE NOCASE",
                        (username,)).fetchone()[0]
 
 
-def verify(username, password):
+def verify(username: str, password: str) -> dict | None:
     row = _con().execute("SELECT * FROM users WHERE username=? COLLATE NOCASE",
                          ((username or "").strip(),)).fetchone()
     if not row:
@@ -154,12 +154,12 @@ def verify(username, password):
     return None
 
 
-def list_users():
+def list_users() -> list[dict]:
     return [dict(r) for r in _con().execute(
         "SELECT id, username, role, created_at FROM users ORDER BY created_at")]
 
 
-def delete_user(uid):
+def delete_user(uid: int) -> None:
     con = _con()
     con.execute("DELETE FROM users WHERE id=?", (uid,))
     con.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
@@ -170,7 +170,7 @@ def delete_user(uid):
 
 # ---------- sessions ----------
 
-def create_session(user_id):
+def create_session(user_id: int) -> str:
     token = secrets.token_urlsafe(32)
     now = _now()
     con = _con()
@@ -181,7 +181,7 @@ def create_session(user_id):
     return token
 
 
-def session_user(token):
+def session_user(token: str | None) -> dict | None:
     if not token:
         return None
     row = _con().execute(
@@ -193,7 +193,7 @@ def session_user(token):
     return {"id": row["id"], "username": row["username"], "role": row["role"]}
 
 
-def delete_session(token):
+def delete_session(token: str | None) -> None:
     if not token:
         return
     con = _con()
@@ -203,7 +203,7 @@ def delete_session(token):
 
 # ---------- Cloudflare Access ----------
 
-def user_for_email(email, create=True):
+def user_for_email(email: str | None, create: bool = True) -> dict | None:
     """The local account behind a Cloudflare identity.
 
     An unmapped email gets an account on first sight, because Cloudflare has
@@ -242,7 +242,7 @@ def user_for_email(email, create=True):
 
 # ---------- per-user preferences ----------
 
-def get_pref(user_id, key, default=None):
+def get_pref(user_id: int | None, key: str, default=None):
     if not user_id:
         return default
     row = _con().execute("SELECT value FROM prefs WHERE user_id=? AND key=?",
@@ -250,7 +250,7 @@ def get_pref(user_id, key, default=None):
     return row["value"] if row else default
 
 
-def set_pref(user_id, key, value):
+def set_pref(user_id: int | None, key: str, value) -> None:
     if not user_id:
         return
     con = _con()

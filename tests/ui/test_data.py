@@ -1,5 +1,4 @@
 """The Backup and restore settings section."""
-import io
 import os
 import zipfile
 

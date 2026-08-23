@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from app import backingstore, db, dbstore, web
+from app import backingstore, db
 
 
 @pytest.fixture
@@ -135,7 +135,6 @@ def test_a_failed_read_raises_rather_than_looking_empty(store, client, synced):
     backingstore.sync_all()
 
     backend = backingstore.chosen()
-    original = backend.read_all
 
     class Broken(type(backend)):
         def read_all(self, store_name):

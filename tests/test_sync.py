@@ -1,5 +1,4 @@
 """Pulling the guide in, and keeping what was already learned."""
-import json
 
 from app import db, sync
 from tests import fake_plex

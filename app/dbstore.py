@@ -34,7 +34,6 @@ FOUR RULES, each of them a bug somewhere else first:
 import hashlib
 import json
 import os
-import time
 
 from . import auth, db
 
@@ -125,7 +124,7 @@ def _ids():
 
 # ---------------------------------------------------------------- reading
 
-def read(name, include_secrets=False):
+def read(name: str, include_secrets: bool = False) -> dict[str, dict]:
     """One store as {key_tuple: row_dict}. Keys are strings, always."""
     spec = STORES[name]
     con = _con(spec["db"])
@@ -170,12 +169,12 @@ def _key(spec, rec):
                        for c in spec["key"])
 
 
-def snapshot(include_secrets=False):
+def snapshot(include_secrets: bool = False) -> dict[str, dict[str, dict]]:
     """Every durable store, ready to be written somewhere."""
     return {name: read(name, include_secrets) for name in STORES}
 
 
-def fingerprint(rec):
+def fingerprint(rec: dict) -> str:
     """A stable hash of one record, for telling a change from a re-read."""
     canon = json.dumps({k: ("" if v is None else str(v)) for k, v in sorted(rec.items())},
                        sort_keys=True, separators=(",", ":"))
@@ -184,7 +183,7 @@ def fingerprint(rec):
 
 # ---------------------------------------------------------------- writing
 
-def apply(name, rows, delete_missing=False):
+def apply(name: str, rows: list[dict], delete_missing: bool = False) -> tuple[int, int]:
     """Write records into a store. Returns (written, deleted).
 
     `delete_missing` removes local rows the incoming set does not carry, which
@@ -238,7 +237,7 @@ def apply(name, rows, delete_missing=False):
     return written, deleted
 
 
-def relink_passes():
+def relink_passes() -> None:
     """Point every grab at the local id of the pass its uid names.
 
     An import brings `pass_uid`, which is portable, and knows nothing about
@@ -253,7 +252,7 @@ def relink_passes():
 
 # ---------------------------------------------------------------- the merge
 
-def merge(local, remote, shadow):
+def merge(local: dict, remote: dict, shadow: dict) -> tuple[dict, dict, list, list, list]:
     """Three-way merge of one store. Pure, so it can be reasoned about.
 
     `shadow` is what both sides looked like at the last sync, as
@@ -267,10 +266,10 @@ def merge(local, remote, shadow):
     del_local, del_remote, conflicts = [], [], []
 
     for key in set(local) | set(remote) | set(shadow):
-        l, r = local.get(key), remote.get(key)
+        mine, theirs = local.get(key), remote.get(key)
         was = shadow.get(key)
-        lf = fingerprint(l) if l is not None else None
-        rf = fingerprint(r) if r is not None else None
+        lf = fingerprint(mine) if mine is not None else None
+        rf = fingerprint(theirs) if theirs is not None else None
 
         if lf == rf:
             continue                                   # already agree
@@ -278,32 +277,32 @@ def merge(local, remote, shadow):
         r_changed = rf != was
 
         if l_changed and not r_changed:
-            if l is not None:
-                to_remote[key] = l
+            if mine is not None:
+                to_remote[key] = mine
             else:
                 del_remote.append(key)
         elif r_changed and not l_changed:
-            if r is not None:
-                to_local[key] = r
+            if theirs is not None:
+                to_local[key] = theirs
             else:
                 del_local.append(key)
         else:
             # Both moved since the last sync.
             conflicts.append(key)
-            if l is None and r is not None:
+            if mine is None and theirs is not None:
                 # An edit beats a delete. Losing an edit loses work; losing a
                 # delete costs one more click.
-                to_local[key] = r
-            elif r is None and l is not None:
-                to_remote[key] = l
-            elif _newer(l, r):
-                to_remote[key] = l
+                to_local[key] = theirs
+            elif theirs is None and mine is not None:
+                to_remote[key] = mine
+            elif _newer(mine, theirs):
+                to_remote[key] = mine
             else:
-                to_local[key] = r
+                to_local[key] = theirs
     return to_local, to_remote, del_local, del_remote, conflicts
 
 
-def _newer(l, r):
+def _newer(mine, theirs):
     """Whichever record claims the later timestamp. Local wins a tie."""
     def stamp(rec):
         for col in ("updated_at", "created_at", "custom_logo_at", "last_seen"):
@@ -314,10 +313,10 @@ def _newer(l, r):
                 except (TypeError, ValueError):
                     pass
         return 0
-    return stamp(l) >= stamp(r)
+    return stamp(mine) >= stamp(theirs)
 
 
-def new_shadow(local, remote):
+def new_shadow(local: dict, remote: dict) -> dict[str, str]:
     """What both sides look like now, for the next merge to compare against."""
     out = {}
     for key in set(local) | set(remote):
@@ -339,7 +338,7 @@ CREATE TABLE IF NOT EXISTS sync_shadow (
 """
 
 
-def load_shadow(backend, store):
+def load_shadow(backend: str, store: str) -> dict[str, str]:
     con = db.connect()
     con.executescript(SHADOW_SCHEMA)
     return {r["k"]: r["fp"] for r in con.execute(
@@ -347,7 +346,7 @@ def load_shadow(backend, store):
         (backend, store))}
 
 
-def save_shadow(backend, store, shadow):
+def save_shadow(backend: str, store: str, shadow: dict[str, str]) -> None:
     con = db.connect()
     con.executescript(SHADOW_SCHEMA)
     con.execute("DELETE FROM sync_shadow WHERE backend = ? AND store = ?",
@@ -358,7 +357,7 @@ def save_shadow(backend, store, shadow):
     con.commit()
 
 
-def forget_shadow(backend):
+def forget_shadow(backend: str) -> None:
     con = db.connect()
     con.executescript(SHADOW_SCHEMA)
     con.execute("DELETE FROM sync_shadow WHERE backend = ?", (backend,))

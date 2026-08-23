@@ -1,5 +1,4 @@
 """Guide filter tokens."""
-import json
 
 from app import db, filters
 

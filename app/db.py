@@ -195,7 +195,7 @@ DEFAULTS = {
 }
 
 
-def connect():
+def connect() -> sqlite3.Connection:
     if not hasattr(_local, "conn"):
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
@@ -278,7 +278,7 @@ def _migrate(conn):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
-def init():
+def init() -> None:
     conn = connect()
     conn.executescript(SCHEMA)
     _migrate(conn)
@@ -306,19 +306,19 @@ def _backfill_uids(conn):
         "our_grabs.pass_id) WHERE pass_uid IS NULL AND pass_id IS NOT NULL")
 
 
-def get_setting(key, default=None):
+def get_setting(key: str, default: str | None = None) -> str | None:
     row = connect().execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else (default if default is not None else DEFAULTS.get(key))
 
 
-def all_settings():
+def all_settings() -> dict[str, str]:
     rows = connect().execute("SELECT key, value FROM settings").fetchall()
     out = dict(DEFAULTS)
     out.update({r["key"]: r["value"] for r in rows})
     return out
 
 
-def set_setting(key, value):
+def set_setting(key: str, value) -> None:
     with tx() as c:
         c.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
@@ -327,15 +327,15 @@ def set_setting(key, value):
         )
 
 
-def query(sql, params=()):
+def query(sql: str, params=()) -> list[sqlite3.Row]:
     return connect().execute(sql, params).fetchall()
 
 
-def one(sql, params=()):
+def one(sql: str, params=()) -> sqlite3.Row | None:
     return connect().execute(sql, params).fetchone()
 
 
-def js(value):
+def js(value) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 

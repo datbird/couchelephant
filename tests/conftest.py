@@ -15,10 +15,11 @@ os.environ["COUCHELEPHANT_DB"] = os.path.join(_ROOT, "couchelephant.db")
 os.environ["COUCHELEPHANT_AUTH_DB"] = os.path.join(_ROOT, "auth.db")
 os.environ["COUCHELEPHANT_LOGOS"] = os.path.join(_ROOT, "logos")
 
-from tests import fake_plex, isolation           # noqa: E402
+from tests import fake_plex, isolation  # noqa: E402
+
 isolation.assert_isolated()                      # before anything is imported
 
-from app import auth, db, passes, sync           # noqa: E402
+from app import auth, db, sync  # noqa: E402
 
 
 def pytest_sessionfinish(session, exitstatus):
@@ -96,6 +97,7 @@ def synced(plex):
 def client():
     """The app, driven in-process. No network, no port."""
     from fastapi.testclient import TestClient
+
     from app.web import app
     with TestClient(app, base_url="http://testserver") as c:
         # Same-origin by default, so the guard does not reject every call.

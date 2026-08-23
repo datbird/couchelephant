@@ -15,7 +15,7 @@ usage() {
   cat <<'USAGE'
 scripts/test.sh [options] [pytest args...]
 
-  --unit      only the Python suite, no browser
+  --unit      lint plus the Python suite, no browser
   --ui        only the browser suite
   --shots     remake docs/images/*.png from the demo guide, then stop
   --build     rebuild the test image first
@@ -79,6 +79,13 @@ if [ "$WHAT" = shots ]; then
 fi
 
 fail=0
+
+if [ "$WHAT" != ui ] && [ "$WHAT" != shots ]; then
+  echo "==> lint"
+  docker run --rm --name "ce-lint-$$" \
+    -v "$PWD:/src:ro" -w /src \
+    "$IMAGE" ruff check --no-cache app tests scripts || fail=1
+fi
 
 if [ "$WHAT" != ui ]; then
   echo "==> unit and API suite"

@@ -207,8 +207,9 @@ def test_the_create_button_waits_for_a_condition_worth_asking(add):
 # ---- it shows up afterwards ----
 
 def test_a_smart_pass_appears_in_the_list_with_its_own_icon(page):
-    from app import db, passes, web
-    web._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
+    from app import passes
+    from app.routes import record as record_routes
+    record_routes._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
                    name="Chiefs football")
     passes.run_passes()
     page.goto("/recordings")
@@ -221,8 +222,9 @@ def test_a_smart_pass_appears_in_the_list_with_its_own_icon(page):
 
 
 def test_opening_a_smart_pass_shows_what_it_records_and_why(page):
-    from app import passes, web
-    web._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
+    from app import passes
+    from app.routes import record as record_routes
+    record_routes._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
                    name="Chiefs football")
     passes.run_passes()
     page.goto("/recordings")
@@ -236,8 +238,8 @@ def test_opening_a_smart_pass_shows_what_it_records_and_why(page):
 
 
 def test_editing_a_smart_pass_opens_its_conditions(page):
-    from app import web
-    web._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
+    from app.routes import record as record_routes
+    record_routes._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
                    name="Chiefs football")
     page.goto("/recordings")
     page.click('.subtab[data-sub="passes"]')
@@ -301,8 +303,8 @@ def test_the_padding_you_set_is_what_gets_booked(add):
 
 
 def test_editing_a_smart_pass_shows_the_padding_it_saved(page):
-    from app import web
-    web._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
+    from app.routes import record as record_routes
+    record_routes._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
                    name="Football", prefs={"endOffsetMinutes": "90"})
     page.goto("/recordings")
     page.click('.subtab[data-sub="passes"]')

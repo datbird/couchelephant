@@ -24,7 +24,14 @@ readable by whoever inherits it.
 | `app/portable.py` | Export and import, as one zip |
 | `app/backups.py` | Snapshot jobs: schedule, retention, encryption, restore |
 | `app/backingstore.py` | The two-way replica, and its database backends |
-| `app/web.py` | Routes, and the HTML they render |
+| `app/web.py` | The FastAPI app: middleware, the background loops, and mounting the routes |
+| `app/routes/_shared.py` | What every route needs: the template engine, `page()`, who is asking, the Plex client |
+| `app/routes/guide.py` | The grid, a programme, search, channel logos |
+| `app/routes/record.py` | Recording one broadcast, Plex's templates and settings, making a pass |
+| `app/routes/passes.py` | The schedule, passes, rules, smart filters |
+| `app/routes/account.py` | First run, sign in, sign out, theme |
+| `app/routes/data.py` | Export, import, backups, the backing store |
+| `app/routes/settings.py` | The Plex connection, accounts, artwork, sync |
 
 `dbstore.py`, `portable.py`, `backups.py` and `backingstore.py` are explained
 in [Your data](DATA.md), including why the guide is never copied.
@@ -94,9 +101,11 @@ immediately.
 
 ## Rendering
 
-`base.html` holds the theme tokens, the header, the tab bar, and the shared
-programme panel. Every colour in the app comes from one token block, so a theme
-is a swap of that block and nothing else.
+`base.html` holds the header, the tab bar, and the shared programme panel. The
+stylesheet is `static/css/app.css` and the shared page behaviour is
+`static/js/app.js`; both are versioned by `asset_v`. Every colour in the app
+comes from one token block at the top of the stylesheet, so a theme is a swap
+of that block and nothing else.
 
 The programme panel lives in `base.html` rather than on the guide, because the
 guide, the schedule, the calendar and a pass all open the same thing.

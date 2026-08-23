@@ -24,6 +24,13 @@
 
 ### Changed
 
+- `web.py` is split into `app/routes/`, one module per screen, with the app,
+  middleware and background loops left in `web.py`. `base.html` no longer
+  carries a thousand lines each of CSS and JS; they are `static/css/app.css`
+  and `static/js/app.js`, versioned like the other scripts.
+- `ruff` lints the tree at the start of every test run (`ruff.toml`). Every
+  `raise` inside an `except` now chains its cause. Public functions in the
+  core modules carry type hints.
 - Every Plex client is closed when its request is done. A handful of routes
   used to leak one connection each.
 - Pass airings are selected in SQL (`json_each` on the team list) instead of

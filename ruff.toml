@@ -1,0 +1,16 @@
+# Lint settings. `ruff check` runs first in scripts/test.sh and in CI.
+line-length = 100
+target-version = "py312"
+
+[lint]
+# Pyflakes, pycodestyle, bugbear, pyupgrade, and the import sorter.
+select = ["E", "F", "W", "B", "UP", "I"]
+ignore = [
+    "E501",   # long lines: the SQL and the user-facing sentences are the long ones
+    "B008",   # Form(...) / File(...) defaults are FastAPI's own idiom
+    "B905",   # zip without strict: every zip here is over two known-equal lists
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]           # the isolation guard must run before app imports
+"scripts/*" = ["E402"]

@@ -9,7 +9,6 @@ tag. The plain email header alone is never trusted, so a request that reaches
 the origin without passing through Cloudflare cannot claim an identity.
 """
 import json
-import time
 import urllib.request
 
 try:
@@ -22,7 +21,7 @@ except ImportError:                      # pragma: no cover
 _clients = {}
 
 
-def available():
+def available() -> bool:
     return jwt is not None
 
 
@@ -35,7 +34,7 @@ def _client(team_domain):
     return c
 
 
-def verify_email(token, team_domain, aud):
+def verify_email(token: str | None, team_domain: str | None, aud: str | None) -> str | None:
     """The verified email, or None if anything about the token does not hold."""
     if not token or not team_domain or not aud or not available():
         return None
@@ -53,7 +52,7 @@ def verify_email(token, team_domain, aud):
     return email or None
 
 
-def check(team_domain, aud):
+def check(team_domain: str | None, aud: str | None) -> tuple[bool, str]:
     """Can this app reach the team's certs? Used by the Settings test button."""
     if not available():
         return False, "PyJWT is not installed in this image"

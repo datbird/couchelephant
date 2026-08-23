@@ -6,7 +6,8 @@ import zipfile
 
 import pytest
 
-from app import backups, db, portable, web
+from app import backups, db, portable
+from app.routes import record as record_routes
 
 
 @pytest.fixture
@@ -123,7 +124,7 @@ def test_an_encrypted_archive_needs_its_passphrase(dest, synced):
     inner = backups.read_archive(dest, out["file"], "open sesame")
     with zipfile.ZipFile(io.BytesIO(inner)) as z:
         assert portable.MANIFEST in z.namelist()
-    with pytest.raises(Exception):
+    with pytest.raises((RuntimeError, ValueError)):
         backups.read_archive(dest, out["file"], "wrong")
 
 
@@ -140,7 +141,7 @@ def test_restoring_an_archive_puts_the_data_back(dest, client, synced):
 def test_a_restore_takes_a_safety_copy_of_what_was_there(dest, client, synced):
     client.post("/api/pass", data={"team_id": "236"})
     out = backups.run_job(_job(dest))
-    web._make_pass("series", series="Quiz Show")
+    record_routes._make_pass("series", series="Quiz Show")
     report = backups.restore(dest, out["file"], replace=True)
     assert report["safety_copy"], "the state before the restore was kept"
     safety = os.path.join(dest, "before-restore", report["safety_copy"])

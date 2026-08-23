@@ -37,7 +37,7 @@ def _clause(token):
     return None
 
 
-def build(include, exclude):
+def build(include: list[str], exclude: list[str]) -> tuple[list[str], list]:
     """Return (sql_fragments, args) to AND into a guide query."""
     frags, args = [], []
     for t in include or []:
@@ -56,11 +56,11 @@ def build(include, exclude):
     return frags, args
 
 
-def parse(value):
+def parse(value: str | None) -> list[str]:
     return [t for t in (value or "").split(",") if t.strip()]
 
 
-def facets():
+def facets() -> list[dict]:
     """Everything the filter panel offers, with counts, grouped into sections."""
     def rows(sql, prefix=None):
         out = []

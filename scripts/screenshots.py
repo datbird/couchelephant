@@ -36,10 +36,12 @@ os.environ.setdefault("COUCHELEPHANT_FAKE_ANCHOR",
                       str((int(time.time()) // 3600) * 3600 + 7200))
 
 sys.path.insert(0, ROOT)
-from tests import fake_plex, isolation                      # noqa: E402
+from tests import fake_plex, isolation  # noqa: E402
+
 isolation.assert_isolated()
 
-from app import backups, db, passes, sync, web              # noqa: E402
+from app import db, passes, sync, web  # noqa: E402
+from app.routes import record as record_routes
 
 
 def free_port():
@@ -66,9 +68,9 @@ def start_app(plex_url):
 
     # A pass, so the schedule and the pass list have something in them.
     team = db.one("SELECT * FROM teams WHERE name = 'Kansas City Chiefs'")
-    web._make_pass("team", team=dict(team),
+    record_routes._make_pass("team", team=dict(team),
                    prefs={"startOffsetMinutes": "1", "endOffsetMinutes": "30"})
-    web._make_pass("smart", name="Sunday football",
+    record_routes._make_pass("smart", name="Sunday football",
                    smart={"op": "all", "nodes": [
                        {"field": "genre", "cmp": "is", "value": "Football"},
                        {"field": "hd", "cmp": "yes"}]},

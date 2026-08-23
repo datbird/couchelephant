@@ -50,7 +50,7 @@ def _future(extra="", args=(), horizon_days=30, limit=None):
     return db.query(sql, (cutoff, until, *args))
 
 
-def candidate_airings(team_id, horizon_days=30):
+def candidate_airings(team_id: int, horizon_days: int = 30) -> list:
     """Future airings of games featuring this team, newest guide data only."""
     if not team_id:
         return []
@@ -59,7 +59,7 @@ def candidate_airings(team_id, horizon_days=30):
                    (int(team_id),), horizon_days)
 
 
-def series_airings(series_guid, horizon_days=30):
+def series_airings(series_guid: str, horizon_days: int = 30) -> list:
     """Future airings of one programme, wherever it turns up.
 
     Matched on the show rather than the episode, so a rule follows the series
@@ -71,7 +71,7 @@ def series_airings(series_guid, horizon_days=30):
                    (series_guid, series_guid), horizon_days)
 
 
-def smart_airings(tree, horizon_days=30):
+def smart_airings(tree: dict, horizon_days: int = 30) -> list:
     """Future airings matching a smart filter.
 
     Compiled to SQL and asked of the database, rather than pulled into Python
@@ -82,7 +82,7 @@ def smart_airings(tree, horizon_days=30):
     return _future(f"({frag})", args, horizon_days)
 
 
-def any_airing(horizon_days=30):
+def any_airing(horizon_days: int = 30) -> list:
     """One usable broadcast, whichever. A stand-in when nothing is chosen yet.
 
     Plex's recording settings belong to Plex, not to the programme: every
@@ -93,7 +93,7 @@ def any_airing(horizon_days=30):
     return _future("COALESCE(a.drm, 0) = 0", (), horizon_days, limit=1)
 
 
-def rule_airings(rule, horizon_days=30):
+def rule_airings(rule, horizon_days: int = 30) -> list:
     """Everything a rule could record, before the source limit is applied."""
     if rule["kind"] == "team" and not rule["team_id"]:
         # Followed from the catalogue before the team had ever played. An
@@ -107,12 +107,12 @@ def rule_airings(rule, horizon_days=30):
     return candidate_airings(rule["team_id"], horizon_days)
 
 
-def allowed_sources(rule):
+def allowed_sources(rule) -> tuple[list[str], list[str]]:
     """The networks and channels a rule accepts. Empty means anywhere."""
     return (db.unjs(rule["networks"]) or [], db.unjs(rule["channels"]) or [])
 
 
-def in_sources(row, networks, channels):
+def in_sources(row, networks: list[str], channels: list[str]) -> bool:
     """True when this broadcast comes from somewhere the rule accepts.
 
     The two lists are one allowlist, not two filters that both have to pass.
@@ -127,7 +127,7 @@ def in_sources(row, networks, channels):
     return bool(net and net in networks)
 
 
-def choose_airing(airings):
+def choose_airing(airings: list) -> tuple[dict | None, str]:
     """Pick one broadcast of a game, and say why. Returns (row, reason)."""
     usable = [a for a in airings if not a["drm"]]
     if not usable:
@@ -143,14 +143,14 @@ def choose_airing(airings):
                   f"{len(usable)}")
 
 
-def group_by_game(rows):
+def group_by_game(rows: list) -> dict[str, list]:
     games = {}
     for r in rows:
         games.setdefault(r["program_guid"], []).append(r)
     return games
 
 
-def already_handled(program_guid):
+def already_handled(program_guid: str) -> str | None:
     """Why this game needs no booking, or None.
 
     Matching Plex's grabs by title alone treated any programme that keeps its
@@ -190,7 +190,7 @@ def _log(pass_id, row, action, reason, dry_run, subscription=None):
         )
 
 
-def templates(plex, row):
+def templates(plex: Plex, row) -> list[dict]:
     """Every recording option Plex offers for this programme, in its order."""
     out = []
     for t in plex.template(row["rating_key"]):
@@ -198,7 +198,7 @@ def templates(plex, row):
     return out
 
 
-def single_template(options):
+def single_template(options: list[dict]) -> dict | None:
     """The one-shot option. Plex titles it "This Event" or "This Episode"."""
     for s in options:
         if (s.get("title") or "").lower().startswith("this "):
@@ -257,7 +257,8 @@ def _schedule(plex, row, target_section, source="pass", template=None, prefs=Non
     return chosen.get("targetLibrarySectionID")
 
 
-def remember(row, source, subscription=None, pass_id=None):
+def remember(row, source: str, subscription: str | None = None,
+             pass_id: int | None = None) -> None:
     """Record that this airing was scheduled by us, and by what.
 
     The pass is recorded by uid as well as by id, because `id` is an
@@ -279,13 +280,13 @@ def remember(row, source, subscription=None, pass_id=None):
              row["begins_at"], source, subscription, pass_id, pass_id, _now()))
 
 
-def forget(airing_id):
+def forget(airing_id) -> None:
     """Drop our record of an airing, after the recording has been cancelled."""
     with db.tx() as c:
         c.execute("DELETE FROM our_grabs WHERE airing_id = ?", (airing_id,))
 
 
-def rule_label(rule):
+def rule_label(rule) -> str:
     keys = rule.keys()
     if rule["kind"] == "smart":
         named = rule["label"] if "label" in keys else None
@@ -295,7 +296,7 @@ def rule_label(rule):
     return rule["team_name"] or rule["series_title"] or "rule"
 
 
-def run_passes(force_dry_run=None):
+def run_passes(force_dry_run: bool | None = None) -> list[dict]:
     """Evaluate every enabled pass. Returns a list of decision dicts."""
     dry = db.get_setting("dry_run") == "1" if force_dry_run is None else force_dry_run
     results = []

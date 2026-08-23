@@ -32,6 +32,7 @@ def _free_port():
 def base_url(plex_url):
     """A real server, in this process, on a port nothing else is using."""
     import uvicorn
+
     from app.web import app
 
     # The periodic sync would fire underneath a test and rewrite the guide.

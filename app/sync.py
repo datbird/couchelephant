@@ -4,8 +4,7 @@ import time
 import traceback
 
 from . import db, teamcat
-from .plex import Plex, discover, PlexError
-
+from .plex import Plex, discover
 
 LOGO_DIR = os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
 
@@ -113,7 +112,7 @@ def _upsert_airings(c, m, now):
         )
 
 
-def sync_guide(plex, provider, shows, sports, movies=None):
+def sync_guide(plex: Plex, provider: str, shows, sports, movies=None) -> dict[str, int]:
     """Pull every section. Each has its own item type: shows and sports are
     episodes (type 4), movies are type 1. Query a section with the wrong type
     and it returns nothing, which is how 16 channels came to look empty."""
@@ -139,7 +138,7 @@ LOGO_MAX_AGE = 30 * 86400   # re-check a logo roughly monthly
 LOGO_MAX_TRIES = 5          # give up on a persistently broken URL, but retry after MAX_AGE
 
 
-def cache_logos(force=False):
+def cache_logos(force: bool = False) -> tuple[int, int, int]:
     """Keep a local logo for every channel, and keep it correct.
 
     Runs on every sync, not once. A channel is re-fetched when any of these
@@ -177,7 +176,7 @@ def cache_logos(force=False):
 
     fetched = failed = 0
     with httpx.Client(timeout=30.0, follow_redirects=True) as c:
-        for r, reason in todo:
+        for r, _reason in todo:
             safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in r["vcn"])
             path = os.path.join(LOGO_DIR, f"{safe}.png")
             try:
@@ -204,7 +203,7 @@ def cache_logos(force=False):
     return fetched, failed, len(todo)
 
 
-def logo_coverage():
+def logo_coverage() -> dict[str, int]:
     total = db.one("SELECT COUNT(*) n FROM channels")["n"]
     have = db.one("SELECT COUNT(*) n FROM channels "
                   "WHERE logo_path IS NOT NULL AND logo_path != ''")["n"]
@@ -213,7 +212,7 @@ def logo_coverage():
     return {"channels": total, "with_logo": have, "no_logo_upstream": none_offered}
 
 
-def enrich_sports(plex, provider):
+def enrich_sports(plex: Plex, provider: str) -> int:
     """Fill in per-programme team tags for sports.
 
     A bulk section listing does not carry the Team array, so each sports
@@ -244,7 +243,7 @@ def enrich_sports(plex, provider):
     return done
 
 
-def sync_teams(plex, provider, sports):
+def sync_teams(plex: Plex, provider: str, sports) -> int:
     """Mirror the teams Plex currently knows, and remember the ones it forgets.
 
     Plex lists only the teams playing inside the guide window, about eleven
@@ -279,7 +278,7 @@ def sync_teams(plex, provider, sports):
     return len(rows)
 
 
-def resolve_team_passes():
+def resolve_team_passes() -> int:
     """Give an id to a pass that was made for a team Plex had not heard of.
 
     A team can be followed from the catalogue before it plays. Such a pass has
@@ -306,7 +305,7 @@ def resolve_team_passes():
     return done
 
 
-def network_of(title):
+def network_of(title: str | None) -> str | None:
     """The network a channel carries.
 
     The guide names a channel `"41.1 KQGGDT (NBC)"`, and that trailing
@@ -323,7 +322,7 @@ def network_of(title):
     return name or None
 
 
-def sync_channels(plex, dvr_key=None):
+def sync_channels(plex: Plex, dvr_key=None) -> int:
     """Kept for the DVR's channel identifiers. Names and logos come from the
     guide, which carries better data than the tuner's channel mapping."""
     now = _now()
@@ -347,7 +346,7 @@ def sync_channels(plex, dvr_key=None):
 KEEP_HISTORY_DAYS = 60
 
 
-def prune_history(days=KEEP_HISTORY_DAYS):
+def prune_history(days: int = KEEP_HISTORY_DAYS) -> None:
     """Drop pass bookkeeping for broadcasts long past.
 
     our_grabs and pass_actions grow by one row per booking and were never
@@ -360,7 +359,7 @@ def prune_history(days=KEEP_HISTORY_DAYS):
         c.execute("DELETE FROM pass_actions WHERE begins_at < ?", (cutoff,))
 
 
-def sync_recordings(plex):
+def sync_recordings(plex: Plex) -> int:
     """Mirror Plex's subscriptions and scheduled grabs.
 
     Subscriptions include the recurring kind ("All new episodes of X", team
@@ -443,7 +442,7 @@ def sync_recordings(plex):
     return len(subs)
 
 
-def full_sync():
+def full_sync() -> tuple[int, str]:
     """One pass over everything. Returns a short human-readable summary."""
     started = _now()
     detail = ""
@@ -473,7 +472,7 @@ def _sync_everything(plex):
     db.set_setting("sports_section", sports or "")
     db.set_setting("movies_section", movies or "")
 
-    chans = sync_channels(plex)
+    sync_channels(plex)
     teams = sync_teams(plex, provider, sports)
     # A pass made for a team that had not played yet starts working here,
     # the moment the guide first carries it.

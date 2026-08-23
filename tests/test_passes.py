@@ -177,6 +177,7 @@ def test_a_user_cannot_unpin_a_pass_booking(plex, synced):
 def test_a_discarded_create_is_reported_as_a_failure(plex, synced):
     """Reporting a recording Plex did not keep is worse than failing."""
     import pytest
+
     from app.plex import PlexError
     rows = passes.candidate_airings(236)
     pick, _ = passes.choose_airing(rows)

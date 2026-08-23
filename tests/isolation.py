@@ -59,5 +59,5 @@ if __name__ == "__main__":
         assert_isolated()
     except NotIsolated as e:
         print(f"NOT ISOLATED: {e}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from e
     print("isolated")

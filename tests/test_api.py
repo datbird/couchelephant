@@ -1,6 +1,4 @@
 """Every endpoint, driven in-process. No port, no network, no real Plex."""
-import json
-import time
 
 from app import auth, db, passes, sync
 from tests import fake_plex
@@ -740,7 +738,6 @@ def test_old_pass_history_is_pruned(client, synced):
 
 def test_a_signed_in_viewer_cannot_change_settings(client, synced):
     """Cloudflare lets the household in; only the first account administers."""
-    from app import auth
     db.set_setting("auth_mode", "local")
     admin = auth.create_user("owner", "a-good-password")
     viewer = auth.create_user("kid", "a-good-password", role="user")

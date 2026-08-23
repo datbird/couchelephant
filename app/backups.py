@@ -15,10 +15,8 @@ The database files are copied with SQLite's own online backup, so a snapshot
 taken mid-write is consistent rather than a torn page.
 """
 import io
-import json
 import os
 import re
-import shutil
 import sqlite3
 import time
 import zipfile
@@ -46,7 +44,7 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
 """
 
 
-def init():
+def init() -> None:
     con = db.connect()
     con.executescript(SCHEMA)
     con.commit()
@@ -57,7 +55,7 @@ def _slug(name):
     return s or "backup"
 
 
-def jobs():
+def jobs() -> list[dict]:
     init()
     return [_public(r) for r in db.query("SELECT * FROM backup_jobs ORDER BY id")]
 
@@ -72,7 +70,7 @@ def _public(row):
     return d
 
 
-def save_job(job_id=None, **f):
+def save_job(job_id: int | None = None, **f) -> int:
     init()
     fields = {
         "name": (f.get("name") or "Backup").strip(),
@@ -104,7 +102,7 @@ def save_job(job_id=None, **f):
         return c.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
-def delete_job(job_id):
+def delete_job(job_id: int) -> None:
     init()
     with db.tx() as c:
         c.execute("DELETE FROM backup_jobs WHERE id = ?", (job_id,))
@@ -138,7 +136,8 @@ def _consistent_copy(path):
     return buf.getvalue()
 
 
-def build(raw_db=True, with_secrets=False, version="", note=""):
+def build(raw_db: bool = True, with_secrets: bool = False, version: str = "",
+          note: str = "") -> bytes:
     """One archive, in memory. Returns bytes."""
     blob = portable.export_bytes(include_secrets=with_secrets,
                                  version=version, note=note)
@@ -166,14 +165,14 @@ def _write(path, data, passphrase):
         import pyzipper
     except ImportError:
         raise RuntimeError("Encryption needs the pyzipper package, which is not "
-                           "in this image. Clear the passphrase to keep plain zips.")
+                           "in this image. Clear the passphrase to keep plain zips.") from None
     with pyzipper.AESZipFile(path, "w", compression=pyzipper.ZIP_DEFLATED,
                              encryption=pyzipper.WZ_AES) as z:
         z.setpassword(passphrase.encode())
         z.writestr("couchelephant-backup.zip", data)
 
 
-def run_job(job_id, version=""):
+def run_job(job_id: int, version: str = "") -> dict:
     """Run one job now. Records the outcome on the job either way."""
     init()
     row = db.one("SELECT * FROM backup_jobs WHERE id = ?", (job_id,))
@@ -226,7 +225,7 @@ def _prune(dest, slug, keep):
     return len(extra)
 
 
-def archives(dest):
+def archives(dest: str) -> list[dict]:
     """Every CouchElephant archive in a folder, newest first."""
     if not dest or not os.path.isdir(dest):
         return []
@@ -244,7 +243,7 @@ def archives(dest):
     return out
 
 
-def read_archive(dest, name, passphrase=""):
+def read_archive(dest: str, name: str, passphrase: str = "") -> bytes:
     """The export inside an archive, unwrapped and decrypted if need be."""
     if "/" in name or "\\" in name or not name.endswith(".zip"):
         raise ValueError("that is not an archive name")
@@ -260,7 +259,8 @@ def read_archive(dest, name, passphrase=""):
         return z.read(inner)
 
 
-def restore(dest, name, passphrase="", replace=True, version=""):
+def restore(dest: str, name: str, passphrase: str = "", replace: bool = True,
+            version: str = "") -> dict:
     """Put an archive back, after taking a safety copy of what is here now."""
     data = read_archive(dest, name, passphrase)
     safety = None

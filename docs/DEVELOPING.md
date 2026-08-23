@@ -43,7 +43,7 @@ and what to do, in plain words. `PlexError: 400` is not a message.
 discard what it just made. Read it back.
 
 **One source for a colour.** Every colour comes from the token block at the top
-of `base.html`. If you are typing a hex value anywhere else, you are making the
+of `static/css/app.css`. If you are typing a hex value anywhere else, you are making the
 next theme harder.
 
 **Two colours mean two things.** Amber is CouchElephant, blue-grey is Plex,
@@ -71,13 +71,21 @@ body does. A careless replace over the whole file puts your script in the
 
 ## The scripts are versioned, and they have to be
 
-`base.html` asks for each script as `/static/js/ce.js?v={{ asset_v }}`, where
+`base.html` asks for the stylesheet and each script as
+`/static/js/ce.js?v={{ asset_v }}`, where
 `asset_v` is the version plus the newest modification time under `app/`. Drop
 the query and a deploy stops reaching the browser: the server has the new file,
 the browser keeps yesterday's, and a fix you have shipped and tested looks like
 it was never made. That is a real afternoon, spent.
 
-`test_conventions.py` fails if a script is asked for without one.
+`test_conventions.py` fails if a script or the stylesheet is asked for without one.
+
+## Lint
+
+`ruff check app tests scripts` runs first in `scripts/test.sh` and fails the
+run. The rules are in `ruff.toml`: pyflakes, pycodestyle, bugbear, pyupgrade
+and import order. Public functions in the core modules carry type hints; the
+routes do not, because FastAPI reads their signatures as request parsing.
 
 ## Known platform assumptions
 
@@ -195,6 +203,7 @@ day and nobody could remake them, which is the whole argument for this.
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 playwright install chromium
+ruff check app tests scripts    # lint
 pytest --ignore=tests/ui        # unit and API
 pytest tests/ui                 # browser
 ```

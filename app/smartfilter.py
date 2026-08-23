@@ -97,7 +97,7 @@ WEEKDAYS = [(0, "Sunday"), (1, "Monday"), (2, "Tuesday"), (3, "Wednesday"),
 
 # ---------------------------------------------------------------- compiling
 
-def like(v):
+def like(v) -> str:
     """A value made safe inside a LIKE pattern. Pair with ESCAPE '\\'.
 
     Without this a title containing % or _ is a wildcard, and "100% Hotter"
@@ -138,7 +138,7 @@ def _number(sql, cmp_, value):
     try:
         n = float(value)
     except (TypeError, ValueError):
-        raise FilterError(f"{value!r} is not a number")
+        raise FilterError(f"{value!r} is not a number") from None
     ops = {"is": "=", "!is": "=", "gt": ">", "lt": "<"}
     if cmp_ not in ops:
         raise FilterError(f"{cmp_} is not something a number can be asked")
@@ -150,7 +150,7 @@ def _date(sql, cmp_, value):
     try:
         datetime.date.fromisoformat(v)
     except ValueError:
-        raise FilterError(f"{v!r} is not a date. Use YYYY-MM-DD.")
+        raise FilterError(f"{v!r} is not a date. Use YYYY-MM-DD.") from None
     return f"{sql} {'>' if cmp_ == 'after' else '<'} ?", [v], False
 
 
@@ -215,7 +215,7 @@ def _compile(node, depth, counter):
     return (f"NOT {joined}" if op == "none" else joined), args
 
 
-def build(tree):
+def build(tree: dict) -> tuple[str, list]:
     """Compile a tree to (sql_fragment, args). Raises FilterError on nonsense."""
     if not isinstance(tree, dict):
         raise FilterError("a filter is a group of conditions")
@@ -224,7 +224,7 @@ def build(tree):
 
 # ---------------------------------------------------------------- describing
 
-def describe(tree):
+def describe(tree: dict) -> str:
     """The tree as a sentence, for the pass list and the schedule reason."""
     try:
         return _describe(tree, top=True)
@@ -248,7 +248,7 @@ def _describe(node, top=False):
     return inner if top else f"({inner})"
 
 
-def count_nodes(tree):
+def count_nodes(tree: dict) -> int:
     if not isinstance(tree, dict):
         return 0
     if "op" not in tree:
@@ -264,7 +264,7 @@ def count_nodes(tree):
 _BROAD_ONLY = {"channel", "network", "hd", "live", "weekday", "hour"}
 
 
-def is_loose(tree):
+def is_loose(tree: dict) -> bool:
     """Whether this filter is likely to book a great deal.
 
     Judged on the shape rather than the count, so the panel can warn before it

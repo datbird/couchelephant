@@ -55,7 +55,7 @@ class Plex:
                                                "X-Plex-Token": self.token})
         return self._http
 
-    def close(self):
+    def close(self) -> None:
         if self._http is not None:
             self._http.close()
             self._http = None
@@ -74,29 +74,29 @@ class Plex:
         try:
             return r.json().get("MediaContainer", {})
         except Exception:
-            raise PlexError(f"GET {path} returned non-JSON: {r.text[:200]}")
+            raise PlexError(f"GET {path} returned non-JSON: {r.text[:200]}") from None
 
     # ---------- identity ----------
 
-    def server_info(self):
+    def server_info(self) -> dict:
         return self._get("/")
 
     # ---------- DVR ----------
 
-    def dvrs(self):
+    def dvrs(self) -> list[dict]:
         return self._get("/livetv/dvrs").get("Dvr", []) or []
 
-    def grabber_devices(self):
+    def grabber_devices(self) -> list[dict]:
         return self._get("/media/grabbers/devices").get("Device", []) or []
 
-    def epg_sections(self, provider):
+    def epg_sections(self, provider: str) -> list[dict]:
         return self._get(f"/{provider}/sections").get("Directory", []) or []
 
-    def section_all(self, provider, section, **filters):
+    def section_all(self, provider: str, section: str, **filters) -> list[dict]:
         """Everything in an EPG section. `type=4` means airings (episodes)."""
         return self._get(f"/{provider}/sections/{section}/all", filters).get("Metadata", []) or []
 
-    def metadata(self, provider, rating_key):
+    def metadata(self, provider: str, rating_key: str) -> dict | None:
         """Full metadata for one programme.
 
         The Team array only exists here. A bulk `/sections/N/all` listing
@@ -106,23 +106,23 @@ class Plex:
         items = self._get(f"/{provider}/metadata/{rating_key}").get("Metadata", []) or []
         return items[0] if items else None
 
-    def teams(self, provider, section):
+    def teams(self, provider: str, section: str) -> list[dict]:
         """Every team the guide knows about, with the ids used by `?team=<id>`."""
         return self._get(f"/{provider}/sections/{section}/team").get("Directory", []) or []
 
     # ---------- recordings ----------
 
-    def subscriptions(self):
+    def subscriptions(self) -> list[dict]:
         return self._get("/media/subscriptions").get("MediaSubscription", []) or []
 
-    def subscription(self, key):
+    def subscription(self, key: str) -> dict | None:
         subs = self._get(f"/media/subscriptions/{key}").get("MediaSubscription", []) or []
         return subs[0] if subs else None
 
-    def scheduled(self):
+    def scheduled(self) -> list[dict]:
         return self._get("/media/subscriptions/scheduled").get("MediaGrabOperation", []) or []
 
-    def template(self, guid):
+    def template(self, guid: str) -> list[dict]:
         """Recording options for a programme, including the parameters blob.
 
         Callers hold the guid in either form: some rows keep it already
@@ -162,7 +162,7 @@ class Plex:
         except Exception:
             return None
 
-    def subscription_exists(self, key):
+    def subscription_exists(self, key: str) -> bool | None:
         """Whether Plex still holds this subscription: True, False, or None.
 
         Plex will answer a create with 200 and a key, then drop the
@@ -184,7 +184,8 @@ class Plex:
             return None
         return r.status_code < 400
 
-    def find_subscription(self, guid, begins_at, tries=1, wait=0.7):
+    def find_subscription(self, guid: str, begins_at: int, tries: int = 1,
+                          wait: float = 0.7) -> str | None:
         """The subscription key Plex just minted for this broadcast.
 
         Plex answers a create with the subscription body but no key we can rely
@@ -218,7 +219,7 @@ class Plex:
                     return str(key) if key is not None else None
         return None
 
-    def delete_subscription(self, key):
+    def delete_subscription(self, key: str) -> bool:
         r = self._client().delete(f"{self.base}/media/subscriptions/{key}")
         if r.status_code >= 400:
             raise PlexError(f"delete subscription {key} -> HTTP {r.status_code}",
@@ -226,7 +227,7 @@ class Plex:
         return True
 
 
-def discover(plex: Plex):
+def discover(plex: Plex) -> tuple[str, str | None, str | None, str | None]:
     """Work out the EPG provider id and which sections hold Shows and Sports.
 
     These are per-DVR and per-server, so they are discovered rather than

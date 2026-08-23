@@ -18,9 +18,11 @@ def _follow_the_chiefs(page):
     you the wrong thing when it breaks. The panel's own version of this is
     tested once, in test_record.py.
     """
-    from app import db, passes, plex as plexmod, sync, web
+    from app import db, passes, sync
+    from app import plex as plexmod
+    from app.routes import record as record_routes
     team = db.one("SELECT * FROM teams WHERE name LIKE 'Kansas City%'")
-    web._make_pass("team", team=dict(team))
+    record_routes._make_pass("team", team=dict(team))
     passes.run_passes()
     # The schedule is what Plex reports back, not what we asked for. Without
     # this the page is honestly empty, which is the behaviour, not a bug.

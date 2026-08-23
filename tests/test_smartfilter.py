@@ -1,8 +1,7 @@
 """The smart filter: what it compiles to, and what it refuses."""
 import pytest
 
-from app import db, passes, smartfilter
-from tests import fake_plex
+from app import passes, smartfilter
 
 
 def _ids(tree):
