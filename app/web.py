@@ -20,6 +20,31 @@ BASE = os.path.dirname(__file__)
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
 VERSION = "0.90"
 
+# What the browser should call this build of the scripts and the stylesheet.
+# The version alone is not enough: it does not change between deploys, so a
+# fix would sit on the server while the browser served yesterday's copy from
+# cache. That happened, and the fix looked like it had not been made.
+def _asset_version():
+    here = os.path.dirname(os.path.abspath(__file__))
+    newest = 0
+    for root, _dirs, files in os.walk(os.path.join(here, "static")):
+        for f in files:
+            try:
+                newest = max(newest, int(os.path.getmtime(os.path.join(root, f))))
+            except OSError:
+                pass
+    # The templates carry the markup and the CSS, so they count too.
+    for f in ("templates/base.html", "templates/recordings.html",
+              "templates/guide.html", "templates/_settings.html"):
+        try:
+            newest = max(newest, int(os.path.getmtime(os.path.join(here, f))))
+        except OSError:
+            pass
+    return f"{VERSION}-{newest}"
+
+
+ASSET_V = _asset_version()
+
 # Walking the tzdata directory on every settings render costs more than the
 # list is worth. It cannot change while the process runs.
 ZONES = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
@@ -113,6 +138,7 @@ def page(request, name, **ctx):
     ctx.setdefault("last_sync", db.one("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1"))
     ctx.setdefault("now", int(time.time()))
     ctx.setdefault("version", VERSION)
+    ctx.setdefault("asset_v", ASSET_V)
     ctx["request"] = request
     return templates.TemplateResponse(name, ctx)
 

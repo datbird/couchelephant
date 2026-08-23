@@ -80,3 +80,11 @@ def test_every_migration_is_listed_rather_than_only_in_the_schema():
     for column in re.findall(r"ALTER TABLE (\w+) ADD COLUMN (\w+)", migrations):
         assert column[1] in schema, \
             f"{column[0]}.{column[1]} is migrated in but missing from the schema"
+
+
+def test_every_script_is_asked_for_by_build():
+    """A deploy has to reach the browser. Unversioned, the scripts were served
+    from cache and a shipped fix looked like it had never been made."""
+    base = (TEMPLATES / "base.html").read_text()
+    for m in re.finditer(r'<script src="(/static/[^"]+)"', base):
+        assert "?v=" in m.group(1), f"{m.group(1)} is not versioned"

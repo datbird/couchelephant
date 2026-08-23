@@ -997,9 +997,12 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
   .profile{width:38px;height:38px;flex:0 0 38px}
 }
 </style>
-<script src="/static/js/ce.js"></script>
-<script src="/static/js/sources.js"></script>
-<script src="/static/js/smartfilter.js"></script>
+{# Versioned, or a deploy never reaches the browser. The scripts carry the
+   whole UI, so a cached copy means shipping a fix nobody can see. That is
+   exactly what happened to the setting tooltips. #}
+<script src="/static/js/ce.js?v={{ asset_v }}"></script>
+<script src="/static/js/sources.js?v={{ asset_v }}"></script>
+<script src="/static/js/smartfilter.js?v={{ asset_v }}"></script>
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
 <div class="topbar">

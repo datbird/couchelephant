@@ -15,7 +15,8 @@
   a plain integer with no allowed-values list, so any number you type works.
 - Every Plex setting now shows Plex's own explanation of it, as a tooltip on a
   small mark beside the label. Inline it ran to twenty lines: "Detect
-  commercials" alone pushed one row past six hundred pixels.
+  commercials" alone pushed one row past six hundred pixels. The options stay
+  two columns of single rows.
 - The option row and the setting renderer existed twice and had drifted. They
   are one component now, in `static/js/ce.js`, with a test that keeps it that
   way.
@@ -67,6 +68,8 @@
 
 ### Fixed
 
+- Scripts are asked for by build version. Without that a deploy never reached
+  the browser, so a shipped fix could sit on the server unseen.
 - The Schedule legend named a colour per side, and the rows it described had
   no marker on them.
 - Two colours in the verdict chip were written as hex instead of coming from

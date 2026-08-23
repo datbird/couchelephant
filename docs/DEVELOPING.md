@@ -69,6 +69,16 @@ A Jinja template's `{% block title %}` ends with the same `{% endblock %}` the
 body does. A careless replace over the whole file puts your script in the
 `<title>`, where it never runs and takes an hour to notice.
 
+## The scripts are versioned, and they have to be
+
+`base.html` asks for each script as `/static/js/ce.js?v={{ asset_v }}`, where
+`asset_v` is the version plus the newest modification time under `app/`. Drop
+the query and a deploy stops reaching the browser: the server has the new file,
+the browser keeps yesterday's, and a fix you have shipped and tested looks like
+it was never made. That is a real afternoon, spent.
+
+`test_conventions.py` fails if a script is asked for without one.
+
 ## Known platform assumptions
 
 `fmt()` uses `%-I` in its strftime pattern, a glibc extension for an unpadded

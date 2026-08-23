@@ -377,3 +377,16 @@ def test_the_record_panel_and_the_pass_panel_look_the_same(page):
     heights = page.eval_on_selector_all(
         ".optgrid .optrow:not(.wide)", "els => els.map(e => e.offsetHeight)")
     assert max(heights) <= 64
+
+
+def test_the_options_stay_two_columns_of_single_rows(add):
+    """The complaint that produced this test: the explanations turned a tidy
+    two-column grid into one long scroll."""
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="comskipMethod"]', timeout=20000)
+    cols = add.eval_on_selector(
+        ".optgrid", "e => getComputedStyle(e).gridTemplateColumns.split(' ').length")
+    assert cols == 2
+    heights = add.eval_on_selector_all(
+        ".optgrid .optrow", "els => els.map(e => e.offsetHeight)")
+    assert len(set(heights)) == 1, f"rows are ragged: {sorted(set(heights))}"
