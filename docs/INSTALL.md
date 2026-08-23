@@ -30,6 +30,10 @@ Search for **CouchElephant** in **Apps**. The template sets the port to 8710
 and the appdata path to `/mnt/user/appdata/couchelephant`, which is all it
 needs. Everything else is configured in the app itself.
 
+The template lives in
+[datbird/unraid-templates](https://github.com/datbird/unraid-templates), which
+is what Community Applications reads.
+
 ### From source
 
 Clone the repository and run `docker build -t couchelephant .`, then use

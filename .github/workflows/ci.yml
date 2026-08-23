@@ -23,7 +23,7 @@ jobs:
       # shared memory and dies halfway through.
       options: --ipc=host
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install
         run: pip install --no-cache-dir --break-system-packages -r requirements.txt -r requirements-dev.txt
