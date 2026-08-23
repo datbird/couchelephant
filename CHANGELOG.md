@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 - 2026-08-23
+## 1.0.1 - 2026-08-23
 
 The first public release. Published as `ghcr.io/datbird/couchelephant` for
 linux/amd64 and linux/arm64, and listed in Unraid Community Applications.

@@ -15,7 +15,7 @@ It sits beside Plex. It does not replace it, proxy it, or ask you to watch
 anything anywhere else. Recordings land in your Plex library exactly as they
 always did.
 
-Version 1.0.0.
+Version 1.0.1.
 
 ---
 
