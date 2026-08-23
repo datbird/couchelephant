@@ -177,7 +177,7 @@ def cache_logos(force: bool = False) -> tuple[int, int, int]:
     fetched = failed = 0
     with httpx.Client(timeout=30.0, follow_redirects=True) as c:
         for r, _reason in todo:
-            safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in r["vcn"])
+            safe = "".join(ch if (ch.isalnum() and ch.isascii()) or ch in "._-" else "_" for ch in r["vcn"])
             path = os.path.join(LOGO_DIR, f"{safe}.png")
             try:
                 resp = c.get(r["thumb_url"])

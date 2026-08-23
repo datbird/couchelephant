@@ -149,7 +149,10 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
   function drawMonth() {
     var first = new Date(cur.getFullYear(), cur.getMonth(), 1);
-    var start = new Date(first); start.setDate(1 - first.getDay());
+    // Back up to the start of the viewer's week, which is not always Sunday.
+    var ws = CE.weekStart();
+    var start = new Date(first);
+    start.setDate(1 - ((first.getDay() - ws + 7) % 7));
     var end = new Date(start); end.setDate(start.getDate() + 42);
     label.textContent = first.toLocaleDateString(undefined, {month: 'long', year: 'numeric'});
     grid.innerHTML = '<div class="agend" style="grid-column:1/-1">Loading...</div>';
@@ -164,7 +167,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
           (byDay[k] = byDay[k] || []).push(r);
         });
         var h = '';
-        ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(function (n) {
+        CE.dayNames('short').forEach(function (n) {
           h += '<div class="caldow">' + n + '</div>';
         });
         var today = new Date().toDateString();

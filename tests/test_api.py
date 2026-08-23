@@ -1,4 +1,5 @@
 """Every endpoint, driven in-process. No port, no network, no real Plex."""
+import time
 
 from app import auth, db, passes, sync
 from tests import fake_plex
@@ -748,3 +749,64 @@ def test_a_signed_in_viewer_cannot_change_settings(client, synced):
         r = client.post("/api/backingstore/config", data={"backend": ""})
         assert r.status_code == code, (uid, r.status_code)
         assert client.get("/api/export").status_code == code
+
+
+# ---- a Plex server that is not in English ----
+
+def test_a_german_plex_still_books_the_single_broadcast(client, synced, monkeypatch):
+    """Plex localizes its template titles. The app used to find the one-shot by
+    the English word "This", so on a German server it picked a series rule and
+    recorded everything. It reads Plex's own type now."""
+    monkeypatch.setenv("COUCHELEPHANT_FAKE_LANG", "de")
+    aid = db.one("SELECT id FROM airings WHERE program_guid = ?",
+                 (fake_plex.GAME_GUID,))["id"]
+    d = client.get("/api/record/options", params={"airing_id": aid}).json()
+    assert d["ok"], d
+    one = [t for t in d["templates"] if t["one_shot"]]
+    assert len(one) == 1, [t["title"] for t in d["templates"]]
+    assert one[0]["title"] == "Diese Sendung", "the title is Plex's, untranslated"
+
+    r = client.post("/api/record", data={"airing_id": aid,
+                                         "template": one[0]["index"],
+                                         "settings": "{}"}).json()
+    assert r["ok"], r
+    sub = list(fake_plex.STATE.subscriptions.values())[0]
+    assert sub["type"] == 4, "a single broadcast, not a series rule"
+
+
+def test_a_german_plex_still_makes_a_team_rule(client, synced, monkeypatch):
+    monkeypatch.setenv("COUCHELEPHANT_FAKE_LANG", "de")
+    opts = client.get("/api/rules/options",
+                      params={"kind": "team", "team_id": "236"}).json()
+    assert opts["ok"], opts
+    assert not opts["templates"][0]["one_shot"], "a pass never books one game"
+    r = client.post("/api/rules", data={
+        "kind": "team", "team_id": "236", "networks": "[]", "channels": "[]",
+        "template": opts["templates"][0]["index"], "settings": "{}"}).json()
+    assert r["ok"], r
+    titles = [s["title"] for s in fake_plex.STATE.subscriptions.values()]
+    assert titles == ["Alle Kansas City Chiefs-Sendungen"], titles
+
+
+def test_a_team_template_is_type_15_and_still_recurs(client, synced):
+    """A real server answers 15 for a team subscription, not 2. Only 4 means
+    one broadcast, so anything else has to be treated as a rule."""
+    opts = client.get("/api/rules/options",
+                      params={"kind": "team", "team_id": "236"}).json()
+    assert opts["ok"]
+    assert all(not t["one_shot"] for t in opts["templates"])
+    assert 15 in [t["type"] for t in opts["templates"]]
+
+def test_search_finds_an_accented_title_whatever_the_case(client, synced):
+    """SQLite's own case folding stops at Z. A guide is full of names it
+    cannot fold: Muller with an umlaut, Astor with an accent."""
+    now = int(time.time())
+    with db.tx() as c:
+        c.execute("INSERT INTO programs (guid, title, section) VALUES (?,?,?)",
+                  ("plex://episode/accent", "M\u00dcLLER \u00dcnterwegs", "1"))
+        c.execute("INSERT INTO airings (id, program_guid, channel_vcn, begins_at, "
+                  "ends_at, premiere, drm) VALUES (?,?,?,?,?,0,0)",
+                  ("a-accent", "plex://episode/accent", "2.1", now + 3600, now + 7200))
+    for q in ("m\u00fcller", "M\u00dcLLER", "M\u00fcller", "\u00fcnterwegs"):
+        html = client.get("/partial/airings", params={"q": q}).text
+        assert "\u00dcLLER" in html, f"{q!r} found nothing"

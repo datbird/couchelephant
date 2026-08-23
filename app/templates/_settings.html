@@ -108,7 +108,7 @@
         <div class="setblock" data-find="last sync result">
           <h3>Last sync</h3>
           <table class="stack">
-            <tr><td class="dim">Finished</td><td>{{ last_sync.ended_at|fmt }}</td></tr>
+            <tr><td class="dim">Finished</td><td><time data-ts="{{ last_sync.ended_at }}" data-fmt="when">{{ last_sync.ended_at|fmt }}</time></td></tr>
             <tr><td class="dim">Result</td><td>
               {% if last_sync.ok %}<span class="pill ok">ok</span>
               {% else %}<span class="pill bad">failed</span>{% endif %}</td></tr>

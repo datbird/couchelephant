@@ -270,6 +270,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._container(Metadata=[item])
 
         if p == "/media/subscriptions/template":
+            # A Plex server in another language localizes these titles. The
+            # app must not care, so the suite can ask for German ones.
+            de = os.environ.get("COUCHELEPHANT_FAKE_LANG") == "de"
+
             guid = (q.get("guid") or [""])[0]
             # The trap: a guid that was already percent-encoded and then
             # encoded again by the client. The real server answers 400.
@@ -286,25 +290,30 @@ class Handler(BaseHTTPRequestHandler):
                 # Chiefs" into "record every NFL game".
                 league = next((m.get("grandparentTitle") for src in (SPORTS_ITEMS,)
                                for m in src if m["guid"] == guid), "Sport")
-                subs = [{"title": "This Event", "type": 4, "targetLibrarySectionID": 2,
+                subs = [{"title": "Diese Sendung" if de else "This Event",
+                         "type": 4, "targetLibrarySectionID": 2,
                          "parameters": f"hints%5Bguid%5D={g}", "Setting": _settings()},
-                        {"title": f"All {league} Events", "type": 2,
+                        {"title": (f"Alle {league}-Sendungen" if de
+                                   else f"All {league} Events"), "type": 2,
                          "targetLibrarySectionID": 2,
                          "parameters": f"hints%5Bguid%5D={g}&hints%5Bleague%5D=1",
                          "Setting": _settings()}]
                 for t in tags:
-                    subs.append({"title": f"All {t['tag']} Events", "type": 2,
+                    # A real server answers 15 for a team, not 2. Only 4 means
+                    # one broadcast; every other type recurs.
+                    subs.append({"title": (f"Alle {t['tag']}-Sendungen" if de
+                                          else f"All {t['tag']} Events"), "type": 15,
                                  "targetLibrarySectionID": 2,
                                  "parameters": f"hints%5Bguid%5D={g}&hints%5Bteam%5D={t['id']}",
                                  "Setting": _settings()})
                 return self._container(SubscriptionTemplate=[{"MediaSubscription": subs}])
             return self._container(SubscriptionTemplate=[{
                 "MediaSubscription": [
-                    {"title": "This Episode", "type": 4,
+                    {"title": "Diese Folge" if de else "This Episode", "type": 4,
                      "targetLibrarySectionID": 2,
                      "parameters": f"hints%5Bguid%5D={g}",
                      "Setting": _settings()},
-                    {"title": "All Episodes", "type": 2,
+                    {"title": "Alle Folgen" if de else "All Episodes", "type": 2,
                      "targetLibrarySectionID": 2,
                      "parameters": f"hints%5Bguid%5D={g}",
                      "Setting": _settings()},
@@ -365,14 +374,20 @@ class Handler(BaseHTTPRequestHandler):
         if pinned and pinned != "-1":
             media = [m for m in media if str(m["beginsAt"]) == str(pinned)] or media
 
-        title = "This Episode" if one_shot else "All Episodes"
+        # The reply is titled in the server's own language, like a real one.
+        de = os.environ.get("COUCHELEPHANT_FAKE_LANG") == "de"
+        every = (lambda w: f"Alle {w}-Sendungen") if de else (lambda w: f"All {w} Events")
         if q.get("hints[league]"):
-            title = f"All {(meta or {}).get('grandparentTitle')} Events"
+            title = every((meta or {}).get("grandparentTitle"))
         elif q.get("hints[team]"):
             names = {str(t["id"]): t["tag"] for t in TEAM_TAGS.get(guid, [])}
-            title = f"All {names.get(q['hints[team]'][0], '?')} Events"
-        elif one_shot and meta in SPORTS_ITEMS:
-            title = "This Event"
+            title = every(names.get(q["hints[team]"][0], "?"))
+        elif one_shot:
+            sport = meta in SPORTS_ITEMS
+            title = (("Diese Sendung" if sport else "Diese Folge") if de
+                     else ("This Event" if sport else "This Episode"))
+        else:
+            title = "Alle Folgen" if de else "All Episodes"
         sub = {
             "key": key, "type": 4 if one_shot else 2,
             "targetLibrarySectionID": 2, "title": title,

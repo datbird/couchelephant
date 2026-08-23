@@ -107,7 +107,10 @@ def like(v) -> str:
 
 
 def _text(sql, cmp_, value):
-    v = str(value or "")
+    # Folded through ulower(), which is Unicode-aware. SQLite's own
+    # case-insensitivity stops at Z, so "muller" never found "MÜLLER".
+    v = str(value or "").lower()
+    sql = f"ulower({sql})"
     if cmp_ in ("is", "!is"):
         frag, args = f"{sql} = ?", [v]
     elif cmp_ in ("contains", "!contains"):

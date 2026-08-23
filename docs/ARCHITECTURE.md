@@ -99,6 +99,26 @@ A background task started at boot:
 Then sleep for the configured interval. The sync icon in the header runs one
 immediately.
 
+## Nothing here is regional
+
+Networks, genres, content ratings and channel lists all come from your own
+guide with `SELECT DISTINCT`, never from a list shipped in this repository. The
+network of a channel is whatever Plex puts in parentheses, so `(NBC)` and
+`(BBC One)` parse alike.
+
+A recording template is identified by Plex's `type` (4 is one broadcast; 2 is a
+series or league; 15 is a team), never by the words in its title. Plex
+localizes those titles, and reading the English out of them broke the app's one
+job for anyone whose server is not in English.
+
+Times, dates, day names and the first day of the week are formatted by the
+browser from the viewer's own locale. Where the server has to render a time it
+writes a 24-hour form and marks it with `<time data-ts>` for the page to
+correct.
+
+Text matching folds case through `ulower()`, a Unicode-aware `lower()`
+registered on every connection, because SQLite's own folding stops at Z.
+
 ## Rendering
 
 `base.html` holds the header, the tab bar, and the shared programme panel. The

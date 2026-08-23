@@ -198,10 +198,33 @@ def templates(plex: Plex, row) -> list[dict]:
     return out
 
 
+# Plex's own subscription types. 4 is one broadcast; 2 is a series or a
+# league; 15 is a team. Anything that is not 4 recurs.
+ONE_SHOT_TYPE = 4
+
+
+def is_one_shot(template: dict) -> bool:
+    """Whether this template books one broadcast rather than a rule.
+
+    Read from Plex's `type`, not from its title. The title is localized: a
+    German server offers "Diese Sendung", not "This Episode", and matching the
+    English word made the whole app pick the wrong template for anyone whose
+    Plex is not in English. The title is only a fallback for a server old
+    enough not to send a type at all.
+    """
+    kind = template.get("type")
+    if kind not in (None, ""):
+        try:
+            return int(kind) == ONE_SHOT_TYPE
+        except (TypeError, ValueError):
+            pass
+    return (template.get("title") or "").lower().startswith("this ")
+
+
 def single_template(options: list[dict]) -> dict | None:
-    """The one-shot option. Plex titles it "This Event" or "This Episode"."""
+    """The one-shot option: the one that books this broadcast and no other."""
     for s in options:
-        if (s.get("title") or "").lower().startswith("this "):
+        if is_one_shot(s):
             return s
     return None
 

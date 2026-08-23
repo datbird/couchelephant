@@ -211,7 +211,7 @@ async def channel_logo_upload(vcn: str, logo: UploadFile = File(...)):
                             status_code=400)
 
     os.makedirs(sync.LOGO_DIR, exist_ok=True)
-    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in vcn)
+    safe = "".join(c if (c.isalnum() and c.isascii()) or c in "._-" else "_" for c in vcn)
     path = os.path.join(sync.LOGO_DIR, f"custom-{safe}.{kind}")
     tmp = path + ".part"
     with open(tmp, "wb") as fh:

@@ -65,14 +65,7 @@ def fmt(ts, pattern="%a %d %b, %H:%M"):
     return datetime.datetime.fromtimestamp(int(ts), tz()).strftime(pattern)
 
 
-def fmt_day(ts):
-    if not ts:
-        return ""
-    return datetime.datetime.fromtimestamp(int(ts), tz()).strftime("%A %B %-d")
-
-
 templates.env.filters["fmt"] = fmt
-templates.env.filters["fmt_day"] = fmt_day
 templates.env.filters["unjs"] = db.unjs
 
 

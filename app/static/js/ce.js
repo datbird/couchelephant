@@ -198,6 +198,31 @@
     if (e.key === 'Escape') hideTip();
   });
 
+  /* Which day a week starts on, and what to call each day, both from the
+     viewer's locale. Sunday-first and English abbreviations are a US habit;
+     most of the world starts on Monday. */
+  function weekStart() {
+    try {
+      var info = new Intl.Locale(navigator.language).weekInfo
+              || new Intl.Locale(navigator.language).getWeekInfo();
+      // weekInfo counts 1=Monday..7=Sunday; JS getDay() counts 0=Sunday.
+      if (info && info.firstDay) return info.firstDay % 7;
+    } catch (e) { /* older browser: fall through */ }
+    return /^(en-US|en-CA|ja|he|ar|pt-BR)\b/i.test(navigator.language) ? 0 : 1;
+  }
+
+  function dayNames(style) {
+    // Any Sunday, walked forward, so the names come from the browser.
+    var base = new Date(Date.UTC(2024, 0, 7)), out = [], start = weekStart();
+    for (var i = 0; i < 7; i++) {
+      var d = new Date(base);
+      d.setUTCDate(base.getUTCDate() + ((start + i) % 7));
+      out.push(d.toLocaleDateString(undefined,
+        {weekday: style || 'short', timeZone: 'UTC'}));
+    }
+    return out;
+  }
+
   /* Server-rendered times carry their timestamp and get localized here.
      The server cannot know the viewer's locale, so it writes a 24-hour
      fallback and the browser corrects it. Runs again after a partial is
@@ -218,7 +243,8 @@
   }
 
   w.CE = {esc: esc, coarse: coarse, fmtTime: fmtTime, fmtWhen: fmtWhen,
-          localizeTimes: localizeTimes,
+          localizeTimes: localizeTimes, weekStart: weekStart,
+          dayNames: dayNames,
           fmtDay: fmtDay, readJson: readJson, KIND_ICON: KIND_ICON,
           optRow: optRow, settingField: settingField,
           showTip: showTip, hideTip: hideTip};

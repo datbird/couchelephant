@@ -148,13 +148,13 @@ def api_series(q: str = ""):
     the guide can no longer record.
     """
     q = (q or "").strip()
-    like = f"%{smartfilter.like(q)}%"
+    like = f"%{smartfilter.like(q).lower()}%"
     rows = db.query(
         """SELECT COALESCE(NULLIF(p.grandparent_title,''), p.title) AS name,
                   COUNT(DISTINCT a.id) AS airings,
                   MIN(a.begins_at) AS next_at
            FROM airings a JOIN programs p ON p.guid = a.program_guid
-           WHERE a.begins_at > ? AND (? = '' OR name LIKE ? ESCAPE '\\' COLLATE NOCASE)
+           WHERE a.begins_at > ? AND (? = '' OR ulower(name) LIKE ? ESCAPE '\\')
            GROUP BY name ORDER BY airings DESC, name LIMIT 40""",
         (int(time.time()), q, like))
     return JSONResponse({"ok": True, "series": [dict(r) for r in rows]})
@@ -239,7 +239,7 @@ def api_sources():
     nets = {}
     chans = []
     for c in db.query("SELECT vcn, call_sign, network FROM channels "
-                      "ORDER BY CAST(vcn AS REAL)"):
+                      "ORDER BY CAST(vcn AS REAL), vcn"):
         if c["network"]:
             nets.setdefault(c["network"], []).append(c["vcn"])
         chans.append({"vcn": c["vcn"], "call_sign": c["call_sign"] or "",
@@ -713,8 +713,7 @@ def _make_plex_rule(label, rows, template, prefs):
     try:
         with _plex() as plex:
             every = passes.templates(plex, row)
-            recurring = [t for t in every
-                         if not (t.get("title") or "").lower().startswith("this ")]
+            recurring = [t for t in every if not passes.is_one_shot(t)]
             if not recurring:
                 raise PlexError("Plex offered no recurring rule for this")
             chosen = every[template] if 0 <= template < len(every) else None

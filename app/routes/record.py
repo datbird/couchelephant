@@ -92,7 +92,7 @@ def _template_payload(options, row=None, pin=True):
     out = []
     for i, s_ in enumerate(options):
         title = s_.get("title") or "Record"
-        one_shot = title.lower().startswith("this ")
+        one_shot = passes.is_one_shot(s_)
         settings = []
         for st in (s_.get("Setting") or []):
             sid = st.get("id")
@@ -149,7 +149,7 @@ async def api_record_options(airing_id: str):
     # CBS and FOX" is how people say it; channels are the finer grain.
     nets, chans = {}, []
     for c in db.query("SELECT vcn, call_sign, network FROM channels "
-                      "ORDER BY CAST(vcn AS REAL)"):
+                      "ORDER BY CAST(vcn AS REAL), vcn"):
         if c["network"]:
             nets.setdefault(c["network"], []).append(c["vcn"])
         chans.append({"vcn": c["vcn"], "call_sign": c["call_sign"] or "",
@@ -295,7 +295,7 @@ async def api_record(airing_id: str = Form(...), template: int = Form(0),
             if not options:
                 raise PlexError("Plex offered no recording options")
             chosen = options[template] if 0 <= template < len(options) else options[0]
-            one_shot = (chosen.get("title") or "").lower().startswith("this ")
+            one_shot = passes.is_one_shot(chosen)
 
             prefs = dict(db.unjs(settings, {}) or {})
             prefs = {k: v for k, v in prefs.items() if v is not None}

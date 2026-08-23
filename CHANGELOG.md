@@ -8,8 +8,19 @@ linux/amd64 and linux/arm64, and listed in Unraid Community Applications.
 Nothing in the app is tied to one country. Networks, genres, content ratings
 and channels are read from your own guide rather than from a list shipped
 here. The team catalogue covers 1,310 teams across 18 leagues, European
-football included. Times follow the viewer's own locale, so the same install
-reads correctly in Seattle, London and Vancouver.
+football included. Times, dates, day names and the first day of the week all
+follow the viewer's own locale, so the same install reads correctly in
+Seattle, London and Vancouver.
+
+One-shot recordings are identified by Plex's own subscription type rather than
+by the English words in its title. A Plex server in German offers "Diese
+Sendung", not "This Episode", and the app used to read the English and pick a
+series rule instead: it would have recorded every airing rather than the one
+game. Verified against a live server, which also answers type 15 for a team
+subscription rather than 2.
+
+Searching and filtering fold case across the whole of Unicode. SQLite stops at
+Z, so a search for "muller" never found "MULLER" with an umlaut.
 
 ### Fixed
 

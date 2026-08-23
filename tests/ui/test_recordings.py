@@ -206,3 +206,24 @@ def test_switching_to_a_programme_changes_what_is_searched(recordings):
     recordings.wait_for_function(
         "() => /Quiz Show/.test(document.getElementById('rlist').textContent)",
         timeout=15000)
+
+
+@pytest.mark.parametrize("locale,first", [("en-US", "Sun"), ("en-GB", "Mon"),
+                                          ("de-DE", "Mo"), ("fr-FR", "lun.")])
+def test_the_calendar_week_starts_where_the_viewer_says(browser, base_url, synced,
+                                                        locale, first):
+    """The month grid always began on Sunday with English day names. Most of
+    the world starts a week on Monday."""
+    from tests.ui.conftest import _page
+    ctx, page = _page(browser, base_url, viewport={"width": 1440, "height": 900},
+                      locale=locale)
+    try:
+        page.goto("/recordings")
+        page.click('[data-view="calendar"]')
+        page.wait_for_selector("#calgrid .caldow", timeout=20000)
+        names = page.locator("#calgrid .caldow").all_inner_texts()
+        assert len(names) == 7, names
+        assert names[0].strip().lower().startswith(first.lower()[:2]), \
+            f"{locale} started the week on {names[0]!r}"
+    finally:
+        ctx.close()

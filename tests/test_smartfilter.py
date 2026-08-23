@@ -184,4 +184,12 @@ def test_a_filter_that_names_the_programme_is_not_loose():
 def test_a_percent_sign_in_a_title_is_not_a_wildcard():
     frag, args = smartfilter.build({"field": "title", "cmp": "contains", "value": "100% Hot"})
     assert "ESCAPE" in frag
-    assert args == ["%100\\% Hot%"]
+    assert args == ["%100\\% hot%"], "folded to lower case first"
+
+
+def test_text_matching_folds_case_beyond_ascii():
+    """SQLite stops folding at Z, so a search for muller never found MÜLLER."""
+    frag, args = smartfilter.build(
+        {"field": "title", "cmp": "contains", "value": "MÜLLER"})
+    assert "ulower(" in frag
+    assert args == ["%müller%"]

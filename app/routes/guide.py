@@ -29,9 +29,10 @@ def _airings_query(day: str, channel: str, sports: int, q: str, offset: int, lim
               FROM airings a JOIN programs p ON p.guid = a.program_guid"""]
     args = []
     if q.strip():
-        like = f"%{smartfilter.like(q.strip())}%"
-        sql.append("""WHERE (p.title LIKE ? ESCAPE '\\' OR p.grandparent_title LIKE ? ESCAPE '\\'
-                            OR p.summary LIKE ? ESCAPE '\\')
+        like = f"%{smartfilter.like(q.strip()).lower()}%"
+        sql.append("""WHERE (ulower(p.title) LIKE ? ESCAPE '\\'
+                            OR ulower(p.grandparent_title) LIKE ? ESCAPE '\\'
+                            OR ulower(p.summary) LIKE ? ESCAPE '\\')
                         AND a.ends_at > ?""")
         args += [like, like, like, now]
         order = "ORDER BY a.begins_at, CAST(a.channel_vcn AS REAL), a.id"

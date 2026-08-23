@@ -195,6 +195,10 @@ DEFAULTS = {
 }
 
 
+def _ulower(v):
+    return v.lower() if isinstance(v, str) else v
+
+
 def connect() -> sqlite3.Connection:
     if not hasattr(_local, "conn"):
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -203,6 +207,10 @@ def connect() -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # SQLite's own lower() and COLLATE NOCASE only fold A-Z, so a search
+        # for "muller" never matched "MÜLLER" and "ÉTÉ" never matched "été".
+        # Python's str.lower() folds the whole of Unicode.
+        conn.create_function("ulower", 1, _ulower, deterministic=True)
         _local.conn = conn
     return _local.conn
 
