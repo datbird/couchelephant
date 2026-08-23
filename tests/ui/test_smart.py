@@ -280,7 +280,7 @@ def test_it_does_not_offer_what_a_pass_cannot_honour(add):
 def test_a_sports_filter_arrives_with_padding_filled_in(add):
     _ready_filter(add)
     add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
-    assert int(add.input_value('[data-set="endOffsetMinutes"]')) >= 30
+    assert add.input_value('[data-set="endOffsetMinutes"]') == "30"
     assert "Sport overruns" in add.locator("#ovlbox").inner_text()
 
 

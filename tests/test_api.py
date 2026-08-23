@@ -546,7 +546,7 @@ def test_a_sports_pass_is_told_that_sport_overruns(client, synced):
     d = client.get("/api/rules/options",
                    params={"kind": "team", "team_id": "236"}).json()
     assert d["sporty"] is True
-    assert int(d["sports_padding"]["endOffsetMinutes"]) >= 30
+    assert d["sports_padding"]["endOffsetMinutes"] == "30"
 
 
 def test_padding_set_on_a_smart_pass_reaches_every_booking(client, synced):

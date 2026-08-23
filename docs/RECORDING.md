@@ -144,7 +144,7 @@ Each setting carries **Plex's own explanation of it**, taken from the template
 rather than rewritten here, so there is only one version of those words.
 
 **Sport overruns, so a sports pass arrives with padding filled in**: one minute
-before and sixty after, on screen, before you create it. Without it a game that
+before and thirty after, on screen, before you create it. Without it a game that
 runs long is cut off at the time the guide claimed it would end, which it very
 often does not.
 

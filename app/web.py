@@ -1384,7 +1384,7 @@ _PASS_HIDDEN = _RECURRING_ONLY | _PASS_PREF_BLOCKED
 # Sport overruns. It is the normal case, not the exception, and a pass with no
 # padding clips the end of every game. Offered as a filled-in default on a new
 # sports pass, on screen, before anything is created.
-SPORTS_PADDING = {"startOffsetMinutes": "1", "endOffsetMinutes": "60"}
+SPORTS_PADDING = {"startOffsetMinutes": "1", "endOffsetMinutes": "30"}
 
 # Plex sends the padding fields as a plain integer with no list of allowed
 # values, so any number works and there is no ceiling to respect. These are

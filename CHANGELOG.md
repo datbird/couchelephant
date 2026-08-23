@@ -9,7 +9,7 @@
   one-shot template's, because that is what a pass books for each airing, so
   the recurring-only choices are no longer offered and then silently dropped.
 - **A sports pass now arrives with padding filled in**, one minute before and
-  sixty after, shown before you create it. A game that runs long used to be cut
+  thirty after, shown before you create it. A game that runs long used to be cut
   off at whatever time the guide claimed.
 - Padding suggests up to 180 minutes and caps nothing. Plex sends the field as
   a plain integer with no allowed-values list, so any number you type works.
