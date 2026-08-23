@@ -140,10 +140,17 @@ dropped on save is worse than not offering it.
 The channel and the airing time are not offered either. CouchElephant sets
 those itself, per airing. That pin is the mechanism this whole app exists for.
 
+Each setting carries **Plex's own explanation of it**, taken from the template
+rather than rewritten here, so there is only one version of those words.
+
 **Sport overruns, so a sports pass arrives with padding filled in**: one minute
-before and sixty after, on screen, before you create it. Change it to whatever
-you like. Without it a game that runs long is cut off at the time the guide
-claimed it would end, which it very often does not.
+before and sixty after, on screen, before you create it. Without it a game that
+runs long is cut off at the time the guide claimed it would end, which it very
+often does not.
+
+Plex sends the two padding fields as a plain integer with no list of allowed
+values, so **there is no ceiling**. The field suggests 0, 5, 15, 30, 45, 60, 90,
+120 and 180 minutes after the end, and still accepts anything you type.
 
 ### Source limits
 

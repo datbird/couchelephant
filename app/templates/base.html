@@ -1330,38 +1330,10 @@ Click to sync the guide now." aria-label="Sync the guide now">
 
   // One row per option. The little rectangle says whose feature it is, so the
   // two systems read as one list rather than two lists the user has to join up.
-  function row(owner, id, label, control, hint, cls) {
-    return '<label class="optrow' + (cls ? ' ' + cls : '') + '" for="' + id + '">' +
-      '<i class="own ' + owner + '" title="' +
-        (owner === 'ce' ? 'CouchElephant feature' : 'Plex DVR feature') + '"></i>' +
-      '<span class="optlabel">' + esc(label) +
-        (hint ? '<span class="opthint">' + esc(hint) + '</span>' : '') + '</span>' +
-      control + '</label>';
-  }
+  // The option row and the Plex setting renderer are shared. See
+  // static/js/ce.js: they existed twice and had already drifted.
+  var row = CE.optRow, field = CE.settingField;
 
-  function field(st) {
-    var id = 'set_' + st.id, c = '';
-    if (st.options && st.options.length) {
-      c += '<select id="' + id + '" data-set="' + esc(st.id) + '">';
-      st.options.forEach(function (op) {
-        c += '<option value="' + esc(op.value) + '"' +
-             (String(op.value) === String(st.value) ? ' selected' : '') + '>' +
-             esc(op.label) + '</option>';
-      });
-      c += '</select>';
-    } else if (st.type === 'bool') {
-      var on = String(st.value) === 'true' || String(st.value) === '1';
-      c += '<input type="checkbox" id="' + id + '" data-set="' + esc(st.id) +
-           '" data-bool="1"' + (on ? ' checked' : '') + '>';
-    } else if (st.type === 'int') {
-      c += '<input type="number" id="' + id + '" data-set="' + esc(st.id) +
-           '" value="' + esc(st.value) + '">';
-    } else {
-      c += '<input type="text" id="' + id + '" data-set="' + esc(st.id) +
-           '" value="' + esc(st.value) + '">';
-    }
-    return row('plex', id, st.label, c);
-  }
 
   // The source limit is the shared picker, not a copy. See static/js/sources.js.
   function multiField() {

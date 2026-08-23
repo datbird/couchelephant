@@ -109,7 +109,11 @@ def _settings():
         {"id": "startOffsetMinutes", "value": "0", "type": "int",
          "label": "Minutes before start"},
         {"id": "endOffsetMinutes", "value": "0", "type": "int",
-         "label": "Minutes after end"},
+         "label": "Minutes after end",
+         # Plex writes its own explanation, and no list of allowed values, so
+         # the field takes any number.
+         "summary": "Increase the recording duration by adding minutes after "
+                    "the scheduled time."},
         {"id": "recordPartials", "value": "true", "type": "bool",
          "label": "Allow partial airings"},
         {"id": "comskipMethod", "value": "0", "type": "int",

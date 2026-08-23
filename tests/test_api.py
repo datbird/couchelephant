@@ -584,3 +584,34 @@ def test_a_smart_filter_matching_nothing_says_so_rather_than_offering_nothing(cl
         "filter": '{"field":"genre","cmp":"is","value":"Curling"}'}).json()
     assert d["ok"] is False
     assert "guide yet" in d["error"]
+
+
+def test_plexs_own_explanation_travels_with_each_setting(client, synced):
+    """Plex writes a summary for its settings. Repeating it here would be a
+    second copy to keep true."""
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}'}).json()
+    hints = {s["id"]: s["hint"] for t in d["templates"] for s in t["settings"]}
+    assert "adding minutes after" in hints["endOffsetMinutes"]
+
+
+def test_padding_offers_a_big_number_without_capping_anything(client, synced):
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}'}).json()
+    presets = {s["id"]: s["presets"] for t in d["templates"] for s in t["settings"]}
+    assert 120 in presets["endOffsetMinutes"]
+    assert presets["endOffsetMinutes"] == sorted(presets["endOffsetMinutes"])
+
+
+def test_a_padding_larger_than_any_preset_is_still_accepted(client, synced):
+    """Plex sends these as a plain integer with no allowed-values list, so
+    there is no ceiling to enforce and none is invented here."""
+    r = client.post("/api/rules", data={
+        "kind": "smart", "name": "Long games",
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]",
+        "settings": '{"endOffsetMinutes":"240"}'})
+    assert r.json()["ok"]
+    assert fake_plex.STATE.created[0]["prefs"]["endOffsetMinutes"] == "240"

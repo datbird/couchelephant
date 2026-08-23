@@ -62,6 +62,13 @@ def test_the_shared_helpers_are_not_reimplemented_per_page():
         text = (TEMPLATES / name).read_text()
         assert "function esc(" not in text, f"{name} redefines esc; use CE.esc"
         assert "multibody" not in text or "CE.SourcePicker" in text
+    # The option row and the Plex setting renderer existed twice and had
+    # already drifted: one panel showed Plex's own explanations, the other
+    # did not.
+    for name in ("base.html", "recordings.html"):
+        text = (TEMPLATES / name).read_text()
+        assert "function field(" not in text, f"{name} redefines field; use CE.settingField"
+        assert "function row(owner" not in text, f"{name} redefines row; use CE.optRow"
 
 
 def test_every_migration_is_listed_rather_than_only_in_the_schema():

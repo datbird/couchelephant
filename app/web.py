@@ -806,7 +806,11 @@ def _template_payload(options, row=None, pin=True):
                 value = str(row["begins_at"])
             settings.append({
                 "id": sid, "label": st.get("label"), "type": st.get("type"),
+                # Plex explains its own settings. Repeating those words here
+                # would be a second copy to keep true.
+                "hint": (st.get("summary") or "").strip(),
                 "value": value, "options": _enum(st.get("enumValues")),
+                "presets": _PRESETS.get(sid, []),
             })
         out.append({
             "index": i, "title": title, "type": s_.get("type"),
@@ -1381,6 +1385,15 @@ _PASS_HIDDEN = _RECURRING_ONLY | _PASS_PREF_BLOCKED
 # padding clips the end of every game. Offered as a filled-in default on a new
 # sports pass, on screen, before anything is created.
 SPORTS_PADDING = {"startOffsetMinutes": "1", "endOffsetMinutes": "60"}
+
+# Plex sends the padding fields as a plain integer with no list of allowed
+# values, so any number works and there is no ceiling to respect. These are
+# suggestions, not limits: the field still takes anything typed into it. A
+# game running two hours long is why 120 is on the list.
+_PRESETS = {
+    "startOffsetMinutes": [0, 1, 2, 5, 10, 15, 30],
+    "endOffsetMinutes": [0, 5, 15, 30, 45, 60, 90, 120, 180],
+}
 
 
 @app.get("/api/rules/options")

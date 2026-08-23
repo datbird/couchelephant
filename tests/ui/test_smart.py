@@ -306,3 +306,19 @@ def test_editing_a_smart_pass_shows_the_padding_it_saved(page):
     page.click('.passrow [data-act="edit"]')
     page.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
     assert page.input_value('[data-set="endOffsetMinutes"]') == "90"
+
+
+def test_padding_shows_plexs_own_words_and_reaches_two_hours(add):
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    row = add.locator('label.optrow:has([data-set="endOffsetMinutes"])')
+    assert "adding minutes after" in row.inner_text()
+
+    # A suggestion list, not a limit.
+    listed = add.eval_on_selector_all(
+        '#set_endOffsetMinutes_opts option', "els => els.map(e => e.value)")
+    assert "120" in listed
+
+    # And the field still takes a number nobody suggested.
+    add.fill('[data-set="endOffsetMinutes"]', "240")
+    assert add.input_value('[data-set="endOffsetMinutes"]') == "240"

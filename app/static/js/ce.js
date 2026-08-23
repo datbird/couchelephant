@@ -68,6 +68,56 @@
       '<circle cx="12" cy="12" r="6"/></svg></span>'
   };
 
+  /* One option row, and one Plex setting rendered into one.
+
+     These lived twice, in the guide's record panel and in the add panel, which
+     is how the record panel gained Plex's own explanations and the add panel
+     did not. One copy now. */
+  function optRow(owner, id, label, control, hint, cls) {
+    return '<label class="optrow' + (cls ? ' ' + cls : '') + '" for="' + id + '">' +
+      '<i class="own ' + owner + '" title="' +
+        (owner === 'ce' ? 'CouchElephant feature' : 'Plex DVR feature') + '"></i>' +
+      '<span class="optlabel">' + esc(label) +
+        (hint ? '<span class="opthint">' + esc(hint) + '</span>' : '') + '</span>' +
+      control + '</label>';
+  }
+
+  function settingField(st) {
+    var id = 'set_' + st.id, c = '';
+    if (st.options && st.options.length) {
+      c += '<select id="' + id + '" data-set="' + esc(st.id) + '">';
+      st.options.forEach(function (op) {
+        c += '<option value="' + esc(op.value) + '"' +
+             (String(op.value) === String(st.value) ? ' selected' : '') + '>' +
+             esc(op.label) + '</option>';
+      });
+      c += '</select>';
+    } else if (st.type === 'bool') {
+      var on = String(st.value) === 'true' || String(st.value) === '1';
+      c += '<input type="checkbox" id="' + id + '" data-set="' + esc(st.id) +
+           '" data-bool="1"' + (on ? ' checked' : '') + '>';
+    } else if (st.type === 'int') {
+      /* Suggestions, not limits. Plex sends these as a plain integer with no
+         list of allowed values, so the field still takes anything typed in;
+         the list is only there so a big number is one click away. */
+      var list = (st.presets && st.presets.length) ? id + '_opts' : '';
+      c += '<input type="number" min="0" id="' + id + '" data-set="' + esc(st.id) +
+           '"' + (list ? ' list="' + list + '"' : '') +
+           ' value="' + esc(st.value) + '">';
+      if (list) {
+        c += '<datalist id="' + list + '">' +
+             st.presets.map(function (v) { return '<option value="' + v + '">'; })
+               .join('') + '</datalist>';
+      }
+    } else {
+      c += '<input type="text" id="' + id + '" data-set="' + esc(st.id) +
+           '" value="' + esc(st.value) + '">';
+    }
+    /* Plex explains its own settings. Its words, not a second copy of them. */
+    return optRow('plex', id, st.label, c, st.hint || '');
+  }
+
   w.CE = {esc: esc, coarse: coarse, fmtTime: fmtTime, fmtWhen: fmtWhen,
-          fmtDay: fmtDay, readJson: readJson, KIND_ICON: KIND_ICON};
+          fmtDay: fmtDay, readJson: readJson, KIND_ICON: KIND_ICON,
+          optRow: optRow, settingField: settingField};
 })(window);
