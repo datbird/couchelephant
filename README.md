@@ -142,15 +142,20 @@ you can leave for later.
 You need a Plex Media Server with a DVR, and Docker.
 
 ```bash
-git clone git@github.com:datbird/couchelephant.git
-cd couchelephant
-docker build -t couchelephant .
 docker run -d --name couchelephant --restart unless-stopped \
   -p 8710:8710 \
   -v /opt/couchelephant/data:/data \
   -e TZ=UTC \
-  couchelephant
+  ghcr.io/datbird/couchelephant:latest
 ```
+
+There is a `docker-compose.yml` in the repository if you would rather use that.
+
+**On Unraid**, search for CouchElephant in **Apps**. The template fills in the
+port and the appdata path for you.
+
+**From source**, if you would rather build it yourself: clone the repository
+and run `docker build -t couchelephant .`
 
 Open `http://your-host:8710`, and in **Settings, Plex** put in your server
 address and token. The address has to work from inside the container, so

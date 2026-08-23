@@ -11,13 +11,29 @@ touch your media files.
 ## Run it
 
 ```bash
-docker build -t couchelephant .
 docker run -d --name couchelephant --restart unless-stopped \
   -p 8710:8710 \
   -v /opt/couchelephant/data:/data \
   -e TZ=UTC \
-  couchelephant
+  ghcr.io/datbird/couchelephant:latest
 ```
+
+The image is built for `linux/amd64` and `linux/arm64`, so the same tag works
+on an ordinary server and on a Pi. Pin a version if you would rather choose
+when to move: `:1` follows fixes within a major version, `:1.2.3` never moves.
+
+There is a `docker-compose.yml` in the repository that does the same thing.
+
+### On Unraid
+
+Search for **CouchElephant** in **Apps**. The template sets the port to 8710
+and the appdata path to `/mnt/user/appdata/couchelephant`, which is all it
+needs. Everything else is configured in the app itself.
+
+### From source
+
+Clone the repository and run `docker build -t couchelephant .`, then use
+`couchelephant` in place of the image name above.
 
 Everything it keeps lives in the one volume, so that is the only thing to back
 up.
