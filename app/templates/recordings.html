@@ -458,6 +458,21 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
   var previewTimer = null;
 
+  // The panel's own message, kept in state. Written straight to the element it
+  // was thrown away by the next redraw, which is how a confirmation looked
+  // like nothing happening. Third time this shape has bitten; last time.
+  function say(text, kind) {
+    st.msg = text ? {text: text, kind: kind || ''} : null;
+    paintMsg();
+  }
+
+  function paintMsg() {
+    var el = document.getElementById('ovlmsg');
+    if (!el) return;
+    el.className = 'note' + (st.msg && st.msg.kind ? ' said ' + st.msg.kind : '');
+    el.textContent = st.msg ? st.msg.text : '';
+  }
+
   // Drawn from state rather than straight from the answer, so redrawing the
   // panel does not throw the count and the sample away. It did, and the count
   // then read as though nothing had matched.
@@ -527,7 +542,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
           });
         });
       }
-      render();
+      // Not while the user is waiting on a create. Redrawing then replaces the
+      // button they are about to press a second time.
+      if (!st.busy) render();
     }).catch(function () { st.tplPending = false; });
   }
 
@@ -698,6 +715,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       preview();
     }
     document.getElementById('rgo').addEventListener('click', create);
+    paintMsg();
     paint();
   }
 
@@ -706,6 +724,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     st.team = null; st.series = null; st.tpl = null; st.pick = 0; st.q = '';
     st.preview = null; st.confirmed = false;
     st.tplPending = false; st.sporty = false;
+    st.msg = null; st.busy = false;
   }
 
   // Once something is chosen, ask Plex what it can do with it.
@@ -842,8 +861,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   }
 
   function create(e) {
-    var btn = e.target, msg = document.getElementById('ovlmsg');
+    var btn = e.target;
     var back = st.editing ? 'Save pass' : 'Create schedule';
+    st.busy = true;
     btn.disabled = true; btn.textContent = 'Working...';
     var vals = {};
     box.querySelectorAll('[data-set]').forEach(function (el) {
@@ -874,8 +894,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     fetch(url, {method: 'POST', body: body})
       .then(CE.readJson)
       .then(function (j) {
-        msg.className = 'note said ' + (j.ok ? 'ok' : j.needs_confirm ? 'warn' : 'bad');
-        msg.textContent = j.message || j.error || '';
+        st.busy = false;
+        say(j.message || j.error || '',
+            j.ok ? 'ok' : j.needs_confirm ? 'warn' : 'bad');
         if (j.ok) {
           btn.textContent = 'Done';
           setTimeout(function () { location.reload(); }, 1100);
@@ -894,8 +915,8 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
         btn.textContent = back;
       })
       .catch(function (err) {
-        msg.className = 'note said bad';
-        msg.textContent = 'Could not reach CouchElephant: ' + err;
+        st.busy = false;
+        say('Could not reach CouchElephant: ' + err, 'bad');
         btn.disabled = false; btn.textContent = back;
       });
   }
@@ -905,7 +926,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     st.team = null; st.series = null; st.editing = null;
     st.tpl = null; st.pick = 0; st.q = '';
     st.tree = null; st.name = ''; st.preview = null; st.confirmed = false;
-    st.tplPending = false; st.sporty = false;
+    st.tplPending = false; st.sporty = false; st.msg = null; st.busy = false;
     st.nets.length = 0; st.chans.length = 0;
     ovl.classList.add('show');
     // The field list has to be in hand before the builder can draw itself, and

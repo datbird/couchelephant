@@ -13,7 +13,9 @@
   off at whatever time the guide claimed.
 - Padding suggests up to 180 minutes and caps nothing. Plex sends the field as
   a plain integer with no allowed-values list, so any number you type works.
-- Every Plex setting now shows Plex's own explanation of it.
+- Every Plex setting now shows Plex's own explanation of it, as a tooltip on a
+  small mark beside the label. Inline it ran to twenty lines: "Detect
+  commercials" alone pushed one row past six hundred pixels.
 - The option row and the setting renderer existed twice and had drifted. They
   are one component now, in `static/js/ce.js`, with a test that keeps it that
   way.

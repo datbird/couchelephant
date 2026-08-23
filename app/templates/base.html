@@ -397,8 +397,12 @@ tr:hover td{background:var(--panel2)}
    the labels the way it does in Plex's own dialog. */
 .optgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}
 .optrow{display:flex;align-items:center;gap:9px;font-size:13px;min-width:0}
-.optlabel{color:var(--dim);min-width:0;flex:1 1 auto;overflow:hidden;
-  text-overflow:ellipsis}
+.optlabel{color:var(--dim);min-width:0;flex:1 1 auto;display:flex;
+  align-items:center;overflow:visible}
+.optname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* Every row the same height, so the grid reads as a grid rather than as a
+   ragged column of whatever each label needed. */
+.optrow{min-height:36px}
 .optrow select,.optrow input[type=number],.optrow input[type=text]{
   flex:0 1 auto;max-width:58%;padding:5px 8px;font-size:13px}
 .optrow input[type=number]{width:82px}
@@ -494,7 +498,30 @@ tr:hover td{background:var(--panel2)}
 .multirow .mn{margin-left:auto;padding-left:10px;color:var(--dim);font-size:11px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:45%}
 .multinone{display:block;padding:16px;text-align:center;color:var(--dim);font-size:13px}
-.opthint{display:block;font-size:11px;opacity:.75;margin-top:1px}
+/* An explanation, on demand.
+   Plex writes a long summary for each of its settings, and inline they were up
+   to twenty lines each. The mark is small and the words arrive on hover or on
+   keyboard focus, so a row stays one row. */
+.opthelp{display:inline-flex;align-items:center;justify-content:center;
+  width:15px;height:15px;margin-left:6px;border-radius:50%;flex:0 0 auto;
+  border:1px solid var(--line);background:var(--panel2);color:var(--dim);
+  font-size:10px;font-weight:700;cursor:help;position:relative;vertical-align:middle}
+.opthelp:hover,.opthelp:focus-visible{border-color:var(--accent-bd);
+  color:var(--accent-ink);background:var(--accent-soft);outline:none}
+.opthelp::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);
+  left:50%;transform:translateX(-50%);width:max-content;max-width:280px;
+  padding:8px 11px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--text);box-shadow:var(--shadow-lg);
+  font-size:12px;font-weight:400;line-height:1.45;text-align:left;
+  white-space:normal;opacity:0;visibility:hidden;transition:opacity .12s;
+  z-index:40;pointer-events:none}
+.opthelp:hover::after,.opthelp:focus-visible::after{opacity:1;visibility:visible}
+/* Near the top of the panel there is nothing above to draw into, so it flips. */
+.optgrid>.optrow:nth-child(-n+2) .opthelp::after{bottom:auto;top:calc(100% + 8px)}
+@media (max-width:700px){
+  /* Half a phone wide, anchored to the row rather than to the mark. */
+  .opthelp::after{left:0;transform:none;max-width:min(280px,74vw)}
+}
 
 /* ---- sub-tabs ----
    A second row under the main tabs, for the sections inside one page. Quieter
@@ -619,7 +646,7 @@ tr:hover td{background:var(--panel2)}
 /* The source limit gets the full width. Its label carries a second line of
    explanation, and in a half-width cell that line was clipped. */
 .optrow.wide{grid-column:1/-1}
-.optrow.wide .optlabel{overflow:visible;white-space:normal}
+.optrow.wide .optname{white-space:normal;overflow:visible}
 /* Allowed to shrink. Fixed at 320 it pushed the panel 2px wider than its own
    box, which is all it takes to put a scrollbar across the bottom. */
 .optrow.wide .multi{max-width:320px;flex:0 1 320px;min-width:0}

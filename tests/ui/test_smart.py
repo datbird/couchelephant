@@ -311,8 +311,9 @@ def test_editing_a_smart_pass_shows_the_padding_it_saved(page):
 def test_padding_shows_plexs_own_words_and_reaches_two_hours(add):
     _ready_filter(add)
     add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
-    row = add.locator('label.optrow:has([data-set="endOffsetMinutes"])')
-    assert "adding minutes after" in row.inner_text()
+    tip = add.get_attribute('label.optrow:has([data-set="endOffsetMinutes"]) .opthelp',
+                            "data-tip")
+    assert "adding minutes after" in tip
 
     # A suggestion list, not a limit.
     listed = add.eval_on_selector_all(
@@ -322,3 +323,57 @@ def test_padding_shows_plexs_own_words_and_reaches_two_hours(add):
     # And the field still takes a number nobody suggested.
     add.fill('[data-set="endOffsetMinutes"]', "240")
     assert add.input_value('[data-set="endOffsetMinutes"]') == "240"
+
+
+def test_an_explanation_is_a_tooltip_not_a_second_line(add):
+    """Plex's summaries run to twenty lines. Inline, one row was taller than
+    the panel."""
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="comskipMethod"]', timeout=20000)
+
+    marks = add.locator(".optgrid .opthelp")
+    assert marks.count() >= 4, "each Plex setting carries its explanation"
+    assert "Attempt to automatically detect" not in add.locator(".optgrid").inner_text()
+
+    # The words are still there, on the mark.
+    tip = add.get_attribute('label.optrow:has([data-set="comskipMethod"]) .opthelp',
+                            "data-tip")
+    assert "detect and remove commercials" in tip
+
+
+def test_no_option_row_is_taller_than_a_row(add):
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="comskipMethod"]', timeout=20000)
+    heights = add.eval_on_selector_all(
+        ".optgrid .optrow:not(.wide)", "els => els.map(e => e.offsetHeight)")
+    assert heights
+    assert max(heights) <= 64, f"a row grew to {max(heights)}px"
+
+
+def test_the_tooltip_appears_on_hover(add):
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    mark = add.locator('label.optrow:has([data-set="endOffsetMinutes"]) .opthelp')
+    hidden = add.eval_on_selector(
+        'label.optrow:has([data-set="endOffsetMinutes"]) .opthelp',
+        "e => getComputedStyle(e, '::after').visibility")
+    assert hidden == "hidden"
+    mark.hover()
+    shown = add.eval_on_selector(
+        'label.optrow:has([data-set="endOffsetMinutes"]) .opthelp',
+        "e => getComputedStyle(e, '::after').visibility")
+    assert shown == "visible"
+
+
+def test_the_record_panel_and_the_pass_panel_look_the_same(page):
+    """Same component, so the guide's Record panel gets the tooltips too."""
+    page.goto("/")
+    page.wait_for_selector(".gprog")
+    page.click('.gprog.live[title*="Chiefs"]')
+    page.wait_for_selector("#ovlbox .air")
+    page.click("#ovlbox .air.best [data-rec]")
+    page.wait_for_selector("#optgo")
+    assert page.locator(".optgrid .opthelp").count() >= 3
+    heights = page.eval_on_selector_all(
+        ".optgrid .optrow:not(.wide)", "els => els.map(e => e.offsetHeight)")
+    assert max(heights) <= 64

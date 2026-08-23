@@ -73,13 +73,20 @@
      These lived twice, in the guide's record panel and in the add panel, which
      is how the record panel gained Plex's own explanations and the add panel
      did not. One copy now. */
+  /* The explanation is a tooltip, not a second line.
+
+     Inline, Plex's own summaries were as long as twenty lines. "Detect
+     commercials" alone pushed one row past six hundred pixels and shoved
+     everything else off the panel. The words are worth keeping; the room
+     they took was not. */
   function optRow(owner, id, label, control, hint, cls) {
     return '<label class="optrow' + (cls ? ' ' + cls : '') + '" for="' + id + '">' +
       '<i class="own ' + owner + '" title="' +
         (owner === 'ce' ? 'CouchElephant feature' : 'Plex DVR feature') + '"></i>' +
-      '<span class="optlabel">' + esc(label) +
-        (hint ? '<span class="opthint">' + esc(hint) + '</span>' : '') + '</span>' +
-      control + '</label>';
+      '<span class="optlabel"><span class="optname">' + esc(label) + '</span>' +
+        (hint ? '<span class="opthelp" tabindex="0" role="note" aria-label="' +
+                esc(hint) + '" data-tip="' + esc(hint) + '">?</span>' : '') +
+      '</span>' + control + '</label>';
   }
 
   function settingField(st) {

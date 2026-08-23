@@ -103,26 +103,40 @@ TEAM_TAGS = {GAME_GUID: [{"id": 236, "tag": "Kansas City Chiefs"},
 
 
 def _settings():
+    """As the real server sends them, summary and all.
+
+    Plex writes a `summary` for every setting. They matter here because the
+    panel shows them, and one of them ("Detect commercials") is long enough
+    that rendering it inline pushed a single row past six hundred pixels.
+    """
     return [
         {"id": "minVideoQuality", "value": "0", "type": "int",
-         "label": "Resolution", "enumValues": "0:Prefer HD|720:HD only"},
+         "label": "Resolution", "enumValues": "0:Prefer HD|720:HD only",
+         "summary": "Choose the minimum resolution for airings to be recorded."},
+        {"id": "replaceLowerQuality", "value": "false", "type": "bool",
+         "label": "Replace lower resolution items",
+         "summary": "Set whether items in your library may be replaced by higher "
+                    "resolution recordings."},
+        {"id": "recordPartials", "value": "true", "type": "bool",
+         "label": "Allow partial airings",
+         "summary": "Choose whether a recording may begin for an airing already "
+                    "in progress."},
         {"id": "startOffsetMinutes", "value": "0", "type": "int",
-         "label": "Minutes before start"},
+         "label": "Minutes before start",
+         "summary": "Increase the recording duration by adding minutes before "
+                    "the scheduled time."},
         {"id": "endOffsetMinutes", "value": "0", "type": "int",
          "label": "Minutes after end",
-         # Plex writes its own explanation, and no list of allowed values, so
-         # the field takes any number.
+         # No list of allowed values, so the field takes any number.
          "summary": "Increase the recording duration by adding minutes after "
                     "the scheduled time."},
-        {"id": "recordPartials", "value": "true", "type": "bool",
-         "label": "Allow partial airings"},
         {"id": "comskipMethod", "value": "0", "type": "int",
-         "label": "Detect commercials"},
-        # A recurring rule can honour these. A one-shot booking cannot, so a
-        # pass must not be offered them.
-        {"id": "onlyNewAirings", "value": "1", "type": "int", "label": "Airings"},
-        {"id": "autoDeletionItemPolicyWatchedLibrary", "value": "0", "type": "int",
-         "label": "Delete episodes after playing"},
+         "label": "Detect commercials",
+         # The long one. Inline it was twenty lines.
+         "summary": "Attempt to automatically detect and remove commercials from "
+                    "recordings. This process may take a long time and cause high "
+                    "CPU usage. 'Detect and delete commercials' will delete "
+                    "detected commercial footage from your video files."},
         {"id": "lineupChannel", "value": "", "type": "text",
          "label": "Limit to channel",
          "enumValues": ":Any|id-41-1:41.1 KQGGDT (NBC)"},
@@ -130,6 +144,11 @@ def _settings():
          "label": "Limit to airing time",
          # URL encoded inside the enum, as Plex really sends it.
          "enumValues": f"-1:Any|{LIVE_AT}:07%3A00 PM"},
+        # A recurring rule can honour these. A one-shot booking cannot, so a
+        # pass must not be offered them.
+        {"id": "onlyNewAirings", "value": "1", "type": "int", "label": "Airings"},
+        {"id": "autoDeletionItemPolicyWatchedLibrary", "value": "0", "type": "int",
+         "label": "Delete episodes after playing"},
         # No label: plumbing, and must stay hidden.
         {"id": "oneShot", "value": "false", "type": "bool", "label": ""},
         {"id": "comskipEnabled", "value": "-1", "type": "int", "label": ""},
