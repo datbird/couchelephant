@@ -129,9 +129,12 @@ def test_the_channel_list_is_searchable(settings):
 
 
 def test_the_about_tab_carries_the_version_and_plain_words(settings):
+    # Read the version rather than spelling it out. A release bumps it, and a
+    # test that hardcodes it fails the release build it is meant to protect.
+    from app.routes._shared import VERSION
     settings.click('.nav-item[data-sec="about"]')
     text = settings.locator('section[data-sec="about"]').inner_text()
-    assert "0.90" in text
+    assert VERSION in text
     assert "records every one that comes up" in text
     import re
     for jargon in ("API", "subscription", "one-shot", "guid", "premiere",
@@ -141,9 +144,10 @@ def test_the_about_tab_carries_the_version_and_plain_words(settings):
 
 
 def test_the_version_is_on_the_logo_tooltip_too(page):
+    from app.routes._shared import VERSION
     page.goto("/")
     tip = page.get_attribute(".brand .mark", "title") or ""
-    assert "0.90" in tip
+    assert VERSION in tip
 
 
 def test_the_close_button_leaves_settings(settings):
