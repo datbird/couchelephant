@@ -37,7 +37,7 @@ def test_the_section_has_the_three_ways_out(data):
 def test_the_export_panel_says_what_is_left_out(data):
     text = data.locator('section[data-tab="export"]').inner_text()
     assert "guide is not in it" in text
-    assert "Include the Plex token" in text
+    assert "Include secrets" in text
     assert not data.locator("#expsecrets").is_checked(), "the token is opt in"
 
 

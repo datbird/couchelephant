@@ -76,9 +76,13 @@ def _rk(guid):
 # Which programmes each channel runs, in order, on a loop. Sport goes to the
 # network affiliates, films to the independents, so the grid reads like a
 # lineup rather than like a shuffled list.
+# The network affiliates open with a show, so their first game starts at the
+# anchor and is still ahead. A game that began an hour ago is past the
+# scheduling window, and a pass quite rightly books its repeat instead, which
+# photographs like the app getting its one job backwards.
 LINEUP = {
-    "41.1": ("sport", "show"),
-    "5.1": ("sport", "show"),
+    "41.1": ("show", "sport"),
+    "5.1": ("show", "sport"),
     "9.1": ("show", "sport"),
     "4.1": ("show", "sport"),
     "2.1": ("show",),
@@ -100,9 +104,20 @@ def build(anchor, media):
 
     sports, shows, movies, team_tags = [], [], [], []
     names = dict(TEAMS)
-    counters = {"sport": 0, "show": 0, "movie": 0}
+    counters = {"sport": 0, "show": 0, "movie": 0, "news": 0}
 
     for vcn, rotation in LINEUP.items():
+        # The grid opens half an hour before now. A half-hour news slot on
+        # every channel fills that first column instead of leaving it blank.
+        n = counters["news"]
+        counters["news"] += 1
+        shows.append({
+            "guid": _key("news", n), "ratingKey": _rk(_key("news", n)),
+            "type": "episode", "title": "Evening News", "grandparentTitle": "Local News",
+            "summary": "The day's news.", "year": 2026, "contentRating": "TV-G",
+            "duration": 30 * 60_000, "Genre": [{"tag": "News"}],
+            "Media": [media(vcn, start_of_day - 1800, premiere=True, res="1080")],
+        })
         clock = start_of_day
         turn = 0
         while clock < end_of_day:

@@ -41,7 +41,9 @@ ASSET_V = _asset_version()
 
 # Walking the tzdata directory on every settings render costs more than the
 # list is worth. It cannot change while the process runs.
-ZONES = sorted(z for z in zoneinfo.available_timezones() if "/" in z)
+# UTC first: it is the default, and a select whose default is not in its list
+# quietly shows the first entry instead (Africa/Abidjan, once, in a screenshot).
+ZONES = ["UTC"] + sorted(z for z in zoneinfo.available_timezones() if "/" in z)
 
 
 

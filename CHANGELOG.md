@@ -21,6 +21,10 @@
   an error message or a log line.
 - `%` and `_` in a search or a smart-filter value are literal, not wildcards.
 - A search with `&` or `#` in it survives the redirect.
+- The first-run timezone picker starts on UTC. UTC was the default but not in
+  the list, so the browser showed the first entry, Africa/Abidjan.
+- The export checkbox says "Include secrets" and names them; it covered more
+  than the Plex token and the label had not kept up.
 
 ### Changed
 

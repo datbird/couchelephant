@@ -121,3 +121,8 @@ def test_a_signed_in_theme_follows_the_account_not_the_browser(page, browser, ba
     assert other.eval_on_selector(
         "html", "el => el.getAttribute('data-theme-from')") == "account"
     ctx.close()
+
+
+def test_the_timezone_picker_starts_on_utc(fresh):
+    """The default must be in the list, or the browser shows the first entry."""
+    assert fresh.locator("#wz").input_value() == "UTC"

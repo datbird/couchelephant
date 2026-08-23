@@ -65,10 +65,15 @@ def test_switching_sub_tab_switches_the_pane(settings):
 
 
 def test_the_search_reaches_across_every_section(settings):
-    settings.fill("#setq", "cloudflare")
+    settings.fill("#setq", "team domain")
     visible = settings.eval_on_selector_all(
         "#setnav .nav-item:not([hidden])", "els => els.map(e => e.dataset.sec)")
     assert visible == ["accounts"]
+    # A word that lives in two sections lights both.
+    settings.fill("#setq", "cloudflare")
+    visible = settings.eval_on_selector_all(
+        "#setnav .nav-item:not([hidden])", "els => els.map(e => e.dataset.sec)")
+    assert visible == ["accounts", "data"]
 
     settings.fill("#setq", "zzzznothing")
     assert settings.locator("#setnone").is_visible()

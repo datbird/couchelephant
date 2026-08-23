@@ -188,6 +188,9 @@ def main():
         # ---- settings ----
         page.goto("/settings")
         page.wait_for_selector("#setnav .nav-item", timeout=20000)
+        # The tab underline sparkles for 700ms after a change of tab. A shot
+        # inside that window shows dots over "Guide".
+        page.wait_for_timeout(900)
         shot(page, "settings-plex")
         page.click('.nav-item[data-sec="accounts"]')
         page.wait_for_timeout(300)
