@@ -567,7 +567,10 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     var url = st.kind === 'smart'
       ? '/api/rules/options?kind=smart&ce_pass=1&filter=' +
         encodeURIComponent(JSON.stringify(st.tree || null))
-      : '/api/rules/options?kind=any&ce_pass=1';
+      // The panel knows it is on the sports route before a team is chosen.
+      // Left to the server, the answer depended on whichever airing stood in.
+      : '/api/rules/options?kind=any&ce_pass=1' +
+        (st.sub === 'team' ? '&sporty=1' : '');
     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
       st.tplPending = false;
       if (!d.ok) return;
@@ -770,7 +773,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     } else if (st.kind === 'team') {
       url = st.team.id
         ? '/api/rules/options?kind=team&team_id=' + encodeURIComponent(st.team.id)
-        : '/api/rules/options?kind=any';
+        : '/api/rules/options?kind=any&sporty=1';
       if (!st.team.id) cePass = true;
     } else {
       url = '/api/rules/options?kind=series&series=' + encodeURIComponent(st.series);

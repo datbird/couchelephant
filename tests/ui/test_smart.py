@@ -484,3 +484,11 @@ def test_plexs_settings_are_always_there(add, route):
     for want in ("minVideoQuality", "replaceLowerQuality", "recordPartials",
                  "comskipMethod", "startOffsetMinutes", "endOffsetMinutes"):
         assert want in ids, f"{want} missing on the {route} route"
+
+
+def test_a_sports_pass_shows_thirty_minutes_before_a_team_is_picked(add):
+    add.check('input[name=rmode][value="smart"]')
+    add.check('input[name=rsub][value="team"]')
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    assert add.input_value('[data-set="endOffsetMinutes"]') == "30"
+    assert "Sport overruns" in add.locator("#ovlbox").inner_text()

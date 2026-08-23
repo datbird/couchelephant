@@ -650,3 +650,17 @@ def test_a_filter_matching_nothing_still_gets_the_settings(client, synced):
         "kind": "smart", "ce_pass": 1,
         "filter": '{"field":"genre","cmp":"is","value":"Curling"}'}).json()
     assert d["ok"], "the settings are Plex's, not the filter's"
+
+
+def test_the_sports_route_gets_its_padding_whatever_stands_in(client, synced):
+    """The panel knows it is on the sports route before a team is chosen. Left
+    to the sample airing, the padding was filled in on one server and not on
+    another."""
+    d = client.get("/api/rules/options",
+                   params={"kind": "any", "ce_pass": 1, "sporty": 1}).json()
+    assert d["sporty"] is True
+    assert d["sports_padding"]["endOffsetMinutes"] == "30"
+
+    plain = client.get("/api/rules/options",
+                       params={"kind": "any", "ce_pass": 1}).json()
+    assert plain["ok"]

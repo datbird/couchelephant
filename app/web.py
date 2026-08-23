@@ -1437,7 +1437,7 @@ _PRESETS = {
 
 @app.get("/api/rules/options")
 def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
-                     filter: str = "", ce_pass: int = 0):
+                     filter: str = "", ce_pass: int = 0, sporty: int = 0):
     """Plex's own options for a rule that follows this team, programme or filter.
 
     A template belongs to a programme, so one upcoming broadcast stands in for
@@ -1501,9 +1501,15 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
     if want and not ce_pass:
         payload.sort(key=lambda t: 0 if want.lower() in (t["title"] or "").lower() else 1)
     # A pass that follows a team follows sport, and sport runs over.
-    sporty = kind == "team" or (row["section"] if "section" in row.keys() else "") == "sports"
+    #
+    # `sporty` is also accepted from the caller, because the panel knows it is
+    # on the sports-team route before a team has been chosen. Without that the
+    # answer depended on whatever airing happened to stand in, so the padding
+    # was filled in on one server and not on another.
+    is_sport = (kind == "team" or sporty
+                or (row["section"] if "section" in row.keys() else "") == "sports")
     return JSONResponse({"ok": True, "templates": payload, "sample": row["title"],
-                         "sporty": bool(sporty),
+                         "sporty": bool(is_sport),
                          "sports_padding": SPORTS_PADDING})
 
 
