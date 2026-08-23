@@ -759,6 +759,10 @@ body.signin .pt-nav{display:none}
    you what to do next. */
 /* display:flex beats the hidden attribute, so an empty box was drawn before
    anything had been checked. */
+/* A checkbox with its label beside it, used all over the backup panels. */
+.chk{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px}
+.chk input[type=checkbox]{flex:0 0 auto;width:auto}
+.bkjob{margin-bottom:14px}
 .verdict[hidden]{display:none}
 .verdict{display:flex;align-items:flex-start;gap:10px;margin-top:12px;
   padding:11px 13px;border-radius:8px;font-size:13px;line-height:1.45;
@@ -1664,6 +1668,321 @@ window.wireSettings = function (root) {
         });
     });
   });
+
+  // ---- Backup and restore -------------------------------------------
+  //
+  // Three panels over one idea: get your decisions out of this machine and
+  // back into it. Export is by hand, snapshots are on a timer, the backing
+  // store is live. Each one has its own restore.
+
+  function verdict(el, ok, text) {
+    if (!el) return;
+    el.hidden = false;
+    el.className = 'verdict ' + (ok === null ? 'busy' : ok ? 'ok' : 'bad');
+    var t = el.querySelector('.vtext');
+    if (t) t.textContent = text;
+  }
+
+  var expgo = root.querySelector('#expgo');
+  if (expgo) {
+    expgo.addEventListener('click', function () {
+      var secrets = root.querySelector('#expsecrets');
+      // A plain navigation, so the browser saves it the way it saves anything.
+      location.href = '/api/export' + (secrets && secrets.checked ? '?secrets=1' : '');
+    });
+  }
+
+  var impfile = root.querySelector('#impfile');
+  if (impfile) {
+    var impgo = root.querySelector('#impgo');
+    impfile.addEventListener('change', function () {
+      var f = impfile.files[0];
+      impgo.disabled = true;
+      if (!f) return;
+      var body = new FormData();
+      body.append('file', f);
+      verdict(root.querySelector('#impverdict'), null, 'Reading the file...');
+      fetch('/api/import/inspect', {method: 'POST', body: body})
+        .then(CE.readJson).then(function (d) {
+          var v = root.querySelector('#impverdict');
+          if (!d.ok) { verdict(v, false, d.error); return; }
+          var bits = [];
+          Object.keys(d.counts || {}).forEach(function (k) {
+            if (d.counts[k]) bits.push(d.counts[k] + ' ' + k.replace(/_/g, ' '));
+          });
+          verdict(v, true, 'A CouchElephant export' +
+            (d.created_at ? ' from ' + new Date(d.created_at * 1000).toLocaleString() : '') +
+            (d.includes_secrets ? ', with the Plex token' : '') + '.');
+          var what = root.querySelector('#impwhat');
+          what.hidden = false;
+          what.textContent = bits.length ? 'It holds ' + bits.join(', ') + '.'
+                                         : 'It holds nothing.';
+          impgo.disabled = false;
+        })
+        .catch(function (e) { verdict(root.querySelector('#impverdict'), false, String(e)); });
+    });
+
+    impgo.addEventListener('click', function () {
+      var f = impfile.files[0], msg = root.querySelector('#impmsg');
+      if (!f) return;
+      var body = new FormData();
+      body.append('file', f);
+      if (root.querySelector('#impreplace').checked) body.append('replace', '1');
+      body.append('secrets', '1');
+      impgo.disabled = true; impgo.textContent = 'Importing...';
+      fetch('/api/import', {method: 'POST', body: body})
+        .then(CE.readJson).then(function (d) {
+          msg.className = 'note said ' + (d.ok ? 'ok' : 'bad');
+          msg.textContent = d.message || d.error || '';
+          impgo.textContent = 'Import';
+          impgo.disabled = !d.ok ? false : true;
+          if (d.ok) setTimeout(function () { location.reload(); }, 1400);
+        })
+        .catch(function (e) {
+          msg.className = 'note said bad'; msg.textContent = String(e);
+          impgo.disabled = false; impgo.textContent = 'Import';
+        });
+    });
+  }
+
+  // ---- snapshot jobs ----
+  var bkjobs = root.querySelector('#bkjobs');
+  if (bkjobs) {
+    function jobRow(j) {
+      var id = j ? j.id : '';
+      var h = '<div class="setblock bkjob" data-id="' + id + '">';
+      h += '<div class="field"><label>Name</label>' +
+           '<input data-f="name" value="' + CE.esc(j ? j.name : 'Nightly') + '"></div>';
+      h += '<div class="field"><label>Folder</label>' +
+           '<input data-f="dest_path" placeholder="/data/backups" value="' +
+           CE.esc(j ? (j.dest_path || '') : '') + '">' +
+           '<span class="help">A path this container can see. Mount it if it is ' +
+           'somewhere else.</span></div>';
+      h += '<div class="field"><label>Every</label>' +
+           '<input type="number" min="0" data-f="every_hours" style="max-width:120px" ' +
+           'value="' + (j ? j.every_hours : 24) + '">' +
+           '<span class="help">Hours. 0 runs only when you press the button.</span></div>';
+      h += '<div class="field"><label>Keep</label>' +
+           '<input type="number" min="0" data-f="retention" style="max-width:120px" ' +
+           'value="' + (j ? j.retention : 7) + '">' +
+           '<span class="help">Archives. The oldest go first, and only this ' +
+           'job\'s.</span></div>';
+      h += '<div class="field"><label>Passphrase</label>' +
+           '<input type="password" data-f="passphrase" placeholder="' +
+           (j && j.encrypted ? 'set, leave blank to keep' : 'none') + '">' +
+           '<span class="help">Optional. AES-256, which 7-Zip, Keka and WinRAR ' +
+           'can open. Type <b>off</b> to remove one.</span></div>';
+      h += '<label class="chk"><input type="checkbox" data-f="enabled"' +
+           (!j || j.enabled ? ' checked' : '') + '><span>On</span></label>';
+      h += '<label class="chk"><input type="checkbox" data-f="raw_db"' +
+           (!j || j.raw_db ? ' checked' : '') +
+           '><span>Include the database files as well as the export</span></label>';
+      h += '<label class="chk"><input type="checkbox" data-f="with_secrets"' +
+           (j && j.with_secrets ? ' checked' : '') +
+           '><span>Include the Plex token</span></label>';
+      if (j && j.last_run) {
+        h += '<div class="note ' + (j.last_ok ? '' : 'said bad') + '">Last run ' +
+             new Date(j.last_run * 1000).toLocaleString() + ': ' +
+             (j.last_ok ? CE.esc(j.last_file || '') + ' (' +
+               Math.round((j.last_size || 0) / 1024) + ' KB)'
+                        : CE.esc(j.last_error || 'failed')) + '</div>';
+      }
+      h += '<div class="row" style="margin-top:10px">' +
+           '<button type="button" class="primary" data-act="save">Save</button>' +
+           (j ? '<button type="button" data-act="run">Back up now</button>' +
+                '<button type="button" class="danger" data-act="del">Remove</button>' : '') +
+           '<span class="note bksay"></span></div>';
+      return h + '</div>';
+    }
+
+    function paintJobs(jobs) {
+      bkjobs.innerHTML = jobs.length
+        ? jobs.map(function (j) { return jobRow(j); }).join('')
+        : '<div class="empty tiny">No backup jobs yet.</div>';
+    }
+
+    function loadJobs() {
+      fetch('/api/backups/jobs').then(CE.readJson).then(function (d) {
+        if (d.ok) paintJobs(d.jobs);
+      });
+    }
+
+    root.querySelector('#bkadd').addEventListener('click', function () {
+      bkjobs.insertAdjacentHTML('beforeend', jobRow(null));
+    });
+
+    bkjobs.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      var card = btn.closest('.bkjob'), id = card.dataset.id;
+      function after(d) {
+        // Repaint FIRST. Writing the message and then redrawing the list threw
+        // the message away in the same tick, which read as "nothing happened".
+        var newId = d.id || id;
+        if (d.jobs) paintJobs(d.jobs);
+        var row = bkjobs.querySelector('.bkjob[data-id="' + newId + '"]') || card;
+        var say = row.querySelector('.bksay');
+        if (!say) return;
+        say.className = 'note bksay said ' + (d.ok ? 'ok' : 'bad');
+        say.textContent = d.ok ? (d.file ? 'Wrote ' + d.file : 'Saved')
+                               : (d.error || 'Failed');
+      }
+      if (btn.dataset.act === 'save') {
+        var body = new URLSearchParams();
+        if (id) body.append('job_id', id);
+        card.querySelectorAll('[data-f]').forEach(function (el) {
+          body.append(el.dataset.f, el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value);
+        });
+        fetch('/api/backups/jobs', {method: 'POST', body: body}).then(CE.readJson).then(after);
+      } else if (btn.dataset.act === 'run') {
+        btn.disabled = true; btn.textContent = 'Working...';
+        fetch('/api/backups/jobs/' + id + '/run', {method: 'POST'})
+          .then(CE.readJson).then(function (d) {
+            btn.disabled = false; btn.textContent = 'Back up now'; after(d);
+          });
+      } else if (btn.dataset.act === 'del') {
+        fetch('/api/backups/jobs/' + id + '/delete', {method: 'POST'})
+          .then(CE.readJson).then(after);
+      }
+    });
+
+    root.querySelector('#bklist').addEventListener('click', function () {
+      var dest = root.querySelector('#bkdest').value.trim();
+      var out = root.querySelector('#bkarch');
+      out.innerHTML = '<div class="fempty">Reading...</div>';
+      fetch('/api/backups/archives?dest=' + encodeURIComponent(dest))
+        .then(CE.readJson).then(function (d) {
+          if (!d.archives.length) {
+            out.innerHTML = '<div class="fempty">Nothing in that folder.</div>';
+            return;
+          }
+          out.innerHTML = d.archives.map(function (a) {
+            return '<button type="button" class="rrow" data-arch="' + CE.esc(a.name) +
+              '"><span class="rt">' + CE.esc(a.name) + '</span><span class="rn">' +
+              new Date(a.at * 1000).toLocaleString() + ' &middot; ' +
+              Math.round(a.size / 1024) + ' KB</span></button>';
+          }).join('');
+          out.querySelectorAll('[data-arch]').forEach(function (b) {
+            b.addEventListener('click', function () {
+              var name = b.dataset.arch;
+              // Restoring replaces what is here. It is worth one question.
+              if (!confirm('Restore ' + name + '? A copy of what is here now is ' +
+                           'kept first.')) return;
+              var pass = prompt('Passphrase, if that archive has one:', '') || '';
+              var body = new URLSearchParams({dest: dest, name: name,
+                                              passphrase: pass, replace: '1'});
+              b.disabled = true;
+              fetch('/api/backups/restore', {method: 'POST', body: body})
+                .then(CE.readJson).then(function (d2) {
+                  b.disabled = false;
+                  if (d2.ok) { location.reload(); return; }
+                  alert(d2.error || 'That did not work.');
+                });
+            });
+          });
+        });
+    });
+
+    loadJobs();
+  }
+
+  // ---- the backing store ----
+  var bsbackend = root.querySelector('#bsbackend');
+  if (bsbackend) {
+    var META = null;
+
+    function paintFields() {
+      var wrap = root.querySelector('#bsfields');
+      var chosen = bsbackend.value;
+      var b = (META.backends || []).filter(function (x) { return x.name === chosen; })[0];
+      if (!b) { wrap.innerHTML = ''; return; }
+      wrap.innerHTML = b.fields.map(function (f) {
+        return '<div class="field"><label for="bs_' + f.key + '">' + CE.esc(f.label) +
+          '</label><input id="bs_' + f.key + '" data-k="' + f.key + '" type="' +
+          (f.kind === 'secret' ? 'password' : 'text') + '" value="' +
+          CE.esc(META.config[f.key] || '') + '"></div>';
+      }).join('');
+    }
+
+    function paintStatus() {
+      var el = root.querySelector('#bsstatus'), st = META.status || {};
+      if (!st.at) { el.textContent = 'It has not run yet.'; return; }
+      el.className = 'note said ' + (st.ok ? 'ok' : 'bad');
+      el.textContent = new Date(st.at * 1000).toLocaleString() + ': ' + (st.detail || '');
+    }
+
+    fetch('/api/backingstore/config').then(CE.readJson).then(function (d) {
+      if (!d.ok) return;
+      META = d;
+      bsbackend.innerHTML = '<option value="">Not set up</option>' +
+        d.backends.map(function (b) {
+          return '<option value="' + b.name + '"' +
+            (d.config.backingstore_backend === b.name ? ' selected' : '') + '>' +
+            CE.esc(b.label) + '</option>';
+        }).join('');
+      root.querySelector('#bsauto').value = d.config.backingstore_auto_minutes || 0;
+      paintFields();
+      paintStatus();
+    });
+
+    bsbackend.addEventListener('change', paintFields);
+
+    function saveStore() {
+      var body = new URLSearchParams();
+      body.append('backingstore_backend', bsbackend.value);
+      body.append('backingstore_auto_minutes', root.querySelector('#bsauto').value || '0');
+      root.querySelectorAll('#bsfields [data-k]').forEach(function (el) {
+        body.append(el.dataset.k, el.value);
+      });
+      return fetch('/api/backingstore/config', {method: 'POST', body: body})
+        .then(CE.readJson);
+    }
+
+    root.querySelector('#bssave').addEventListener('click', function () {
+      saveStore().then(function () {
+        verdict(root.querySelector('#bsverdict'), true, 'Saved.');
+      });
+    });
+
+    root.querySelector('#bstest').addEventListener('click', function () {
+      var v = root.querySelector('#bsverdict');
+      verdict(v, null, 'Checking...');
+      // Saved first, so the test checks what is on screen rather than what
+      // was last stored.
+      saveStore().then(function () {
+        return fetch('/api/backingstore/test', {method: 'POST'}).then(CE.readJson);
+      }).then(function (d) { verdict(v, !!d.ok, d.detail || d.error || ''); })
+        .catch(function (e) { verdict(v, false, String(e)); });
+    });
+
+    function run(url, body, label) {
+      var el = root.querySelector('#bsstatus');
+      el.className = 'note'; el.textContent = 'Working...';
+      fetch(url, {method: 'POST', body: body}).then(CE.readJson).then(function (d) {
+        el.className = 'note said ' + (d.ok ? 'ok' : 'bad');
+        if (!d.ok) { el.textContent = d.error || 'That did not work.'; return; }
+        el.textContent = d.dry_run
+          ? label + ' would send ' + d.pushed + ', receive ' + d.pulled +
+            ' and remove ' + d.removed + '.'
+          : (d.restored != null
+              ? 'Restored ' + d.restored + ' record(s).'
+              : 'Sent ' + d.pushed + ', received ' + d.pulled +
+                ', removed ' + d.removed + '.');
+      });
+    }
+
+    root.querySelector('#bsrun').addEventListener('click', function () {
+      run('/api/backingstore/run', new URLSearchParams(), 'That');
+    });
+    root.querySelector('#bsdry').addEventListener('click', function () {
+      run('/api/backingstore/run', new URLSearchParams({dry_run: '1'}), 'That');
+    });
+    root.querySelector('#bsrestore').addEventListener('click', function () {
+      if (!confirm('Pull everything down from the backing store? Nothing is ' +
+                   'written back to it.')) return;
+      run('/api/backingstore/restore', new URLSearchParams(), 'That');
+    });
+  }
 
   // Channel artwork: upload one of your own, or drop back to the guide's.
   var chlist = root.querySelector('#chlist');

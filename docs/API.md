@@ -87,3 +87,25 @@ Useful as a container health check.
 Everything under `/api/` answers JSON. Success is `{"ok": true, ...}`. Failure
 is `{"ok": false, "error": "..."}` with a matching status code, and the error
 is a sentence meant for a person, not a code.
+
+## Backup and restore
+
+See [Your data](DATA.md).
+
+| | |
+| --- | --- |
+| `GET /api/export` | Download everything you decided, as a zip. `secrets=1` includes the Plex token |
+| `POST /api/import/inspect` | What is in an uploaded export, without writing anything. Multipart, field `file` |
+| `POST /api/import` | Read an export back in. `file`, `replace`, `secrets` |
+| `GET /api/backups/jobs` | Every snapshot job. A stored passphrase is reported as `encrypted`, never returned |
+| `POST /api/backups/jobs` | Create or change one. `job_id` to change, `name`, `dest_path`, `every_hours`, `retention`, `passphrase`, `enabled`, `raw_db`, `with_secrets` |
+| `POST /api/backups/jobs/{id}/run` | Run it now |
+| `POST /api/backups/jobs/{id}/delete` | Remove it |
+| `GET /api/backups/archives?dest=` | Archives in a folder, newest first |
+| `POST /api/backups/restore` | Put one back. `dest`, `name`, `passphrase`, `replace`. Copies the current state to `before-restore/` first |
+| `GET /api/backingstore/config` | Backends, their fields, the current settings and the last run. Passwords are masked |
+| `POST /api/backingstore/config` | Save it. A masked password means "leave it alone" |
+| `POST /api/backingstore/test` | Connect and touch a store |
+| `POST /api/backingstore/run` | Reconcile both ways. `dry_run=1` counts without writing |
+| `POST /api/backingstore/restore` | Pull everything down and write nothing back |
+| `GET /api/backingstore/status` | What the last run did |

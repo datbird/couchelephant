@@ -8,6 +8,7 @@ import json
 import os
 import sqlite3
 import threading
+import uuid
 from contextlib import contextmanager
 
 DB_PATH = os.environ.get("COUCHELEPHANT_DB", "/data/couchelephant.db")
@@ -130,6 +131,9 @@ CREATE TABLE IF NOT EXISTS passes (
     -- A smart pass carries a condition tree instead of a team or a series.
     filter       TEXT,
     label        TEXT,
+    -- Stable across machines, unlike `id`. This is what an export, a backing
+    -- store or a restore uses to say "the same pass".
+    uid          TEXT,
     enabled      INTEGER DEFAULT 1,
     created_at   INTEGER
 );
@@ -162,6 +166,7 @@ CREATE TABLE IF NOT EXISTS our_grabs (
     begins_at    INTEGER,
     source       TEXT,
     subscription TEXT,
+    pass_uid     TEXT,
     created_at   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_ourgrabs_guid ON our_grabs(program_guid);
@@ -257,6 +262,12 @@ MIGRATIONS = [
     ("teams", "league", "TEXT"),
     ("teams", "in_guide", "INTEGER DEFAULT 0"),
     ("teams", "last_seen", "INTEGER"),
+    # A pass's `id` is an autoincrement, which means a different number on
+    # every install. Anything that leaves this machine, an export, a backing
+    # store, a snapshot restored elsewhere, needs a name for a pass that two
+    # machines agree on. See [[dbstore]].
+    ("passes", "uid", "TEXT"),
+    ("our_grabs", "pass_uid", "TEXT"),
 ]
 
 
@@ -273,7 +284,26 @@ def init():
     _migrate(conn)
     for k, v in DEFAULTS.items():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+    _backfill_uids(conn)
+    # After the migration and the backfill, not inside SCHEMA: on an existing
+    # install the column does not exist until _migrate has run.
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS passes_uid ON passes(uid)")
     conn.commit()
+
+
+def _backfill_uids(conn):
+    """Give every existing pass a uid, and every grab the uid of its pass.
+
+    A pass made before this column existed has none, so anything that names a
+    pass across machines would silently skip it.
+    """
+    rows = conn.execute("SELECT id FROM passes WHERE uid IS NULL OR uid = ''").fetchall()
+    for r in rows:
+        conn.execute("UPDATE passes SET uid = ? WHERE id = ?",
+                     (uuid.uuid4().hex, r["id"]))
+    conn.execute(
+        "UPDATE our_grabs SET pass_uid = (SELECT uid FROM passes WHERE passes.id = "
+        "our_grabs.pass_id) WHERE pass_uid IS NULL AND pass_id IS NOT NULL")
 
 
 def get_setting(key, default=None):

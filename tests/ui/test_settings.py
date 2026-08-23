@@ -40,7 +40,8 @@ def test_there_is_no_settings_tab_left_in_the_tab_bar(page):
 def test_the_sections_run_down_the_left(settings):
     names = settings.eval_on_selector_all(
         "#setnav .nav-item", "els => els.map(e => e.textContent.trim())")
-    assert names == ["Plex", "Recording", "Accounts", "Channels", "About"]
+    assert names == ["Plex", "Recording", "Accounts", "Channels",
+                     "Backup & restore", "About"]
 
 
 def test_each_section_has_its_own_sub_tabs(settings):

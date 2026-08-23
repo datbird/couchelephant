@@ -11,6 +11,7 @@
       <button type="button" class="nav-item" data-sec="recording">Recording</button>
       <button type="button" class="nav-item" data-sec="accounts">Accounts</button>
       <button type="button" class="nav-item" data-sec="channels">Channels</button>
+      <button type="button" class="nav-item" data-sec="data">Backup &amp; restore</button>
       <button type="button" class="nav-item" data-sec="about">About</button>
     </div>
     <div class="nav-none" id="setnone" hidden>Nothing matches.</div>
@@ -254,6 +255,111 @@
             <span class="chsay"></span>
           </div>
           {% endfor %}
+        </div>
+      </section>
+
+      {# ---------------- Backup and restore ----------------
+         Two ways to protect the same data, each with its own backup and its
+         own restore. A live copy saves you from losing the machine; a snapshot
+         saves you from a change you regret, because a live copy faithfully
+         copies the mistake. #}
+      <section data-sec="data" data-tab="export" data-tab-label="Export &amp; import" hidden>
+        <h2>Export and import</h2>
+        <p class="dim">Everything you decided, in one file. Your passes and their
+          conditions, the recordings you booked, your channel artwork, your settings
+          and your accounts.</p>
+        <div class="setblock" data-find="export download backup file zip">
+          <h3>Export</h3>
+          <p class="dim">The guide is not in it. Programmes and airings rebuild from
+            your Plex server in seconds, so a stale copy would be bigger and wrong.</p>
+          <label class="chk"><input type="checkbox" id="expsecrets">
+            <span>Include the Plex token</span></label>
+          <div class="help">Off by default. It is a credential, and an export is a
+            file that ends up in an email.</div>
+          <div class="row" style="margin-top:12px">
+            <button type="button" class="primary" id="expgo">Download export</button>
+          </div>
+        </div>
+        <div class="setblock" data-find="import restore upload file zip">
+          <h3>Import</h3>
+          <p class="dim">Read an export back in. It says what is in the file before
+            anything is written.</p>
+          <label class="chk"><input type="file" id="impfile" accept=".zip"
+                 style="max-width:100%"></label>
+          <div class="verdict" id="impverdict" hidden>
+            <span class="vmark" aria-hidden="true"></span><span class="vtext"></span>
+          </div>
+          <div id="impwhat" class="note" hidden></div>
+          <label class="chk" style="margin-top:10px"><input type="checkbox" id="impreplace">
+            <span>Replace, rather than merge</span></label>
+          <div class="help">Merging writes everything in the file and leaves anything
+            else here alone. Replacing removes what the file does not carry, so the
+            result is exactly what was exported.</div>
+          <div class="row" style="margin-top:12px">
+            <button type="button" class="primary" id="impgo" disabled>Import</button>
+            <span class="note" id="impmsg"></span>
+          </div>
+        </div>
+      </section>
+
+      <section data-sec="data" data-tab="snapshot" data-tab-label="Snapshots" hidden>
+        <h2>Snapshot backups</h2>
+        <p class="dim">A copy of a moment, written on a schedule and kept for as long
+          as you say. This is what saves you from a change you regret.</p>
+        <div id="bkjobs" data-find="backup job schedule retention encrypt passphrase folder"></div>
+        <div class="row" style="margin-top:12px">
+          <button type="button" id="bkadd">Add a backup job</button>
+          <span class="note" id="bkmsg"></span>
+        </div>
+        <div class="setblock" data-find="restore archive snapshot">
+          <h3>Restore from an archive</h3>
+          <p class="dim">Read the list from any folder, including one written by an
+            install you no longer have.</p>
+          <div class="row">
+            <input id="bkdest" placeholder="/data/backups" style="flex:1 1 260px">
+            <button type="button" id="bklist">List archives</button>
+          </div>
+          <div id="bkarch" class="rlist" style="margin-top:10px"></div>
+        </div>
+      </section>
+
+      <section data-sec="data" data-tab="database" data-tab-label="Database" hidden>
+        <h2>Backing store</h2>
+        <p class="dim">Keep a live copy of your decisions in another database, both
+          ways. Change something here and it appears there. Rebuild this machine and
+          it comes back.</p>
+        <p class="dim">The guide is never copied. It is an output, not data.</p>
+        <div class="setblock" data-find="backing store database postgres mysql sqlite sync two-way">
+          <h3>Where to keep it</h3>
+          <div class="field">
+            <label for="bsbackend">Database</label>
+            <select id="bsbackend"><option value="">Not set up</option></select>
+          </div>
+          <div id="bsfields"></div>
+          <div class="field">
+            <label for="bsauto">Reconcile every</label>
+            <input id="bsauto" type="number" min="0" step="5" style="max-width:120px">
+            <span class="help">Minutes. 0 does it only when you press the button.</span>
+          </div>
+          <div class="row">
+            <button type="button" class="primary" id="bssave">Save</button>
+            <button type="button" id="bstest">Test connection</button>
+          </div>
+          <div class="verdict" id="bsverdict" hidden>
+            <span class="vmark" aria-hidden="true"></span><span class="vtext"></span>
+          </div>
+        </div>
+        <div class="setblock" data-find="sync now backup restore from database">
+          <h3>Now</h3>
+          <div class="row">
+            <button type="button" id="bsrun">Reconcile now</button>
+            <button type="button" id="bsdry">Preview</button>
+            <button type="button" class="danger" id="bsrestore">Restore from the store</button>
+          </div>
+          <div class="help">Restoring pulls everything down and writes nothing back,
+            so restoring onto an empty machine cannot erase the copy you are
+            restoring from.</div>
+          <div id="bsstatus" class="note" style="margin-top:10px"></div>
         </div>
       </section>
 

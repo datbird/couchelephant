@@ -4,6 +4,20 @@
 
 ### Added
 
+- **Export and import.** One zip with everything you decided: passes, the
+  recordings they booked, channel artwork, settings and accounts. Readable JSON
+  inside, on purpose. The Plex token is left out unless you ask.
+- **Snapshot backups.** Jobs with their own folder, schedule and retention.
+  Optional AES-256 that 7-Zip and Keka can open. The database files are copied
+  with SQLite's online backup, so a snapshot taken mid-write is consistent.
+  Restoring takes a copy of the current state first.
+- **A backing store.** A live two-way copy in PostgreSQL, MySQL or another
+  SQLite file, reconciled by three-way merge on demand or on a timer. An edit
+  beats a delete; a conflict goes to the later timestamp. Restoring pulls down
+  and never writes back, so restoring onto an empty machine cannot erase the
+  copy it is restoring from.
+- Passes now carry a `uid`, and the recordings they book carry `pass_uid`, so a
+  pass means the same thing on another machine.
 - **1,310 teams to follow, not 76.** Plex lists only the teams playing in the
   next eleven days. CouchElephant now ships its own catalogue: every NFL, NBA,
   MLB, NHL, WNBA, MLS and NWSL side, 929 NCAA schools, and the top two tiers of

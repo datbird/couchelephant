@@ -125,6 +125,19 @@ Its guide is anchored just ahead of the current time, because the app's own
 horizons are relative: passes look thirty days ahead and the grid draws around
 now. `COUCHELEPHANT_FAKE_ANCHOR` overrides the anchor.
 
+### Both clocks are pinned to UTC
+
+The guide is rendered from the server's configured timezone and positioned by
+the browser's clock. When those disagree the grid asks for a window a day away
+from the data and draws nothing. So the suite sets the app's timezone to UTC
+and gives every browser context `timezone_id="UTC"`.
+
+That is a real limitation of the page, not only of the test. It shows up when
+the machine running the browser is in a different zone from the one configured
+in Settings, and the guide happens to straddle midnight in one of them. Worth
+fixing properly one day; noted here so the next person does not spend an
+evening on it, as this one did.
+
 ### What is covered
 
 | | |
@@ -138,8 +151,11 @@ now. `COUCHELEPHANT_FAKE_ANCHOR` overrides the anchor.
 | `test_teamcat.py` | the shipped team catalogue, and how it meets Plex's list |
 | `test_auth.py` | hashing, sessions, the three modes |
 | `test_api.py` | every endpoint, in process |
+| `test_dbstore.py` | the three-way merge, and export/import |
+| `test_backingstore.py` | the two-way store, against a real SQLite file |
+| `test_backups.py` | snapshot jobs, retention, encryption, restore |
 | `test_conventions.py` | rules the code holds itself to, checked not remembered |
-| `ui/` | the browser: guide, record, recordings, smart passes, settings, phone, first run |
+| `ui/` | the browser: guide, record, recordings, smart passes, backup and restore, settings, phone, first run |
 
 The UI suite fails a test on any uncaught page error, so an exception that
 leaves a panel half drawn is a failure even when the assertions would pass.

@@ -255,18 +255,25 @@ def _schedule(plex, row, target_section, source="pass", template=None, prefs=Non
 
 
 def remember(row, source, subscription=None, pass_id=None):
-    """Record that this airing was scheduled by us, and by what."""
+    """Record that this airing was scheduled by us, and by what.
+
+    The pass is recorded by uid as well as by id, because `id` is an
+    autoincrement and means nothing on another machine.
+    """
     with db.tx() as c:
         c.execute(
             """INSERT INTO our_grabs (airing_id, program_guid, title, channel_vcn,
-                                      begins_at, source, subscription, pass_id, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?)
+                                      begins_at, source, subscription, pass_id,
+                                      pass_uid, created_at)
+               VALUES (?,?,?,?,?,?,?,?,
+                       (SELECT uid FROM passes WHERE id = ?),?)
                ON CONFLICT(airing_id) DO UPDATE SET source=excluded.source,
                  subscription=COALESCE(excluded.subscription, our_grabs.subscription),
                  pass_id=COALESCE(excluded.pass_id, our_grabs.pass_id),
+                 pass_uid=COALESCE(excluded.pass_uid, our_grabs.pass_uid),
                  created_at=excluded.created_at""",
             (row["id"], row["program_guid"], row["title"], row["channel_vcn"],
-             row["begins_at"], source, subscription, pass_id, _now()))
+             row["begins_at"], source, subscription, pass_id, pass_id, _now()))
 
 
 def forget(airing_id):

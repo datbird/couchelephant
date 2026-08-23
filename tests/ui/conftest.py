@@ -64,6 +64,13 @@ def browser():
 
 
 def _page(browser, base_url, **context):
+    # Downloads are a feature here, not an accident: the export panel hands you
+    # a file, and a test that cannot receive one cannot check that.
+    context.setdefault("accept_downloads", True)
+    # Pinned to match the app's configured timezone. Left to the host, a
+    # machine five hours from the server drew an empty grid, because the page
+    # asked for the wrong day.
+    context.setdefault("timezone_id", "UTC")
     ctx = browser.new_context(base_url=base_url, **context)
     page = ctx.new_page()
     # A console error is a failure. Half of what a UI suite is for is catching

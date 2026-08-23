@@ -4,6 +4,7 @@ import datetime
 import os
 import time
 import urllib.parse
+import uuid
 import zoneinfo
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -11,7 +12,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import auth, cf_access, db, filters, passes, smartfilter, sync, teamcat
+from . import (auth, backingstore, backups, cf_access, db, dbstore, filters,
+               passes, portable, smartfilter, sync, teamcat)
 from .plex import Plex, PlexError
 
 BASE = os.path.dirname(__file__)
@@ -293,6 +295,183 @@ def api_theme(request: Request, theme: str = Form("dark")):
     return JSONResponse({"ok": True, "stored": "browser"})
 
 
+# ---------- database: export, import, snapshots, backing store ----------
+
+@app.get("/api/export")
+def api_export(secrets: int = 0):
+    """Download everything you decided, in one file."""
+    blob = portable.export_bytes(include_secrets=bool(secrets), version=VERSION)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Response(
+        blob, media_type="application/zip",
+        headers={"Content-Disposition":
+                 f'attachment; filename="couchelephant-{stamp}.zip"'})
+
+
+@app.post("/api/import/inspect")
+async def api_import_inspect(file: UploadFile = File(...)):
+    """What is in this file, before anything is written."""
+    try:
+        return JSONResponse({"ok": True, **portable.describe(await file.read())})
+    except portable.ImportError_ as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.post("/api/import")
+async def api_import(file: UploadFile = File(...), replace: str = Form(""),
+                     secrets: str = Form("")):
+    """Read an export back in."""
+    blob = await file.read()
+    try:
+        report = await asyncio.to_thread(
+            portable.import_bytes, blob,
+            str(replace).lower() in ("1", "true", "yes"),
+            str(secrets).lower() in ("1", "true", "yes"))
+    except portable.ImportError_ as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    total = sum(v["written"] for v in report["stores"].values())
+    removed = sum(v["deleted"] for v in report["stores"].values())
+    report["message"] = (f"{total} record(s) imported"
+                         + (f", {removed} removed" if removed else "")
+                         + (f", {report['logos']} logo(s)" if report["logos"] else "")
+                         + ". The guide refreshes on the next sync.")
+    return JSONResponse(report)
+
+
+@app.get("/api/backups/jobs")
+def api_backup_jobs():
+    return JSONResponse({"ok": True, "jobs": backups.jobs()})
+
+
+@app.post("/api/backups/jobs")
+def api_backup_job_save(job_id: str = Form(""), name: str = Form("Backup"),
+                        dest_path: str = Form(""), every_hours: str = Form("24"),
+                        retention: str = Form("7"), passphrase: str = Form(""),
+                        enabled: str = Form("1"), raw_db: str = Form("1"),
+                        with_secrets: str = Form("")):
+    def on(v):
+        return str(v).lower() in ("1", "true", "yes", "on")
+    try:
+        jid = backups.save_job(
+            int(job_id) if job_id else None, name=name, dest_path=dest_path,
+            every_hours=every_hours, retention=retention, passphrase=passphrase,
+            enabled=on(enabled), raw_db=on(raw_db), with_secrets=on(with_secrets))
+    except (TypeError, ValueError) as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True, "id": jid, "jobs": backups.jobs()})
+
+
+@app.post("/api/backups/jobs/{job_id}/delete")
+def api_backup_job_delete(job_id: int):
+    backups.delete_job(job_id)
+    return JSONResponse({"ok": True, "jobs": backups.jobs()})
+
+
+@app.post("/api/backups/jobs/{job_id}/run")
+async def api_backup_job_run(job_id: int):
+    try:
+        out = await asyncio.to_thread(backups.run_job, job_id, VERSION)
+    except FileNotFoundError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=404)
+    out["jobs"] = backups.jobs()
+    return JSONResponse(out, status_code=200 if out.get("ok") else 400)
+
+
+@app.get("/api/backups/archives")
+def api_backup_archives(dest: str = ""):
+    return JSONResponse({"ok": True, "archives": backups.archives(dest)})
+
+
+@app.post("/api/backups/restore")
+async def api_backup_restore(dest: str = Form(...), name: str = Form(...),
+                             passphrase: str = Form(""), replace: str = Form("1")):
+    try:
+        report = await asyncio.to_thread(
+            backups.restore, dest, name, passphrase,
+            str(replace).lower() in ("1", "true", "yes"), VERSION)
+    except portable.ImportError_ as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"},
+                            status_code=400)
+    return JSONResponse(report)
+
+
+@app.get("/api/backingstore/config")
+def api_backingstore_config():
+    cfg = backingstore.config()
+    # A stored password is never handed back, only whether there is one.
+    shown = {k: ("*" * 8 if v else "") if k in backingstore.SECRET_KEYS else v
+             for k, v in cfg.items()}
+    return JSONResponse({
+        "ok": True, "config": shown,
+        "backends": [{"name": b.name, "label": b.label,
+                      "fields": [{"key": f[0], "label": f[1], "kind": f[2]}
+                                 for f in b.fields]}
+                     for b in backingstore.BACKENDS.values()],
+        "stores": [{"name": n, "label": s["label"]}
+                   for n, s in dbstore.STORES.items()],
+        "status": backingstore.status(),
+    })
+
+
+@app.post("/api/backingstore/config")
+async def api_backingstore_config_save(request: Request):
+    form = await request.form()
+    for key in backingstore.CONFIG_KEYS:
+        if key not in form:
+            continue
+        value = (form.get(key) or "").strip()
+        # A masked password means "leave it alone", not "set it to asterisks".
+        if key in backingstore.SECRET_KEYS and set(value) == {"*"}:
+            continue
+        db.set_setting(key, value)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/backingstore/test")
+async def api_backingstore_test():
+    backend = backingstore.chosen()
+    if backend is None:
+        return JSONResponse({"ok": False, "error": "Pick a backing store first."},
+                            status_code=400)
+    try:
+        detail = await asyncio.to_thread(backend.test)
+    except backingstore.BackendError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"},
+                            status_code=400)
+    return JSONResponse({"ok": True, "detail": detail})
+
+
+@app.post("/api/backingstore/run")
+async def api_backingstore_run(dry_run: str = Form("")):
+    try:
+        out = await asyncio.to_thread(
+            backingstore.sync_all, str(dry_run).lower() in ("1", "true", "yes"))
+    except backingstore.BackendError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    return JSONResponse(out)
+
+
+@app.post("/api/backingstore/restore")
+async def api_backingstore_restore(dry_run: str = Form("")):
+    try:
+        out = await asyncio.to_thread(
+            backingstore.restore_from_remote,
+            str(dry_run).lower() in ("1", "true", "yes"))
+    except backingstore.BackendError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    return JSONResponse(out)
+
+
+@app.get("/api/backingstore/status")
+def api_backingstore_status():
+    return JSONResponse({"ok": True, "status": backingstore.status(),
+                         "configured": backingstore.chosen() is not None})
+
+
 # ---------- lifecycle ----------
 
 @app.on_event("startup")
@@ -301,9 +480,12 @@ async def startup():
     # A test drives sync itself and asserts on the result. A loop waking up
     # underneath it rewrites the database mid-assertion, which is a flake that
     # takes an afternoon to explain.
+    backups.init()
     if os.environ.get("COUCHELEPHANT_NO_SYNC_LOOP") == "1":
         return
     asyncio.create_task(sync_loop())
+    asyncio.create_task(backup_loop())
+    asyncio.create_task(backingstore_loop())
 
 
 async def sync_loop():
@@ -319,6 +501,46 @@ async def sync_loop():
             if ok:
                 await asyncio.to_thread(passes.run_passes)
         await asyncio.sleep(max(5, minutes) * 60)
+
+
+async def backup_loop():
+    """Run each backup job when its own interval says so."""
+    await asyncio.sleep(20)
+    while True:
+        try:
+            now = int(time.time())
+            for job in await asyncio.to_thread(backups.jobs):
+                if not job["enabled"] or not job["every_hours"]:
+                    continue
+                due = (job["last_run"] or 0) + job["every_hours"] * 3600
+                if now >= due:
+                    await asyncio.to_thread(backups.run_job, job["id"], VERSION)
+        except Exception:
+            # A backup that fails is recorded on the job. The loop must not
+            # be the thing that stops.
+            pass
+        await asyncio.sleep(300)
+
+
+async def backingstore_loop():
+    """Reconcile with the backing store on its own timer.
+
+    It also runs shortly after startup, so a machine that was off picks up
+    what changed elsewhere without anybody pressing anything.
+    """
+    await asyncio.sleep(45)
+    while True:
+        try:
+            minutes = int(db.get_setting("backingstore_auto_minutes") or 0)
+        except ValueError:
+            minutes = 0
+        if minutes and backingstore.chosen() is not None:
+            try:
+                await asyncio.to_thread(backingstore.sync_all)
+            except Exception as e:
+                backingstore._status(ok=False, at=int(time.time()),
+                                     detail=f"{type(e).__name__}: {e}")
+        await asyncio.sleep(max(5, minutes or 30) * 60)
 
 
 # ---------- guide ----------
@@ -692,22 +914,23 @@ def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,
                       "WHERE id=?",
                       (db.js(nets), db.js(chans), db.js(prefs), existing["id"]))
             return existing["id"], label, False
+        uid = uuid.uuid4().hex
         if kind == "smart":
             c.execute("INSERT INTO passes (kind, filter, label, networks, channels, "
-                      "prefs, enabled, created_at) VALUES ('smart',?,?,?,?,?,1,?)",
+                      "prefs, uid, enabled, created_at) VALUES ('smart',?,?,?,?,?,?,1,?)",
                       (db.js(smart), label, db.js(nets), db.js(chans),
-                       db.js(prefs), int(time.time())))
+                       db.js(prefs), uid, int(time.time())))
         elif kind == "team":
             c.execute("INSERT INTO passes (kind, team_id, team_name, networks, channels, "
-                      "prefs, enabled, created_at) VALUES ('team',?,?,?,?,?,1,?)",
+                      "prefs, uid, enabled, created_at) VALUES ('team',?,?,?,?,?,?,1,?)",
                       (team.get("id"), team["name"], db.js(nets), db.js(chans),
-                       db.js(prefs), int(time.time())))
+                       db.js(prefs), uid, int(time.time())))
         else:
             c.execute("INSERT INTO passes (kind, series_title, series_guid, networks, "
-                      "channels, prefs, enabled, created_at) "
-                      "VALUES ('series',?,?,?,?,?,1,?)",
+                      "channels, prefs, uid, enabled, created_at) "
+                      "VALUES ('series',?,?,?,?,?,?,1,?)",
                       (series, series, db.js(nets), db.js(chans), db.js(prefs),
-                       int(time.time())))
+                       uid, int(time.time())))
         new_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
     return new_id, label, True
 

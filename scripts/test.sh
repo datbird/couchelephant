@@ -68,7 +68,7 @@ if [ "$WHAT" != ui ]; then
   echo "==> unit and API suite"
   docker run --rm --name "ce-tests-unit-$$" \
     -v "$PWD:/src:ro" -w /work \
-    --tmpfs /work:exec,size=512m \
+    --tmpfs /work:exec,size=2g \
     -e HOME=/work/home -e PYTHONPATH=/work \
     "$IMAGE" bash -c "$BOOT" -- \
       pytest --ignore=tests/ui "${ARGS[@]}" || fail=1
@@ -81,7 +81,7 @@ if [ "$WHAT" != unit ]; then
   anchor=$(( $(date +%s) / 1800 * 1800 + 1800 ))
   docker run --rm --name "ce-tests-ui-$$" \
     -v "$PWD:/src:ro" -w /work \
-    --tmpfs /work:exec,size=512m \
+    --tmpfs /work:exec,size=2g \
     --ipc=host \
     -e HOME=/work/home -e PYTHONPATH=/work \
     -e COUCHELEPHANT_FAKE_ANCHOR="$anchor" \

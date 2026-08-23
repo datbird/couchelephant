@@ -4,3 +4,8 @@ httpx==0.28.1
 jinja2==3.1.5
 python-multipart==0.0.20
 pyjwt[crypto]==2.10.1
+# Optional, and used only if you configure that backing store or ask for an
+# encrypted snapshot. The app runs without them.
+psycopg[binary]==3.2.3
+PyMySQL==1.1.1
+pyzipper==0.3.6

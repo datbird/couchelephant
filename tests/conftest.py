@@ -61,6 +61,11 @@ def clean_db(plex_url):
     db.set_setting("plex_token", "test-token")
     db.set_setting("dry_run", "0")
     db.set_setting("auth_mode", "none")
+    # The guide is drawn from the server's configured timezone and positioned
+    # by the browser's clock. They have to agree, or the grid asks for a window
+    # a day away from the data. Both are pinned to UTC for the suite; the
+    # browser side is pinned in tests/ui/conftest.py.
+    db.set_setting("timezone", "UTC")
     fake_plex.STATE.reset()
     yield
 

@@ -35,6 +35,9 @@ It also does two things Plex cannot say at all:
 - **Limit a rule to several networks or channels.** A Plex rule takes one
   channel, or none. "Only ABC, CBS and FOX" cannot be expressed to Plex, so
   CouchElephant keeps that rule itself and books each airing as it comes.
+- **Keep your decisions somewhere else.** Export them to a file, snapshot them
+  on a schedule, or keep a live two-way copy in PostgreSQL, MySQL or another
+  SQLite file. The guide is never copied; it rebuilds from Plex in seconds.
 - **Record by conditions rather than by name.** A smart filter is a nested tree:
   "comedy or sci-fi, not rated TV-MA, first shown after 2015, in HD". Plex rules
   follow one programme or one team and cannot be given conditions at all.
@@ -147,11 +150,11 @@ Full instructions are in [docs/INSTALL.md](docs/INSTALL.md).
 ./scripts/test.sh
 ```
 
-272 checks: the airing choice, the pin, the smart filter compiler, the Plex
-client against a fake server that reproduces the real one's quirks, every
-endpoint, and a browser suite that drives the guide, the record panel, the
-recordings page, the smart filter builder, settings, the phone layout and
-first run. It refuses to start unless every path it would write to
+346 checks: the airing choice, the pin, the smart filter compiler, the
+three-way merge behind the backing store, the Plex client against a fake server
+that reproduces the real one's quirks, every endpoint, and a browser suite that
+drives the guide, the record panel, the recordings page, the smart filter
+builder, backup and restore, settings, the phone layout and first run. It refuses to start unless every path it would write to
 is scratch. See [docs/DEVELOPING.md](docs/DEVELOPING.md).
 
 ## Documentation
@@ -163,6 +166,7 @@ is scratch. See [docs/DEVELOPING.md](docs/DEVELOPING.md).
 | [Architecture](docs/ARCHITECTURE.md) | Modules, the database, the sync loop |
 | [HTTP API](docs/API.md) | Every endpoint |
 | [Accounts](docs/AUTH.md) | Off, local, or Cloudflare Access |
+| [Your data](docs/DATA.md) | Export and import, snapshots, and a two-way backing store |
 | [Developing](docs/DEVELOPING.md) | Running it locally, the test suite, the deploy script |
 | [Plex API notes](docs/PLEX-NOTES.md) | What the server really returns, and the traps in it |
 
