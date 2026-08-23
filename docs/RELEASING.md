@@ -42,10 +42,11 @@ Docker Hub's description and long description are not updated by the push. Set
 them from the README with a PATCH to
 `https://hub.docker.com/v2/repositories/datbird/couchelephant/`.
 
-### The one manual step, once
+### If the GHCR package ever comes back private
 
-A new GHCR package is **private** until you say otherwise, and Community
-Applications will refuse an image it cannot pull. After the first release:
+Published from a public repository, the package inherits that and is public
+from its first push. It only needs setting by hand if it was first published
+while the repository was private:
 
 1. github.com/datbird → **Packages** → **couchelephant**
 2. **Package settings** → **Danger Zone** → **Change visibility** → **Public**
