@@ -809,6 +809,19 @@ def _enum(raw):
     return out
 
 
+# The two padding fields go last, and in that order. Plex lists them in the
+# middle, between "allow partial airings" and commercial detection, which
+# splits the pair that people actually reach for. Everything else keeps Plex's
+# own order.
+_LAST_SETTINGS = ("startOffsetMinutes", "endOffsetMinutes")
+
+
+def _ordered(settings):
+    rest = [s for s in settings if s["id"] not in _LAST_SETTINGS]
+    tail = [s for k in _LAST_SETTINGS for s in settings if s["id"] == k]
+    return rest + tail
+
+
 def _template_payload(options, row=None, pin=True):
     """Plex's own recording choices, ready to render.
 
@@ -840,7 +853,7 @@ def _template_payload(options, row=None, pin=True):
             })
         out.append({
             "index": i, "title": title, "type": s_.get("type"),
-            "one_shot": one_shot, "settings": settings,
+            "one_shot": one_shot, "settings": _ordered(settings),
         })
     return out
 

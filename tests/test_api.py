@@ -615,3 +615,23 @@ def test_a_padding_larger_than_any_preset_is_still_accepted(client, synced):
         "settings": '{"endOffsetMinutes":"240"}'})
     assert r.json()["ok"]
     assert fake_plex.STATE.created[0]["prefs"]["endOffsetMinutes"] == "240"
+
+
+def test_the_padding_pair_is_last_and_in_that_order(client, synced):
+    """Plex lists them in the middle, which splits the two fields people
+    actually reach for."""
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}'}).json()
+    ids = [s["id"] for s in d["templates"][0]["settings"]]
+    assert ids[-2:] == ["startOffsetMinutes", "endOffsetMinutes"]
+    assert "comskipMethod" in ids[:-2]
+
+
+def test_everything_else_keeps_plexs_own_order(client, synced):
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}'}).json()
+    ids = [s["id"] for s in d["templates"][0]["settings"]]
+    assert ids[:4] == ["minVideoQuality", "replaceLowerQuality",
+                       "recordPartials", "comskipMethod"]

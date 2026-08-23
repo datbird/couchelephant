@@ -19,6 +19,8 @@
   two columns of single rows. The tooltip is drawn on the body and clamped to
   the window, because every panel it can appear in scrolls, and a scrolling
   box clips its own children.
+- The two padding fields are last, in that order. Plex lists them in the
+  middle, which split the pair people actually reach for.
 - The option row and the setting renderer existed twice and had drifted. They
   are one component now, in `static/js/ce.js`, with a test that keeps it that
   way.
