@@ -5,6 +5,12 @@
 The first public release. Published as `ghcr.io/datbird/couchelephant` for
 linux/amd64 and linux/arm64, and listed in Unraid Community Applications.
 
+Nothing in the app is tied to one country. Networks, genres, content ratings
+and channels are read from your own guide rather than from a list shipped
+here. The team catalogue covers 1,310 teams across 18 leagues, European
+football included. Times follow the viewer's own locale, so the same install
+reads correctly in Seattle, London and Vancouver.
+
 ### Fixed
 
 - **Following a team as a plain Plex rule made a rule for the whole league.**

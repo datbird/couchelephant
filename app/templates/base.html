@@ -57,7 +57,7 @@
     {# The last sync time is reference, not news. It belongs on the control it
        describes, not taking up a slot in the bar. #}
     <form method="post" action="/sync" style="margin:0">
-      <button type="submit" class="iconbtn" title="{% if last_sync %}Last synced {{ last_sync.ended_at|fmt('%-I:%M %p') }}{% if not last_sync.ok %} and it failed{% endif %}. {{ last_sync.detail }}{% else %}Never synced yet{% endif %}
+      <button type="submit" class="iconbtn" title="{% if last_sync %}Last synced {{ last_sync.ended_at|fmt('%H:%M') }}{% if not last_sync.ok %} and it failed{% endif %}. {{ last_sync.detail }}{% else %}Never synced yet{% endif %}
 Click to sync the guide now." aria-label="Sync the guide now">
         <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

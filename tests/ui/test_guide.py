@@ -1,4 +1,5 @@
 """The guide grid, and opening a programme from it."""
+import pytest
 
 
 def test_the_grid_draws_channels_and_programmes(guide):
@@ -81,3 +82,28 @@ def test_the_search_box_opens_and_filters(page):
     page.keyboard.press("Enter")
     page.wait_for_selector("#grid, .gprog")
     assert "Quiz" in page.content()
+
+
+@pytest.mark.parametrize("locale,wants_meridiem", [
+    ("en-US", True), ("en-GB", False), ("de-DE", False), ("fr-FR", False),
+])
+def test_the_clock_follows_the_viewer_not_the_author(browser, base_url, synced,
+                                                     locale, wants_meridiem):
+    """The guide used to write 12-hour AM/PM everywhere, which reads as broken
+    in most of the world. Nothing about this app is American, and its clock
+    should not be either."""
+    import re
+
+    from tests.ui.conftest import _page
+    ctx, page = _page(browser, base_url, viewport={"width": 1440, "height": 900},
+                      locale=locale)
+    try:
+        page.goto("/")
+        page.wait_for_selector(".gtick", timeout=20000)
+        ticks = [t.strip() for t in page.locator(".gtick").all_inner_texts()]
+        assert ticks, "the guide drew no time axis"
+        assert all(re.match(r"^\d{1,2}[:.]\d{2}", t) for t in ticks), ticks[:4]
+        meridiem = any(re.search(r"(AM|PM|a\.m\.|p\.m\.)", t, re.I) for t in ticks)
+        assert meridiem is wants_meridiem, f"{locale} rendered {ticks[:4]}"
+    finally:
+        ctx.close()

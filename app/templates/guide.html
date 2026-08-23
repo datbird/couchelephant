@@ -157,7 +157,8 @@
       .then(function (html) {
         var t = html.trim();
         if (!t) { finished = true; done.style.display = 'block'; }
-        else { body.insertAdjacentHTML('beforeend', t); offset = body.querySelectorAll('tr').length; }
+        else { body.insertAdjacentHTML('beforeend', t); CE.localizeTimes(body);
+               offset = body.querySelectorAll('tr').length; }
       })
       .catch(function () { finished = true; })
       .finally(function () { busy = false; spinner.style.display = 'none'; });
@@ -255,14 +256,11 @@
 
   function drawTicks(fromTs, toTs) {
     for (var t = Math.ceil(fromTs / SLOT) * SLOT; t < toTs; t += SLOT) {
-      var d = new Date(t * 1000),
-          h = d.getHours(), m = d.getMinutes(),
-          ap = h < 12 ? 'AM' : 'PM', hh = h % 12 || 12,
-          el = document.createElement('div');
+      var el = document.createElement('div');
       el.className = 'gtick';
       el.dataset.t = String(t);
       el.style.left = x(t) + 'px';
-      el.textContent = hh + ':' + (m < 10 ? '0' + m : m) + ' ' + ap;
+      el.textContent = CE.fmtTime(t);
       timesEl.appendChild(el);
     }
   }
@@ -292,9 +290,7 @@
       (a.sched === 'ce' ? ' sched-ce' : a.sched === 'plex' ? ' sched-plex' : '');
     el.style.left = x(a.b) + 'px';
     el.style.width = blockW(a.b, a.e) + 'px';
-    var when = new Date(a.b * 1000), hh = when.getHours() % 12 || 12,
-        mm = when.getMinutes(), ap = when.getHours() < 12 ? 'AM' : 'PM';
-    el.title = a.title + '\n' + hh + ':' + (mm < 10 ? '0' + mm : mm) + ' ' + ap +
+    el.title = a.title + '\n' + CE.fmtTime(a.b) +
                (a.summary ? '\n\n' + a.summary : '');
     el.dataset.aid = a.id;
     el.dataset.b = String(a.b);

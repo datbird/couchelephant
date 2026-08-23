@@ -56,7 +56,10 @@ def tz():
         return zoneinfo.ZoneInfo("UTC")
 
 
-def fmt(ts, pattern="%a %b %d, %-I:%M %p"):
+# 24-hour, day before month. The server cannot know the viewer's locale, so
+# it writes the form that reads correctly everywhere and lets ce.js correct
+# it where the markup carries a timestamp to correct from.
+def fmt(ts, pattern="%a %d %b, %H:%M"):
     if not ts:
         return ""
     return datetime.datetime.fromtimestamp(int(ts), tz()).strftime(pattern)

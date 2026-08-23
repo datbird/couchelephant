@@ -177,7 +177,7 @@ Full instructions are in [docs/INSTALL.md](docs/INSTALL.md).
 ./scripts/test.sh
 ```
 
-393 checks: the airing choice, the pin, the smart filter compiler, the
+397 checks: the airing choice, the pin, the smart filter compiler, the
 three-way merge behind the backing store, the Plex client against a fake server
 that reproduces the real one's quirks, every endpoint, and a browser suite that
 drives the guide, the record panel, the recordings page, the smart filter

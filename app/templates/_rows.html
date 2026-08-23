@@ -3,7 +3,8 @@
 {% for r in rows %}
 <tr>
   <td class="dim" style="white-space:nowrap">
-    {{ r.begins_at|fmt if q else r.begins_at|fmt('%-I:%M %p') }}</td>
+    <time data-ts="{{ r.begins_at }}" data-fmt="{{ 'when' if q else 'time' }}"
+          >{{ r.begins_at|fmt if q else r.begins_at|fmt('%H:%M') }}</time></td>
   <td class="chcell">
     {% if logos.get(r.channel_vcn) %}
       <img src="/logo/{{ r.channel_vcn }}" alt="" class="chlogo"

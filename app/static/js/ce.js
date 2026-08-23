@@ -15,8 +15,10 @@
   }
 
   function fmtTime(ts) {
-    var d = new Date(ts * 1000), h = d.getHours() % 12 || 12, m = d.getMinutes();
-    return h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
+    // The viewer's own clock. Hardcoding 12-hour AM/PM read as broken
+    // everywhere that writes 19:00, which is most of the world.
+    return new Date(ts * 1000).toLocaleTimeString(undefined,
+      {hour: 'numeric', minute: '2-digit'});
   }
 
   function fmtWhen(ts) {
@@ -196,7 +198,27 @@
     if (e.key === 'Escape') hideTip();
   });
 
+  /* Server-rendered times carry their timestamp and get localized here.
+     The server cannot know the viewer's locale, so it writes a 24-hour
+     fallback and the browser corrects it. Runs again after a partial is
+     inserted, or the second page of results keeps the fallback. */
+  function localizeTimes(root) {
+    var els = (root || document).querySelectorAll('time[data-ts]');
+    Array.prototype.forEach.call(els, function (el) {
+      var ts = parseInt(el.getAttribute('data-ts'), 10);
+      if (!ts) return;
+      el.textContent = el.getAttribute('data-fmt') === 'when'
+        ? fmtWhen(ts) : fmtTime(ts);
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { localizeTimes(); });
+  } else {
+    localizeTimes();
+  }
+
   w.CE = {esc: esc, coarse: coarse, fmtTime: fmtTime, fmtWhen: fmtWhen,
+          localizeTimes: localizeTimes,
           fmtDay: fmtDay, readJson: readJson, KIND_ICON: KIND_ICON,
           optRow: optRow, settingField: settingField,
           showTip: showTip, hideTip: hideTip};
