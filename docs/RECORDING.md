@@ -143,9 +143,10 @@ those itself, per airing. That pin is the mechanism this whole app exists for.
 Each setting carries **Plex's own explanation of it**, taken from the template
 rather than rewritten here, so there is only one version of those words.
 
-They appear as soon as the panel opens, before you have chosen a team or
-written a condition. Plex offers the same settings whatever the programme, so
-there is nothing to wait for.
+They appear as soon as the panel opens, on every route through it: a sports
+team, a programme, a smart filter, before anything at all is chosen. Plex
+offers the same settings whatever the programme, so there is nothing to wait
+for. Choosing a target afterwards refreshes them in place.
 
 **Sport overruns, so a sports pass arrives with padding filled in**: one minute
 before and thirty after, on screen, before you create it. Without it a game that

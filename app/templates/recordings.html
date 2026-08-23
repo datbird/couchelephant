@@ -448,7 +448,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     }
     if (!st.tpl) {
       h += '<div class="note" style="margin-top:10px">Plex\'s own options are ' +
-           'still loading. If they do not appear, check the server under ' +
+           'loading. If they never arrive, check the server under ' +
            '<a href="/settings"><b>Settings</b></a>.</div>';
     }
     return h;
@@ -555,39 +555,48 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     previewTimer = setTimeout(preview, 350);
   }
 
-  // Plex's own settings for a smart pass. They belong to a programme, and any
-  // matching one stands in for the rest, so this is asked once rather than on
-  // every keystroke.
-  function loadSmartTemplates() {
+  // Plex's settings, on screen from the moment the panel opens.
+  //
+  // They belong to Plex, not to what you are following: every template offers
+  // the same ones. So there is nothing to wait for, and an Options box that
+  // says "choose something first" was a box with nothing in it for no reason.
+  // Any upcoming airing stands in until a real one is known.
+  function ensureTemplates() {
     if (st.tpl || st.tplPending) return;
     st.tplPending = true;
-    // Asked for straight away, with whatever conditions exist. Plex offers the
-    // same settings whatever the programme, so waiting for the filter to match
-    // something meant an empty Options box for anybody still deciding.
-    var url = '/api/rules/options?kind=smart&ce_pass=1&filter=' +
-              encodeURIComponent(JSON.stringify(st.tree || null));
+    var url = st.kind === 'smart'
+      ? '/api/rules/options?kind=smart&ce_pass=1&filter=' +
+        encodeURIComponent(JSON.stringify(st.tree || null))
+      : '/api/rules/options?kind=any&ce_pass=1';
     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
       st.tplPending = false;
       if (!d.ok) return;
-      st.tpl = d.templates;
-      st.sporty = !!d.sporty;
-      if (st.editing && st.editing.prefs) {
-        st.tpl.forEach(function (t) {
-          t.settings.forEach(function (stg) {
-            if (stg.id in st.editing.prefs) stg.value = st.editing.prefs[stg.id];
-          });
-        });
-      } else if (d.sporty && d.sports_padding) {
-        st.tpl.forEach(function (t) {
-          t.settings.forEach(function (stg) {
-            if (stg.id in d.sports_padding) stg.value = d.sports_padding[stg.id];
-          });
-        });
-      }
+      applyTemplates(d);
       // Only the Options section. A full redraw would replace the condition
       // row being edited, and the button waiting to be pressed again.
       paintOptions();
     }).catch(function () { st.tplPending = false; });
+  }
+
+  function applyTemplates(d) {
+    st.tpl = d.templates;
+    st.sporty = !!d.sporty;
+    st.pick = 0;
+    if (st.editing && st.editing.prefs) {
+      // What this pass already saved, not Plex's defaults.
+      st.tpl.forEach(function (t) {
+        t.settings.forEach(function (stg) {
+          if (stg.id in st.editing.prefs) stg.value = st.editing.prefs[stg.id];
+        });
+      });
+    } else if (d.sporty && d.sports_padding) {
+      // Sport overruns, so a new sports pass arrives with padding filled in.
+      st.tpl.forEach(function (t) {
+        t.settings.forEach(function (stg) {
+          if (stg.id in d.sports_padding) stg.value = d.sports_padding[stg.id];
+        });
+      });
+    }
   }
 
   function preview() {
@@ -609,7 +618,6 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       st.preview = d.ok ? d : null;
       st.previewError = d.ok ? '' : (d.error || 'That filter cannot be read.');
       paintPreview();
-      if (d.ok && d.count) loadSmartTemplates();
       paint();
     }).catch(function () {
       var el = document.getElementById('sfcount');
@@ -731,8 +739,8 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       // What is already known, drawn at once; then ask again in the background.
       paintPreview();
       preview();
-      loadSmartTemplates();
     }
+    ensureTemplates();
     document.getElementById('rgo').addEventListener('click', create);
     paintMsg();
     paint();
@@ -768,19 +776,11 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       url = '/api/rules/options?kind=series&series=' + encodeURIComponent(st.series);
     }
     if (cePass) url += '&ce_pass=1';
+    st.tplPending = true;
     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
-      st.tpl = d.ok ? d.templates : null;
-      st.sporty = !!(d.ok && d.sporty);
-      st.pick = 0;
-      // Sport overruns. A new sports pass arrives with padding filled in, on
-      // screen, rather than clipping the end of every game in silence.
-      if (d.ok && d.sporty && !st.editing && d.sports_padding) {
-        st.tpl.forEach(function (t) {
-          t.settings.forEach(function (stg) {
-            if (stg.id in d.sports_padding) stg.value = d.sports_padding[stg.id];
-          });
-        });
-      }
+      st.tplPending = false;
+      // A target of its own replaces the stand-in settings already on screen.
+      if (d.ok) applyTemplates(d);
       // Show what this pass already saved, not Plex's defaults.
       if (st.tpl && st.editing && st.editing.prefs) {
         st.tpl.forEach(function (t) {

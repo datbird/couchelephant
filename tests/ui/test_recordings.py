@@ -150,12 +150,15 @@ def test_the_team_list_has_a_search_box_that_filters(recordings):
     assert "Tampa" not in recordings.locator("#rlist").inner_text()
 
 
-def test_the_add_panel_offers_plexs_own_settings_once_you_choose(recordings):
+def test_the_add_panel_offers_plexs_own_settings(recordings):
     recordings.click("#addrule")
     recordings.wait_for_selector("#rlist > *", timeout=15000)
-    assert recordings.locator('[data-set="minVideoQuality"]').count() == 0
-    recordings.click("#rlist >> text=Kansas City Chiefs")
+    # There before anything is chosen, and still there after.
     recordings.wait_for_selector('[data-set="minVideoQuality"]', timeout=15000)
+    recordings.click("#rlist >> text=Kansas City Chiefs")
+    recordings.wait_for_function(
+        "() => /Kansas City Chiefs/.test("
+        "document.getElementById('rpick').textContent)", timeout=15000)
     assert "Kansas City Chiefs" in recordings.locator("#rpick").inner_text()
     assert not recordings.locator("#rgo").is_disabled()
 
@@ -164,7 +167,12 @@ def test_the_add_panel_bar_names_who_will_own_the_rule(recordings):
     recordings.click("#addrule")
     recordings.wait_for_selector("#rlist > *", timeout=15000)
     recordings.click("#rlist >> text=Kansas City Chiefs")
-    recordings.wait_for_selector('[data-set="minVideoQuality"]', timeout=15000)
+    # Wait for the panel to settle on the chosen team. The settings are on
+    # screen from the start now, so waiting on them proves nothing and the
+    # source picker opened while the options were still being repainted.
+    recordings.wait_for_function(
+        "() => /Kansas City Chiefs/.test("
+        "document.getElementById('rpick').textContent)", timeout=15000)
     assert "Plex schedule" in recordings.locator("#optbar").inner_text()
     recordings.click("#multibtn")
     recordings.wait_for_selector("#multibody .multirow")

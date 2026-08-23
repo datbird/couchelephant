@@ -46,8 +46,12 @@ def test_the_sports_team_route_is_unchanged(add):
     add.wait_for_selector("#rlist > *", timeout=15000)
     assert "teams" in add.get_attribute("#rq", "placeholder")
     add.click("#rlist >> text=Kansas City Chiefs")
-    add.wait_for_selector('[data-set="minVideoQuality"]', timeout=15000)
-    assert "Kansas City Chiefs" in add.locator("#rpick").inner_text()
+    # The settings are already on screen, so waiting on them proves nothing.
+    # Wait for the team to be taken instead.
+    add.wait_for_function(
+        "() => /Kansas City Chiefs/.test("
+        "document.getElementById('rpick').textContent)", timeout=15000)
+    assert add.locator('[data-set="minVideoQuality"]').count() == 1
 
 
 # ---- the builder ----
@@ -456,5 +460,27 @@ def test_a_team_that_has_not_played_still_gets_the_settings(add):
         "() => /Purdue/.test(document.getElementById('rlist').textContent)",
         timeout=15000)
     add.click("#rlist >> text=Purdue")
+    add.wait_for_function(
+        "() => /not in the guide this week/.test("
+        "document.getElementById('ovlbox').textContent)", timeout=20000)
+    assert add.locator('[data-set="endOffsetMinutes"]').count() == 1
+
+
+@pytest.mark.parametrize("route", ["open", "team", "series", "filter"])
+def test_plexs_settings_are_always_there(add, route):
+    """They belong to Plex, not to what you are following. Every one of these
+    used to be an empty Options box telling you to choose something first."""
+    if route == "team":
+        add.check('input[name=rmode][value="smart"]')
+        add.check('input[name=rsub][value="team"]')
+    elif route == "series":
+        add.check('input[name=rmode][value="series"]')
+    elif route == "filter":
+        add.check('input[name=rmode][value="smart"]')
+        add.check('input[name=rsub][value="filter"]')
+
     add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
-    assert "not in the guide this week" in add.locator("#ovlbox").inner_text()
+    ids = add.eval_on_selector_all("[data-set]", "els => els.map(e => e.dataset.set)")
+    for want in ("minVideoQuality", "replaceLowerQuality", "recordPartials",
+                 "comskipMethod", "startOffsetMinutes", "endOffsetMinutes"):
+        assert want in ids, f"{want} missing on the {route} route"
