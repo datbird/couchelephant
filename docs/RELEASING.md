@@ -24,8 +24,9 @@ Docker Hub allows 100 anonymous pulls per IP address per six hours, which is a
 poor fit for an app strangers install: one busy neighbour on the same shared
 address can lock everyone else out.
 
-Docker Hub is still worth having for discoverability. The release workflow
-pushes there too, but only once two secrets and one variable exist:
+Docker Hub carries the same image, at `datbird/couchelephant`. It is where
+people browse and search, which GHCR has no page for. The release workflow
+pushes to both, driven by two secrets and one variable on the repository:
 
 | Where | Name | Value |
 | --- | --- | --- |
@@ -33,9 +34,13 @@ pushes there too, but only once two secrets and one variable exist:
 | Repository secret | `DOCKERHUB_USERNAME` | the Docker Hub account |
 | Repository secret | `DOCKERHUB_TOKEN` | a Docker Hub access token, write scope |
 
-Until `DOCKERHUB_IMAGE` is set the Docker Hub steps skip and the release still
-succeeds. The Unraid template points at ghcr.io either way, for the pull-limit
-reason above.
+Remove `DOCKERHUB_IMAGE` and the Docker Hub steps skip; the release still
+succeeds and GHCR still gets the image. The Unraid template points at ghcr.io
+either way, for the pull-limit reason above.
+
+Docker Hub's description and long description are not updated by the push. Set
+them from the README with a PATCH to
+`https://hub.docker.com/v2/repositories/datbird/couchelephant/`.
 
 ### The one manual step, once
 

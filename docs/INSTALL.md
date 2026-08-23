@@ -22,6 +22,11 @@ The image is built for `linux/amd64` and `linux/arm64`, so the same tag works
 on an ordinary server and on a Pi. Pin a version if you would rather choose
 when to move: `:1` follows fixes within a major version, `:1.2.3` never moves.
 
+The same image is on Docker Hub as `datbird/couchelephant`. Either address
+works; GHCR is the one to prefer, because Docker Hub allows only 100
+anonymous pulls per address per six hours and everyone behind your router
+shares that count.
+
 There is a `docker-compose.yml` in the repository that does the same thing.
 
 ### On Unraid

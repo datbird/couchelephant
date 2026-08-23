@@ -149,7 +149,9 @@ docker run -d --name couchelephant --restart unless-stopped \
   ghcr.io/datbird/couchelephant:latest
 ```
 
-There is a `docker-compose.yml` in the repository if you would rather use that.
+The same image is on Docker Hub as `datbird/couchelephant`, if you would
+rather pull from there. There is a `docker-compose.yml` in the repository if
+you would rather use that.
 
 **On Unraid**, search for CouchElephant in **Apps**. The template fills in the
 port and the appdata path for you.
