@@ -12,7 +12,7 @@ from ..plex import Plex
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(directory=os.path.join(BASE, "templates"))
-VERSION = "0.90"
+VERSION = "1.0.0"
 
 # What the browser should call this build of the scripts and the stylesheet.
 # The version alone is not enough: it does not change between deploys, so a
