@@ -90,6 +90,18 @@ def smart_airings(tree, horizon_days=30):
     )
 
 
+def any_airing(horizon_days=30):
+    """One usable broadcast, whichever. A stand-in when nothing is chosen yet.
+
+    Plex's recording settings belong to Plex, not to the programme: every
+    template offers the same ones. So a pass can be shown them before it knows
+    what it follows, which is the difference between an options panel and an
+    empty box that says come back later.
+    """
+    rows = [r for r in _future_airings(horizon_days) if not r["drm"]]
+    return rows[:1]
+
+
 def rule_airings(rule, horizon_days=30):
     """Everything a rule could record, before the source limit is applied."""
     if rule["kind"] == "team" and not rule["team_id"]:

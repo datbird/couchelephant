@@ -1448,18 +1448,28 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
     airing. Without it the recurring choices are offered, which is right when
     the rule is about to become Plex's own.
     """
-    if kind == "smart":
+    if kind == "any":
+        # No target yet: a filter with nothing in it, or a team that has not
+        # played. Plex offers the same settings whatever the programme, so
+        # there is no reason to make somebody choose before they can see them.
+        rows = passes.any_airing()
+    elif kind == "smart":
         tree = db.unjs(filter, None)
-        if not tree:
-            return JSONResponse({"ok": False, "error": "add a condition first"})
-        try:
-            rows = passes.smart_airings(tree)
-        except smartfilter.FilterError as e:
-            return JSONResponse({"ok": False, "error": str(e)})
+        rows = []
+        if tree:
+            try:
+                rows = passes.smart_airings(tree)
+            except smartfilter.FilterError:
+                rows = []
+        # A filter matching nothing still gets the settings. They belong to
+        # Plex, not to the filter.
+        rows = rows or passes.any_airing()
     elif kind == "team":
-        rows = passes.candidate_airings(int(team_id or 0))
+        rows = passes.candidate_airings(int(team_id or 0)) or (
+            passes.any_airing() if ce_pass else [])
     else:
-        rows = passes.series_airings((series or "").strip())
+        rows = passes.series_airings((series or "").strip()) or (
+            passes.any_airing() if ce_pass else [])
     if not rows:
         return JSONResponse({"ok": False, "error":
                              "Nothing from this is in the guide yet, so Plex has no "

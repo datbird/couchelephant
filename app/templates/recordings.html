@@ -423,6 +423,45 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   var row = CE.optRow, field = CE.settingField;
 
 
+  // The Options section on its own, so Plex's settings can arrive without
+  // redrawing the panel around them. Rebuilding the lot threw away whatever
+  // condition the user was in the middle of choosing.
+  function optionsHtml() {
+    var h = '';
+    // Sport runs over. A pass with no padding clips the end of every game, so
+    // the reason the field is not zero is said next to the field.
+    if (st.sporty && !st.editing) {
+      h += '<div class="note" style="margin-bottom:10px">Sport overruns, so the ' +
+           'padding below is filled in for you. Change it if you want to; ' +
+           'CouchElephant applies it to every airing this pass books.</div>';
+    }
+    h += '<div class="optgrid">' + multiField();
+    if (st.tpl && st.tpl[st.pick]) {
+      st.tpl[st.pick].settings.forEach(function (stg) { h += field(stg); });
+    }
+    h += '</div>';
+    if (st.team && !st.team.id) {
+      h += '<div class="note" style="margin-top:10px"><b>' + esc(st.team.name) +
+           '</b> is not in the guide this week. CouchElephant keeps this pass ' +
+           'and starts booking its games the moment the team appears, with the ' +
+           'settings above.</div>';
+    }
+    if (!st.tpl) {
+      h += '<div class="note" style="margin-top:10px">Plex\'s own options are ' +
+           'still loading. If they do not appear, check the server under ' +
+           '<a href="/settings"><b>Settings</b></a>.</div>';
+    }
+    return h;
+  }
+
+  function paintOptions() {
+    var zone = document.getElementById('optzone');
+    if (!zone) return;
+    zone.innerHTML = optionsHtml();
+    st.picker.wire();
+    paint();
+  }
+
   function multiField() {
     return row('ce', 'multibtn', 'Limit to networks or channels',
                st.picker.html(),
@@ -520,10 +559,13 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   // matching one stands in for the rest, so this is asked once rather than on
   // every keystroke.
   function loadSmartTemplates() {
-    if (st.tpl || st.tplPending || !st.filter.usable()) return;
+    if (st.tpl || st.tplPending) return;
     st.tplPending = true;
+    // Asked for straight away, with whatever conditions exist. Plex offers the
+    // same settings whatever the programme, so waiting for the filter to match
+    // something meant an empty Options box for anybody still deciding.
     var url = '/api/rules/options?kind=smart&ce_pass=1&filter=' +
-              encodeURIComponent(JSON.stringify(st.tree));
+              encodeURIComponent(JSON.stringify(st.tree || null));
     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
       st.tplPending = false;
       if (!d.ok) return;
@@ -542,9 +584,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
           });
         });
       }
-      // Not while the user is waiting on a create. Redrawing then replaces the
-      // button they are about to press a second time.
-      if (!st.busy) render();
+      // Only the Options section. A full redraw would replace the condition
+      // row being edited, and the button waiting to be pressed again.
+      paintOptions();
     }).catch(function () { st.tplPending = false; });
   }
 
@@ -648,32 +690,8 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
     h += '<div class="ovlsec"><h3>Options</h3>' +
          '<div class="ownkey"><span><i class="own ce"></i>CouchElephant</span>' +
-         '<span><i class="own plex"></i>Plex DVR</span></div>';
-    // Sport runs over. A pass with no padding clips the end of every game, so
-    // the reason the field is not zero is said next to the field.
-    if (st.sporty && !st.editing) {
-      h += '<div class="note" style="margin-bottom:10px">Sport overruns, so the ' +
-           'padding below is filled in for you. Change it if you want to; ' +
-           'CouchElephant applies it to every airing this pass books.</div>';
-    }
-    h += '<div class="optgrid">';
-    h += multiField();
-    if (st.tpl && st.tpl[st.pick]) {
-      st.tpl[st.pick].settings.forEach(function (stg) { h += field(stg); });
-    }
-    h += '</div>';
-    if (!st.tpl) {
-      h += '<div class="note" style="margin-top:10px">' +
-           (st.team && !st.team.id
-             ? '<b>' + esc(st.team.name) + '</b> is not in the guide this week, so ' +
-               'Plex has no options to offer for it yet. CouchElephant keeps this ' +
-               'pass and starts booking games the moment the team appears.'
-             : st.kind === 'smart'
-             ? 'Plex\'s own options, padding included, appear once the conditions ' +
-               'match something in the guide.'
-             : 'Plex\'s own options appear once you have chosen what to follow.') +
-           '</div>';
-    }
+         '<span><i class="own plex"></i>Plex DVR</span></div>' +
+         '<div id="optzone">' + optionsHtml() + '</div>';
     h += '</div>';
 
     h += '<div class="ovlfoot"><button class="primary" id="rgo"' +
@@ -713,6 +731,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       // What is already known, drawn at once; then ask again in the background.
       paintPreview();
       preview();
+      loadSmartTemplates();
     }
     document.getElementById('rgo').addEventListener('click', create);
     paintMsg();
@@ -741,7 +760,10 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       url = '/api/rules/options?kind=smart&filter=' +
             encodeURIComponent(JSON.stringify(st.tree));
     } else if (st.kind === 'team') {
-      url = '/api/rules/options?kind=team&team_id=' + encodeURIComponent(st.team.id);
+      url = st.team.id
+        ? '/api/rules/options?kind=team&team_id=' + encodeURIComponent(st.team.id)
+        : '/api/rules/options?kind=any';
+      if (!st.team.id) cePass = true;
     } else {
       url = '/api/rules/options?kind=series&series=' + encodeURIComponent(st.series);
     }
@@ -846,8 +868,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
         list.querySelectorAll('[data-team]').forEach(function (b) {
           b.addEventListener('click', function () {
             st.team = {id: b.dataset.team || null, name: b.dataset.name};
-            // Plex has options to offer only for a team it has heard of.
-            if (st.team.id) loadTemplates(); else render();
+            // Even a team that has not played yet gets Plex's settings. They
+            // are Plex's, not the team's.
+            loadTemplates();
           });
         });
         list.querySelectorAll('[data-series]').forEach(function (b) {

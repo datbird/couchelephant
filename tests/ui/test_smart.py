@@ -436,3 +436,25 @@ def test_the_options_stay_two_columns_of_single_rows(add):
     heights = add.eval_on_selector_all(
         ".optgrid .optrow", "els => els.map(e => e.offsetHeight)")
     assert len(set(heights)) == 1, f"rows are ragged: {sorted(set(heights))}"
+
+
+def test_the_plex_settings_are_there_before_anything_is_chosen(add):
+    """They belong to Plex, not to the filter. Waiting for a match meant an
+    empty Options box for anybody still deciding what to record."""
+    _filter(add)
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    ids = add.eval_on_selector_all("[data-set]", "els => els.map(e => e.dataset.set)")
+    assert "startOffsetMinutes" in ids and "minVideoQuality" in ids
+
+
+def test_a_team_that_has_not_played_still_gets_the_settings(add):
+    add.check('input[name=rmode][value="smart"]')
+    add.check('input[name=rsub][value="team"]')
+    add.wait_for_selector("#rlist > *", timeout=15000)
+    add.fill("#rq", "Purdue")
+    add.wait_for_function(
+        "() => /Purdue/.test(document.getElementById('rlist').textContent)",
+        timeout=15000)
+    add.click("#rlist >> text=Purdue")
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    assert "not in the guide this week" in add.locator("#ovlbox").inner_text()

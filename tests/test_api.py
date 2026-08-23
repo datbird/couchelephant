@@ -578,14 +578,6 @@ def test_the_pinning_keys_are_still_not_the_users_to_set(client, synced):
     assert prefs["startTimeslot"] == str(fake_plex.LIVE_AT)
 
 
-def test_a_smart_filter_matching_nothing_says_so_rather_than_offering_nothing(client, synced):
-    d = client.get("/api/rules/options", params={
-        "kind": "smart", "ce_pass": 1,
-        "filter": '{"field":"genre","cmp":"is","value":"Curling"}'}).json()
-    assert d["ok"] is False
-    assert "guide yet" in d["error"]
-
-
 def test_plexs_own_explanation_travels_with_each_setting(client, synced):
     """Plex writes a summary for its settings. Repeating it here would be a
     second copy to keep true."""
@@ -635,3 +627,26 @@ def test_everything_else_keeps_plexs_own_order(client, synced):
     ids = [s["id"] for s in d["templates"][0]["settings"]]
     assert ids[:4] == ["minVideoQuality", "replaceLowerQuality",
                        "recordPartials", "comskipMethod"]
+
+
+def test_the_settings_can_be_asked_for_with_no_target(client, synced):
+    """A filter with nothing in it, or a team that has not played."""
+    d = client.get("/api/rules/options",
+                   params={"kind": "any", "ce_pass": 1}).json()
+    assert d["ok"]
+    ids = [s["id"] for s in d["templates"][0]["settings"]]
+    assert "startOffsetMinutes" in ids and "endOffsetMinutes" in ids
+
+
+def test_an_empty_filter_still_gets_the_settings(client, synced):
+    d = client.get("/api/rules/options",
+                   params={"kind": "smart", "ce_pass": 1, "filter": ""}).json()
+    assert d["ok"]
+    assert [s["id"] for s in d["templates"][0]["settings"]]
+
+
+def test_a_filter_matching_nothing_still_gets_the_settings(client, synced):
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Curling"}'}).json()
+    assert d["ok"], "the settings are Plex's, not the filter's"

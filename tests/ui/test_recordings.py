@@ -153,7 +153,7 @@ def test_the_team_list_has_a_search_box_that_filters(recordings):
 def test_the_add_panel_offers_plexs_own_settings_once_you_choose(recordings):
     recordings.click("#addrule")
     recordings.wait_for_selector("#rlist > *", timeout=15000)
-    assert "options appear" in recordings.locator("#ovlbox").inner_text()
+    assert recordings.locator('[data-set="minVideoQuality"]').count() == 0
     recordings.click("#rlist >> text=Kansas City Chiefs")
     recordings.wait_for_selector('[data-set="minVideoQuality"]', timeout=15000)
     assert "Kansas City Chiefs" in recordings.locator("#rpick").inner_text()
