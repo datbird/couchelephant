@@ -1,0 +1,20 @@
+# The same container the README describes, as a compose file.
+#
+#   docker compose up -d
+#
+# Then open http://<this-host>:8710 and put your Plex address and token into
+# Settings, Plex. Nothing else is required.
+services:
+  couchelephant:
+    image: ghcr.io/datbird/couchelephant:latest
+    container_name: couchelephant
+    restart: unless-stopped
+    ports:
+      - "8710:8710"
+    volumes:
+      # The database, your channel artwork, and any snapshots you schedule.
+      - ./data:/data
+    environment:
+      # The container's clock. Guide times are stored as UTC and shown in the
+      # timezone you pick in Settings, so this only affects the log.
+      - TZ=UTC

@@ -16,7 +16,7 @@ HOST="${COUCHELEPHANT_HOST:?set COUCHELEPHANT_HOST to the ssh host to deploy to}
 REMOTE_DIR="${COUCHELEPHANT_REMOTE_DIR:-/opt/couchelephant}"
 PORT="${COUCHELEPHANT_PORT:-8710}"
 TZ_NAME="${COUCHELEPHANT_TZ:-UTC}"
-TAG="couchelephant:1.0"
+TAG="couchelephant:local"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "==> packaging"
