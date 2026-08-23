@@ -1,0 +1,46 @@
+# Lint and the whole suite, on every push and every pull request.
+#
+# The job runs inside Playwright's own image for the same reason
+# `scripts/test.sh` does: `playwright install --with-deps` names Debian font
+# packages that no longer exist, and Microsoft's image already carries Chromium
+# and every library it needs.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Release calls this, so a published image is always one the suite passed.
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.49.1-noble
+      # The browser suite needs a shared IPC namespace or Chromium runs out of
+      # shared memory and dies halfway through.
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: pip install --no-cache-dir --break-system-packages -r requirements.txt -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check app tests scripts
+
+      - name: Unit and API suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest --ignore=tests/ui
+
+      - name: Browser suite
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        # The fake guide is anchored just ahead of now, because the grid draws
+        # around the current time and a guide dated 2096 is an empty screen.
+        run: |
+          export COUCHELEPHANT_FAKE_ANCHOR=$(( $(date +%s) / 1800 * 1800 + 1800 ))
+          pytest tests/ui
