@@ -15,10 +15,19 @@ readable by whoever inherits it.
 | `app/plex.py` | The Plex client. Every request to Plex goes through here |
 | `app/sync.py` | Pulling the guide and Plex's recordings into SQLite, and caching logos |
 | `app/passes.py` | **Choosing which airing to record.** The heart of the app |
+| `app/smartfilter.py` | The smart filter: a nested condition tree, compiled to SQL |
+| `app/teamcat.py` | The shipped team catalogue, and matching a Plex team to it |
 | `app/filters.py` | The guide's filter tokens |
 | `app/auth.py` | Accounts, sessions and per-user preferences |
 | `app/cf_access.py` | Verifying Cloudflare Access tokens |
+| `app/dbstore.py` | What counts as durable data, and the three-way merge |
+| `app/portable.py` | Export and import, as one zip |
+| `app/backups.py` | Snapshot jobs: schedule, retention, encryption, restore |
+| `app/backingstore.py` | The two-way replica, and its database backends |
 | `app/web.py` | Routes, and the HTML they render |
+
+`dbstore.py`, `portable.py`, `backups.py` and `backingstore.py` are explained
+in [Your data](DATA.md), including why the guide is never copied.
 
 `passes.py` is where the value is. If you read one file, read that one.
 
@@ -36,13 +45,15 @@ take the other with it.
 | `channels` | One row per channel, with its logo and network |
 | `programs` | One row per programme, with genres and team tags |
 | `airings` | **One row per broadcast.** The same game appears several times |
-| `teams` | Teams the guide knows about, with Plex's own ids |
-| `passes` | Our rules: follow a team or a programme, with an optional source limit |
+| `teams` | Every team seen in the guide, kept after it stops playing. `in_guide` says which are on this week |
+| `passes` | Our rules: a team, a programme or a smart filter, with an optional source limit. `uid` names one on any machine; `id` does not |
 | `pass_actions` | Every decision a pass made, including the ones it declined |
 | `our_grabs` | Broadcasts we booked, and what booked them |
 | `plex_subscriptions` | Mirror of Plex's own rules |
 | `plex_grabs` | Mirror of Plex's own scheduled recordings |
 | `sync_log` | One row per sync |
+| `sync_shadow` | What the backing store and this database agreed on last time |
+| `backup_jobs` | Snapshot jobs, and how each one last went |
 
 The distinction between `programs` and `airings` is the whole project. A
 programme is a thing; an airing is one broadcast of it, on one channel, at one

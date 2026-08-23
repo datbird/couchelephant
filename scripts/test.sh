@@ -17,6 +17,7 @@ scripts/test.sh [options] [pytest args...]
 
   --unit      only the Python suite, no browser
   --ui        only the browser suite
+  --shots     remake docs/images/*.png from the demo guide, then stop
   --build     rebuild the test image first
   -h, --help  this
 
@@ -30,6 +31,7 @@ ARGS=()
 for a in "$@"; do
   case "$a" in
     --unit)    WHAT=unit ;;
+    --shots)   WHAT=shots ;;
     --ui)      WHAT=ui ;;
     --build)   BUILD=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -61,6 +63,20 @@ fi
 # The source is copied out of a read-only mount into the container's own
 # scratch, so a test cannot write back over the working tree either.
 BOOT='mkdir -p /work/home && cp -r /src/app /src/tests /src/scripts /src/pytest.ini /work/ && cd /work && exec "$@"'
+
+if [ "$WHAT" = shots ]; then
+  # The only run that writes to the working tree, and it writes exactly one
+  # directory. Mounted read-write for that reason and no other.
+  docker run --rm --name "ce-shots-$$" \
+    -v "$PWD:/src:ro" -v "$PWD/docs/images:/out" -w /work \
+    --tmpfs /work:exec,size=2g --ipc=host \
+    -e HOME=/work/home -e PYTHONPATH=/work \
+    "$IMAGE" bash -c "$BOOT" -- \
+      bash -c 'ln -sfn /out /work/docs-images && mkdir -p /work/docs && \
+               rm -rf /work/docs/images && ln -sfn /out /work/docs/images && \
+               python3 scripts/screenshots.py'
+  exit $?
+fi
 
 fail=0
 

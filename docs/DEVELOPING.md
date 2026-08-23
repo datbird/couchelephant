@@ -175,6 +175,20 @@ evening on it, as this one did.
 The UI suite fails a test on any uncaught page error, so an exception that
 leaves a panel half drawn is a failure even when the assertions would pass.
 
+### Remaking the screenshots
+
+```bash
+./scripts/test.sh --shots
+```
+
+Writes every picture in `docs/images/` from `tests/demo_guide.py`, an invented
+guide of eight channels and a day of television. It never touches a real Plex
+server, so nobody's viewing ends up in the README and the pictures can be
+remade whenever the interface changes.
+
+The first set was photographed from a live install. They were stale inside a
+day and nobody could remake them, which is the whole argument for this.
+
 ### Running it without Docker
 
 ```bash

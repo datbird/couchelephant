@@ -88,10 +88,23 @@ too, in the other colour.
 
 ### Adding a schedule
 
-Follow a team or a programme. Leave the source limit alone and it becomes an
-ordinary Plex rule. Name more than one network and CouchElephant keeps it.
+Follow a team, a programme, or a set of conditions. Leave the source limit
+alone on a team or a programme and it becomes an ordinary Plex rule.
 
 ![Add a schedule](docs/images/add-schedule.png)
+
+### Smart filters
+
+A nested tree: every group matches all, any or none of what it holds, and
+groups nest as deep as you like. It counts what it would record, and shows the
+first matches, before you create it.
+
+![Smart filter](docs/images/smart-filter.png)
+
+Plex's own settings are on every pass, padding included, with Plex's own
+explanation of each one a hover away.
+
+![Setting explanations](docs/images/record-tooltip.png)
 
 ### Settings
 
@@ -101,6 +114,15 @@ them.
 | Plex | Accounts | Channel artwork |
 | --- | --- | --- |
 | ![Settings, Plex](docs/images/settings-plex.png) | ![Settings, accounts](docs/images/settings-accounts.png) | ![Settings, artwork](docs/images/settings-artwork.png) |
+
+### Getting your decisions out, and back
+
+Export them to a file, snapshot them on a schedule, or keep a live two-way copy
+in another database.
+
+| Export and import | Backing store |
+| --- | --- |
+| ![Export and import](docs/images/settings-data.png) | ![Backing store](docs/images/settings-backingstore.png) |
 
 ### First run
 
@@ -156,6 +178,10 @@ that reproduces the real one's quirks, every endpoint, and a browser suite that
 drives the guide, the record panel, the recordings page, the smart filter
 builder, backup and restore, settings, the phone layout and first run. It refuses to start unless every path it would write to
 is scratch. See [docs/DEVELOPING.md](docs/DEVELOPING.md).
+
+Every picture above is made by `scripts/test.sh --shots`, from an invented
+guide in `tests/demo_guide.py`. None of them shows anybody's real television,
+and they can be remade whenever the interface changes.
 
 ## Documentation
 

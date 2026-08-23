@@ -101,6 +101,19 @@ TEAMS = [{"key": "236", "title": "Kansas City Chiefs"},
 TEAM_TAGS = {GAME_GUID: [{"id": 236, "tag": "Kansas City Chiefs"},
                          {"id": 237, "tag": "Tampa Bay Buccaneers"}]}
 
+MOVIE_ITEMS = []
+
+# A guide big enough to photograph. Tests want the smallest one that proves
+# the behaviour; the README wants a screen with television on it. Same server,
+# same shapes, more rows. See tests/demo_guide.py.
+if os.environ.get("COUCHELEPHANT_DEMO_GUIDE") == "1":
+    from tests import demo_guide as _demo
+
+    CHANNELS = {vcn: (call, title, f"id-{vcn.replace('.', '-')}")
+                for vcn, (call, title) in _demo.CHANNELS.items()}
+    SPORTS_ITEMS, SHOW_ITEMS, MOVIE_ITEMS, TEAM_TAGS = _demo.build(LIVE_AT, _media)
+    TEAMS = [{"key": str(i), "title": n} for i, n in _demo.TEAMS]
+
 
 def _settings():
     """As the real server sends them, summary and all.
@@ -231,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._container(Metadata=SPORTS_ITEMS)
             if section == "1" and itype == "4":
                 return self._container(Metadata=SHOW_ITEMS)
+            if section == "2" and itype == "1":
+                return self._container(Metadata=MOVIE_ITEMS)
             return self._container(Metadata=[])
 
         if p.endswith("/team"):
@@ -240,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
             STATE.metadata_calls += 1
             key = urllib.parse.unquote(p.rsplit("/", 1)[-1])
             item = None
-            for src in (SPORTS_ITEMS, SHOW_ITEMS):
+            for src in (SPORTS_ITEMS, SHOW_ITEMS, MOVIE_ITEMS):
                 for m in src:
                     if urllib.parse.unquote(m["ratingKey"]) == key:
                         item = dict(m)
@@ -316,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
         STATE.next_key += 1
 
         meta = None
-        for src in (SPORTS_ITEMS, SHOW_ITEMS):
+        for src in (SPORTS_ITEMS, SHOW_ITEMS, MOVIE_ITEMS):
             for m in src:
                 if m["guid"] == guid:
                     meta = m

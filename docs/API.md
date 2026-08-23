@@ -25,6 +25,7 @@ JSON body rather than a redirect.
 | `GET /api/record/options?airing_id=` | What Plex offers for this programme, read from its own template, plus the networks and channels a rule could be limited to |
 | `POST /api/record` | Schedule a broadcast. `airing_id`, `template`, `settings` (JSON), `networks` (JSON), `channels` (JSON) |
 | `POST /api/record/cancel` | Cancel something we booked. `airing_id` |
+| `POST /api/pass` | Follow a team straight from the programme panel. `team_id`. Runs the passes at once, so the next game is booked now rather than at the next sync |
 
 `POST /api/record` refuses while preview mode is on, and says so.
 
@@ -43,6 +44,16 @@ JSON body rather than a redirect.
 | `POST /passes/{id}/toggle` | Pause or resume a pass |
 | `POST /passes/{id}/delete` | Remove a pass |
 | `POST /passes/run` | Run every pass now |
+
+## Pages
+
+| | |
+| --- | --- |
+| `GET /` | The guide |
+| `GET /recordings` | The schedule and the passes. Both are fetched from the API above |
+| `GET /settings` | The settings window, on its own page |
+| `GET /search` | Guide search results |
+| `GET /partial/settings` | Just the settings window, for the gear to open in place |
 
 ## Schedule
 
