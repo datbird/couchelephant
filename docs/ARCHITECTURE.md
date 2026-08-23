@@ -86,7 +86,8 @@ A background task started at boot:
    has them.
 4. Cache any channel logo that is missing, changed, or older than 30 days.
 5. Mirror Plex's own subscriptions and scheduled recordings.
-6. Run every enabled pass.
+6. Trim pass history older than 60 days.
+7. Run every enabled pass.
 
 Then sleep for the configured interval. The sync icon in the header runs one
 immediately.

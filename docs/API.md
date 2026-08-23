@@ -6,7 +6,9 @@ so you can drive it from a script if you want to.
 
 With sign-in on, every path except the sign-in screens and `/healthz` needs a
 session. An unauthenticated call to anything under `/api/` gets `401` with a
-JSON body rather than a redirect.
+JSON body rather than a redirect. A signed-in account without the `admin`
+role gets `403` on settings, accounts, backups, the backing store, and
+export/import. See [AUTH.md](AUTH.md).
 
 ## Guide
 
