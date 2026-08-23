@@ -124,7 +124,80 @@
     return optRow('plex', id, st.label, c, st.hint || '');
   }
 
+  /* One tooltip, on the body, positioned by hand.
+
+     It was a ::after on the mark, which is simpler and wrong: the panel it
+     lives in scrolls, and a scrolling ancestor clips anything absolutely
+     positioned inside it. The explanation was cut off at the panel edge. A
+     fixed element on the body has no such ancestor, and can be clamped to
+     the window rather than to whatever box it happens to sit in. */
+  var tipEl = null, tipFor = null;
+
+  function tip() {
+    if (!tipEl) {
+      tipEl = document.createElement('div');
+      tipEl.className = 'tipbox';
+      tipEl.setAttribute('role', 'tooltip');
+      document.body.appendChild(tipEl);
+    }
+    return tipEl;
+  }
+
+  function showTip(mark) {
+    var text = mark.getAttribute('data-tip');
+    if (!text) return;
+    tipFor = mark;
+    var el = tip();
+    el.textContent = text;
+    el.classList.add('on');
+    placeTip(mark, el);
+  }
+
+  function placeTip(mark, el) {
+    var m = mark.getBoundingClientRect();
+    var t = el.getBoundingClientRect();
+    var pad = 8;
+    /* Above by preference, below when there is no room above. */
+    var top = m.top - t.height - pad;
+    if (top < pad) top = m.bottom + pad;
+    var left = m.left + m.width / 2 - t.width / 2;
+    /* Clamped to the window, so it is never half off the edge. */
+    left = Math.max(pad, Math.min(left, window.innerWidth - t.width - pad));
+    el.style.top = Math.round(top) + 'px';
+    el.style.left = Math.round(left) + 'px';
+  }
+
+  function hideTip() {
+    tipFor = null;
+    if (tipEl) tipEl.classList.remove('on');
+  }
+
+  document.addEventListener('mouseover', function (e) {
+    var mark = e.target.closest && e.target.closest('.opthelp');
+    if (mark) showTip(mark); else if (!e.target.closest('.tipbox')) hideTip();
+  });
+  document.addEventListener('focusin', function (e) {
+    var mark = e.target.closest && e.target.closest('.opthelp');
+    if (mark) showTip(mark); else hideTip();
+  });
+
+  /* A panel scrolling under a shown tooltip moves the row it explains, so the
+     tooltip follows rather than being dismissed. Hiding was the first attempt
+     and it is wrong twice over: pointing at a mark scrolls that mark into
+     view, so the tooltip killed itself the moment it appeared. */
+  function follow() {
+    if (!tipFor || !tipEl) return;
+    if (!tipFor.isConnected) { hideTip(); return; }
+    placeTip(tipFor, tipEl);
+  }
+  window.addEventListener('scroll', follow, true);
+  window.addEventListener('resize', follow);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') hideTip();
+  });
+
   w.CE = {esc: esc, coarse: coarse, fmtTime: fmtTime, fmtWhen: fmtWhen,
           fmtDay: fmtDay, readJson: readJson, KIND_ICON: KIND_ICON,
-          optRow: optRow, settingField: settingField};
+          optRow: optRow, settingField: settingField,
+          showTip: showTip, hideTip: hideTip};
 })(window);

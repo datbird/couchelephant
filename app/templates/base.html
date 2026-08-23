@@ -505,23 +505,19 @@ tr:hover td{background:var(--panel2)}
 .opthelp{display:inline-flex;align-items:center;justify-content:center;
   width:15px;height:15px;margin-left:6px;border-radius:50%;flex:0 0 auto;
   border:1px solid var(--line);background:var(--panel2);color:var(--dim);
-  font-size:10px;font-weight:700;cursor:help;position:relative;vertical-align:middle}
+  font-size:10px;font-weight:700;cursor:help;vertical-align:middle}
 .opthelp:hover,.opthelp:focus-visible{border-color:var(--accent-bd);
   color:var(--accent-ink);background:var(--accent-soft);outline:none}
-.opthelp::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);
-  left:50%;transform:translateX(-50%);width:max-content;max-width:280px;
-  padding:8px 11px;border-radius:8px;border:1px solid var(--line);
-  background:var(--panel);color:var(--text);box-shadow:var(--shadow-lg);
-  font-size:12px;font-weight:400;line-height:1.45;text-align:left;
-  white-space:normal;opacity:0;visibility:hidden;transition:opacity .12s;
-  z-index:40;pointer-events:none}
-.opthelp:hover::after,.opthelp:focus-visible::after{opacity:1;visibility:visible}
-/* Near the top of the panel there is nothing above to draw into, so it flips. */
-.optgrid>.optrow:nth-child(-n+2) .opthelp::after{bottom:auto;top:calc(100% + 8px)}
-@media (max-width:700px){
-  /* Half a phone wide, anchored to the row rather than to the mark. */
-  .opthelp::after{left:0;transform:none;max-width:min(280px,74vw)}
-}
+/* The tooltip itself lives on the body, not on the mark. Every panel it could
+   appear in scrolls, and a scrolling ancestor clips an absolutely positioned
+   child; the text was being cut off at the panel edge. Fixed, on the body,
+   positioned by ce.js and clamped to the window. */
+.tipbox{position:fixed;z-index:200;max-width:min(320px,86vw);padding:9px 12px;
+  border-radius:8px;border:1px solid var(--line);background:var(--panel);
+  color:var(--text);box-shadow:var(--shadow-lg);font-size:12px;line-height:1.45;
+  pointer-events:none;opacity:0;visibility:hidden;transition:opacity .12s;
+  top:0;left:0}
+.tipbox.on{opacity:1;visibility:visible}
 
 /* ---- sub-tabs ----
    A second row under the main tabs, for the sections inside one page. Quieter

@@ -334,6 +334,7 @@ def test_an_explanation_is_a_tooltip_not_a_second_line(add):
     marks = add.locator(".optgrid .opthelp")
     assert marks.count() >= 4, "each Plex setting carries its explanation"
     assert "Attempt to automatically detect" not in add.locator(".optgrid").inner_text()
+    assert add.locator(".tipbox.on").count() == 0, "and nothing is shown until asked"
 
     # The words are still there, on the mark.
     tip = add.get_attribute('label.optrow:has([data-set="comskipMethod"]) .opthelp',
@@ -353,16 +354,50 @@ def test_no_option_row_is_taller_than_a_row(add):
 def test_the_tooltip_appears_on_hover(add):
     _ready_filter(add)
     add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
-    mark = add.locator('label.optrow:has([data-set="endOffsetMinutes"]) .opthelp')
-    hidden = add.eval_on_selector(
-        'label.optrow:has([data-set="endOffsetMinutes"]) .opthelp',
-        "e => getComputedStyle(e, '::after').visibility")
-    assert hidden == "hidden"
-    mark.hover()
-    shown = add.eval_on_selector(
-        'label.optrow:has([data-set="endOffsetMinutes"]) .opthelp',
-        "e => getComputedStyle(e, '::after').visibility")
-    assert shown == "visible"
+    assert add.locator(".tipbox.on").count() == 0
+    add.locator('label.optrow:has([data-set="endOffsetMinutes"]) .opthelp').hover()
+    add.wait_for_selector(".tipbox.on", timeout=5000)
+    assert "adding minutes after" in add.locator(".tipbox").inner_text()
+
+
+def test_the_tooltip_is_not_clipped_by_the_panel(add):
+    """It was a pseudo-element inside a box that scrolls, and a scrolling
+    ancestor clips its children. The words were cut off at the panel edge."""
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="minVideoQuality"]', timeout=20000)
+    add.locator('label.optrow:has([data-set="minVideoQuality"]) .opthelp').hover()
+    add.wait_for_selector(".tipbox.on", timeout=5000)
+
+    box = add.locator(".tipbox").bounding_box()
+    size = add.viewport_size
+    assert box["x"] >= 0, "clipped on the left"
+    assert box["x"] + box["width"] <= size["width"], "clipped on the right"
+    assert box["y"] >= 0 and box["y"] + box["height"] <= size["height"]
+    # And it is on the body, so no ancestor can clip it.
+    assert add.eval_on_selector(
+        ".tipbox", "e => e.parentElement.tagName") == "BODY"
+
+
+def test_the_tooltip_follows_the_row_when_the_panel_scrolls(add):
+    """Hiding on scroll was the first attempt, and it is wrong twice over:
+    pointing at a mark scrolls that mark into view, so the tooltip killed
+    itself the moment it appeared."""
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="minVideoQuality"]', timeout=20000)
+    mark = 'label.optrow:has([data-set="minVideoQuality"]) .opthelp'
+    add.locator(mark).hover()
+    add.wait_for_selector(".tipbox.on", timeout=5000)
+
+    def gap():
+        m = add.locator(mark).bounding_box()
+        t = add.locator(".tipbox").bounding_box()
+        return round(abs((m["y"] + m["height"] / 2) - (t["y"] + t["height"] / 2)))
+
+    before = gap()
+    add.eval_on_selector("#ovlbox", "e => e.scrollBy(0, 60)")
+    add.wait_for_timeout(200)
+    assert add.locator(".tipbox.on").count() == 1, "it stayed up"
+    assert abs(gap() - before) <= 4, "and it moved with the row"
 
 
 def test_the_record_panel_and_the_pass_panel_look_the_same(page):

@@ -16,7 +16,9 @@
 - Every Plex setting now shows Plex's own explanation of it, as a tooltip on a
   small mark beside the label. Inline it ran to twenty lines: "Detect
   commercials" alone pushed one row past six hundred pixels. The options stay
-  two columns of single rows.
+  two columns of single rows. The tooltip is drawn on the body and clamped to
+  the window, because every panel it can appear in scrolls, and a scrolling
+  box clips its own children.
 - The option row and the setting renderer existed twice and had drifted. They
   are one component now, in `static/js/ce.js`, with a test that keeps it that
   way.
