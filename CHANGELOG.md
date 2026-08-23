@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Plex's own settings on every pass, smart filters included.** Padding before
+  and after, resolution, partial airings, commercial detection. They are the
+  one-shot template's, because that is what a pass books for each airing, so
+  the recurring-only choices are no longer offered and then silently dropped.
+- **A sports pass now arrives with padding filled in**, one minute before and
+  sixty after, shown before you create it. A game that runs long used to be cut
+  off at whatever time the guide claimed.
 - **Export and import.** One zip with everything you decided: passes, the
   recordings they booked, channel artwork, settings and accounts. Readable JSON
   inside, on purpose. The Plex token is left out unless you ask.

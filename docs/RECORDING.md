@@ -124,6 +124,27 @@ book more than 40 programmes, or that narrows only by where and when something
 airs rather than by what it is, has to be confirmed a second time. The button
 says the number. It is a question, not a refusal: press again and it is made.
 
+### Plex's own settings on a pass
+
+Every kind of pass, including a smart filter, is offered Plex's own recording
+settings: padding before and after, resolution, whether to replace a lower
+quality copy, whether to allow a partial airing, commercial detection.
+CouchElephant applies them to every airing that pass books.
+
+**They are the one-shot template's settings, not the recurring one's.** A pass
+books a pinned one-shot for each airing it matches, so the three choices only a
+recurring rule can honour are not offered: whether to take repeats, and the two
+policies about deleting episodes it has kept. Offering a control that is
+dropped on save is worse than not offering it.
+
+The channel and the airing time are not offered either. CouchElephant sets
+those itself, per airing. That pin is the mechanism this whole app exists for.
+
+**Sport overruns, so a sports pass arrives with padding filled in**: one minute
+before and sixty after, on screen, before you create it. Change it to whatever
+you like. Without it a game that runs long is cut off at the time the guide
+claimed it would end, which it very often does not.
+
 ### Source limits
 
 A pass can be limited to a set of networks, a set of channels, or both. The two

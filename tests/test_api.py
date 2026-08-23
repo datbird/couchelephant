@@ -505,3 +505,82 @@ def test_a_smart_pass_obeys_the_source_limit_like_any_other(client, synced):
     assert r.json()["ok"]
     assert db.one("SELECT 1 FROM our_grabs") is None, \
         "the game is only on NBC, and the pass was told ABC"
+
+
+# ---- Plex's own settings on a pass ----
+
+def test_a_smart_pass_is_offered_plexs_own_settings(client, synced):
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}'}).json()
+    assert d["ok"]
+    ids = [s["id"] for t in d["templates"] for s in t["settings"]]
+    assert "startOffsetMinutes" in ids, "padding before"
+    assert "endOffsetMinutes" in ids, "padding after"
+    assert "minVideoQuality" in ids
+
+
+def test_a_pass_is_offered_the_settings_it_actually_uses(client, synced):
+    """A pass books a pinned one-shot for every airing, so the recurring-only
+    choices would be stored and never honoured."""
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}'}).json()
+    ids = [s["id"] for t in d["templates"] for s in t["settings"]]
+    assert "onlyNewAirings" not in ids
+    assert "autoDeletionItemPolicyWatchedLibrary" not in ids
+    # And nothing CouchElephant sets for itself. A control that is silently
+    # dropped on save is worse than no control.
+    for pinned in ("lineupChannel", "startTimeslot", "oneShot"):
+        assert pinned not in ids
+
+
+def test_a_plex_rule_is_still_offered_the_recurring_choices(client, synced):
+    d = client.get("/api/rules/options",
+                   params={"kind": "team", "team_id": "236"}).json()
+    assert d["ok"]
+    assert all(not t["one_shot"] for t in d["templates"])
+
+
+def test_a_sports_pass_is_told_that_sport_overruns(client, synced):
+    d = client.get("/api/rules/options",
+                   params={"kind": "team", "team_id": "236"}).json()
+    assert d["sporty"] is True
+    assert int(d["sports_padding"]["endOffsetMinutes"]) >= 30
+
+
+def test_padding_set_on_a_smart_pass_reaches_every_booking(client, synced):
+    """This is the whole point: a game that runs long is not cut off."""
+    r = client.post("/api/rules", data={
+        "kind": "smart", "name": "Football",
+        "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]",
+        "settings": '{"startOffsetMinutes":"1","endOffsetMinutes":"60"}'})
+    assert r.json()["ok"]
+    prefs = fake_plex.STATE.created[0]["prefs"]
+    assert prefs["endOffsetMinutes"] == "60"
+    assert prefs["startOffsetMinutes"] == "1"
+
+
+def test_the_pinning_keys_are_still_not_the_users_to_set(client, synced):
+    client.post("/api/rules", data={
+        "kind": "smart", "filter": '{"field":"genre","cmp":"is","value":"Football"}',
+        "networks": "[]", "channels": "[]",
+        "settings": '{"endOffsetMinutes":"60","startTimeslot":"-1",'
+                    '"lineupChannel":"","oneShot":"0"}'})
+    stored = db.unjs(db.one("SELECT prefs FROM passes")["prefs"], {})
+    assert stored["endOffsetMinutes"] == "60"
+    for blocked in ("startTimeslot", "lineupChannel", "oneShot"):
+        assert blocked not in stored
+    # And the booking is still pinned to the live broadcast.
+    prefs = fake_plex.STATE.created[0]["prefs"]
+    assert prefs["oneShot"] == "1"
+    assert prefs["startTimeslot"] == str(fake_plex.LIVE_AT)
+
+
+def test_a_smart_filter_matching_nothing_says_so_rather_than_offering_nothing(client, synced):
+    d = client.get("/api/rules/options", params={
+        "kind": "smart", "ce_pass": 1,
+        "filter": '{"field":"genre","cmp":"is","value":"Curling"}'}).json()
+    assert d["ok"] is False
+    assert "guide yet" in d["error"]

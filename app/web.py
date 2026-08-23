@@ -1364,15 +1364,47 @@ def api_sources():
     })
 
 
+# What a CouchElephant pass books, every time, is a pinned one-shot. So the
+# settings it should be offered are the one-shot template's. The recurring
+# template carries three more that mean nothing to a one-shot booking: whether
+# to take repeats, and two policies about deleting episodes it has kept.
+_RECURRING_ONLY = frozenset(("onlyNewAirings",
+                             "autoDeletionItemPolicyUnwatchedLibrary",
+                             "autoDeletionItemPolicyWatchedLibrary"))
+
+# CouchElephant sets these itself, per airing. Offering them on a pass would be
+# a control that does nothing: `_pass_prefs` drops them on the way in, because
+# the pin is the mechanism the whole app exists for.
+_PASS_HIDDEN = _RECURRING_ONLY | _PASS_PREF_BLOCKED
+
+# Sport overruns. It is the normal case, not the exception, and a pass with no
+# padding clips the end of every game. Offered as a filled-in default on a new
+# sports pass, on screen, before anything is created.
+SPORTS_PADDING = {"startOffsetMinutes": "1", "endOffsetMinutes": "60"}
+
+
 @app.get("/api/rules/options")
-def api_rule_options(kind: str = "team", team_id: str = "", series: str = ""):
-    """Plex's own options for a rule that follows this team or programme.
+def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
+                     filter: str = "", ce_pass: int = 0):
+    """Plex's own options for a rule that follows this team, programme or filter.
 
     A template belongs to a programme, so one upcoming broadcast stands in for
-    the rest. Only the recurring choices are offered here: a rule that records
-    one broadcast is not a rule.
+    the rest.
+
+    `ce_pass` asks for the settings a CouchElephant pass will actually use,
+    which are the one-shot template's, because that is what it books for each
+    airing. Without it the recurring choices are offered, which is right when
+    the rule is about to become Plex's own.
     """
-    if kind == "team":
+    if kind == "smart":
+        tree = db.unjs(filter, None)
+        if not tree:
+            return JSONResponse({"ok": False, "error": "add a condition first"})
+        try:
+            rows = passes.smart_airings(tree)
+        except smartfilter.FilterError as e:
+            return JSONResponse({"ok": False, "error": str(e)})
+    elif kind == "team":
         rows = passes.candidate_airings(int(team_id or 0))
     else:
         rows = passes.series_airings((series or "").strip())
@@ -1387,7 +1419,16 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = ""):
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"})
 
-    payload = [t for t in _template_payload(options, row, pin=False) if not t["one_shot"]]
+    every = _template_payload(options, row, pin=False)
+    if ce_pass:
+        # The one-shot, minus what only a recurring rule can honour.
+        payload = [dict(t, settings=[s2 for s2 in t["settings"]
+                                     if s2["id"] not in _PASS_HIDDEN])
+                   for t in every if t["one_shot"]]
+        for t in payload:
+            t["title"] = "Every airing this pass books"
+    else:
+        payload = [t for t in every if not t["one_shot"]]
     # Put the one that names what you chose first, since that is the rule the
     # user means; Plex lists them in its own order.
     if kind == "team":
@@ -1395,10 +1436,13 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = ""):
         want = t["name"] if t else ""
     else:
         want = (series or "").strip()
-    if want:
+    if want and not ce_pass:
         payload.sort(key=lambda t: 0 if want.lower() in (t["title"] or "").lower() else 1)
-    return JSONResponse({"ok": True, "templates": payload,
-                         "sample": row["title"]})
+    # A pass that follows a team follows sport, and sport runs over.
+    sporty = kind == "team" or (row["section"] if "section" in row.keys() else "") == "sports"
+    return JSONResponse({"ok": True, "templates": payload, "sample": row["title"],
+                         "sporty": bool(sporty),
+                         "sports_padding": SPORTS_PADDING})
 
 
 @app.get("/api/rules")

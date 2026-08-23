@@ -486,6 +486,40 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
   var previewTimer = null;
 
+  // Drawn from state rather than straight from the answer, so redrawing the
+  // panel does not throw the count and the sample away. It did, and the count
+  // then read as though nothing had matched.
+  function paintPreview() {
+    var el = document.getElementById('sfcount');
+    if (!el) return;
+    var d = st.preview;
+    if (!d) {
+      el.className = 'sfcount' + (st.previewError ? ' bad' : '');
+      el.textContent = st.previewError ||
+        'Add a condition, and this says how much it would record.';
+      var s0 = document.getElementById('sfsample');
+      if (s0) { s0.hidden = true; s0.innerHTML = ''; }
+      return;
+    }
+    el.className = 'sfcount' + (d.over ? ' bad' : d.loose || !d.count ? ' warn' : '');
+    el.innerHTML = '<b>' + d.count + '</b><span>' +
+      (d.count === 1 ? 'programme matches' : 'programmes match') +
+      ' in the next 30 days' + (d.count ? ', and every one would be recorded' : '') +
+      '.</span>' + (d.warning ? '<span>' + esc(d.warning) + '</span>' : '');
+    var sam = document.getElementById('sfsample');
+    if (!sam) return;
+    if (!d.sample.length) { sam.hidden = true; sam.innerHTML = ''; return; }
+    var t = '<table>';
+    d.sample.forEach(function (u) {
+      t += '<tr><td>' + (u.parent ? '<span class="dim tiny">' + esc(u.parent) +
+           '</span><br>' : '') + '<b>' + esc(u.title) + '</b></td>' +
+           '<td class="dim" style="white-space:nowrap">' + CE.fmtWhen(u.b) +
+           '<br>' + esc(u.vcn + ' ' + u.call_sign) + '</td></tr>';
+    });
+    sam.innerHTML = t + '</table>';
+    sam.hidden = false;
+  }
+
   function onFilterEdit() {
     // A changed filter is a different question, so a previous yes to a large
     // one does not carry over to it.
@@ -495,15 +529,42 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     previewTimer = setTimeout(preview, 350);
   }
 
+  // Plex's own settings for a smart pass. They belong to a programme, and any
+  // matching one stands in for the rest, so this is asked once rather than on
+  // every keystroke.
+  function loadSmartTemplates() {
+    if (st.tpl || st.tplPending || !st.filter.usable()) return;
+    st.tplPending = true;
+    var url = '/api/rules/options?kind=smart&ce_pass=1&filter=' +
+              encodeURIComponent(JSON.stringify(st.tree));
+    fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      st.tplPending = false;
+      if (!d.ok) return;
+      st.tpl = d.templates;
+      st.sporty = !!d.sporty;
+      if (st.editing && st.editing.prefs) {
+        st.tpl.forEach(function (t) {
+          t.settings.forEach(function (stg) {
+            if (stg.id in st.editing.prefs) stg.value = st.editing.prefs[stg.id];
+          });
+        });
+      } else if (d.sporty && d.sports_padding) {
+        st.tpl.forEach(function (t) {
+          t.settings.forEach(function (stg) {
+            if (stg.id in d.sports_padding) stg.value = d.sports_padding[stg.id];
+          });
+        });
+      }
+      render();
+    }).catch(function () { st.tplPending = false; });
+  }
+
   function preview() {
     var box2 = document.getElementById('sfcount');
     if (!box2) return;
     if (!st.filter.usable()) {
-      box2.className = 'sfcount';
-      box2.textContent = 'Add a condition, and this says how much it would record.';
-      var s0 = document.getElementById('sfsample');
-      if (s0) s0.hidden = true;
-      st.preview = null;
+      st.preview = null; st.previewError = '';
+      paintPreview();
       paint();
       return;
     }
@@ -514,35 +575,10 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       networks: JSON.stringify(st.nets),
       channels: JSON.stringify(st.chans)
     })}).then(CE.readJson).then(function (d) {
-      var el = document.getElementById('sfcount');
-      if (!el) return;
       st.preview = d.ok ? d : null;
-      if (!d.ok) {
-        el.className = 'sfcount bad';
-        el.textContent = d.error || 'That filter cannot be read.';
-        paint();
-        return;
-      }
-      el.className = 'sfcount' + (d.over ? ' bad' : d.loose || !d.count ? ' warn' : '');
-      el.innerHTML = '<b>' + d.count + '</b><span>' +
-        (d.count === 1 ? 'programme matches' : 'programmes match') +
-        ' in the next 30 days' + (d.count ? ', and every one would be recorded' : '') +
-        '.</span>' + (d.warning ? '<span>' + esc(d.warning) + '</span>' : '');
-      var sam = document.getElementById('sfsample');
-      if (sam) {
-        if (!d.sample.length) { sam.hidden = true; sam.innerHTML = ''; }
-        else {
-          var t = '<table>';
-          d.sample.forEach(function (u) {
-            t += '<tr><td>' + (u.parent ? '<span class="dim tiny">' + esc(u.parent) +
-                 '</span><br>' : '') + '<b>' + esc(u.title) + '</b></td>' +
-                 '<td class="dim" style="white-space:nowrap">' + CE.fmtWhen(u.b) +
-                 '<br>' + esc(u.vcn + ' ' + u.call_sign) + '</td></tr>';
-          });
-          sam.innerHTML = t + '</table>';
-          sam.hidden = false;
-        }
-      }
+      st.previewError = d.ok ? '' : (d.error || 'That filter cannot be read.');
+      paintPreview();
+      if (d.ok && d.count) loadSmartTemplates();
       paint();
     }).catch(function () {
       var el = document.getElementById('sfcount');
@@ -623,7 +659,15 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
     h += '<div class="ovlsec"><h3>Options</h3>' +
          '<div class="ownkey"><span><i class="own ce"></i>CouchElephant</span>' +
-         '<span><i class="own plex"></i>Plex DVR</span></div><div class="optgrid">';
+         '<span><i class="own plex"></i>Plex DVR</span></div>';
+    // Sport runs over. A pass with no padding clips the end of every game, so
+    // the reason the field is not zero is said next to the field.
+    if (st.sporty && !st.editing) {
+      h += '<div class="note" style="margin-bottom:10px">Sport overruns, so the ' +
+           'padding below is filled in for you. Change it if you want to; ' +
+           'CouchElephant applies it to every airing this pass books.</div>';
+    }
+    h += '<div class="optgrid">';
     h += multiField();
     if (st.tpl && st.tpl[st.pick]) {
       st.tpl[st.pick].settings.forEach(function (stg) { h += field(stg); });
@@ -635,6 +679,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
              ? '<b>' + esc(st.team.name) + '</b> is not in the guide this week, so ' +
                'Plex has no options to offer for it yet. CouchElephant keeps this ' +
                'pass and starts booking games the moment the team appears.'
+             : st.kind === 'smart'
+             ? 'Plex\'s own options, padding included, appear once the conditions ' +
+               'match something in the guide.'
              : 'Plex\'s own options appear once you have chosen what to follow.') +
            '</div>';
     }
@@ -672,7 +719,12 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
       search(st.q);
     }
     st.picker.wire();
-    if (st.kind === 'smart') { st.filter.wire(); preview(); }
+    if (st.kind === 'smart') {
+      st.filter.wire();
+      // What is already known, drawn at once; then ask again in the background.
+      paintPreview();
+      preview();
+    }
     document.getElementById('rgo').addEventListener('click', create);
     paint();
   }
@@ -681,16 +733,41 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     syncKind();
     st.team = null; st.series = null; st.tpl = null; st.pick = 0; st.q = '';
     st.preview = null; st.confirmed = false;
+    st.tplPending = false; st.sporty = false;
   }
 
   // Once something is chosen, ask Plex what it can do with it.
+  //
+  // A CouchElephant pass books a pinned one-shot for every airing it matches,
+  // so the settings it should be offered are the one-shot template's: padding,
+  // resolution, partials, commercial detection. `ce_pass` asks for those. A
+  // rule that is about to become Plex's own gets the recurring choices
+  // instead, because that is what Plex will hold.
   function loadTemplates() {
-    var url = st.kind === 'team'
-      ? '/api/rules/options?kind=team&team_id=' + encodeURIComponent(st.team.id)
-      : '/api/rules/options?kind=series&series=' + encodeURIComponent(st.series);
+    var cePass = st.kind === 'smart' || st.editing;
+    var url;
+    if (st.kind === 'smart') {
+      url = '/api/rules/options?kind=smart&filter=' +
+            encodeURIComponent(JSON.stringify(st.tree));
+    } else if (st.kind === 'team') {
+      url = '/api/rules/options?kind=team&team_id=' + encodeURIComponent(st.team.id);
+    } else {
+      url = '/api/rules/options?kind=series&series=' + encodeURIComponent(st.series);
+    }
+    if (cePass) url += '&ce_pass=1';
     fetch(url).then(function (r) { return r.json(); }).then(function (d) {
       st.tpl = d.ok ? d.templates : null;
+      st.sporty = !!(d.ok && d.sporty);
       st.pick = 0;
+      // Sport overruns. A new sports pass arrives with padding filled in, on
+      // screen, rather than clipping the end of every game in silence.
+      if (d.ok && d.sporty && !st.editing && d.sports_padding) {
+        st.tpl.forEach(function (t) {
+          t.settings.forEach(function (stg) {
+            if (stg.id in d.sports_padding) stg.value = d.sports_padding[stg.id];
+          });
+        });
+      }
       // Show what this pass already saved, not Plex's defaults.
       if (st.tpl && st.editing && st.editing.prefs) {
         st.tpl.forEach(function (t) {
@@ -856,6 +933,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     st.team = null; st.series = null; st.editing = null;
     st.tpl = null; st.pick = 0; st.q = '';
     st.tree = null; st.name = ''; st.preview = null; st.confirmed = false;
+    st.tplPending = false; st.sporty = false;
     st.nets.length = 0; st.chans.length = 0;
     ovl.classList.add('show');
     // The field list has to be in hand before the builder can draw itself, and

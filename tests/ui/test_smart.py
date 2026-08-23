@@ -243,3 +243,66 @@ def test_editing_a_smart_pass_opens_its_conditions(page):
     assert page.eval_on_selector("#sfroot .sffield", "e => e.value") == "genre"
     assert page.input_value("#sfname") == "Chiefs football"
     assert page.locator("input[name=rmode]").count() == 0, "what it is stays fixed"
+
+
+# ---- Plex's own settings on a smart pass ----
+
+def _ready_filter(page):
+    _filter(page)
+    page.select_option("#sfroot .sffield", "genre")
+    page.select_option("select.sfval", "Football")
+    page.wait_for_function(
+        "() => /programme/.test(document.getElementById('sfcount').textContent)",
+        timeout=20000)
+    return page
+
+
+def test_a_smart_pass_offers_plexs_own_settings(add):
+    """Padding above all. A game that runs long is cut off without it."""
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    ids = add.eval_on_selector_all("[data-set]", "els => els.map(e => e.dataset.set)")
+    assert "startOffsetMinutes" in ids
+    assert "endOffsetMinutes" in ids
+    assert "minVideoQuality" in ids
+    text = add.locator("#ovlbox").inner_text()
+    assert "Minutes after end" in text
+
+
+def test_it_does_not_offer_what_a_pass_cannot_honour(add):
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    ids = add.eval_on_selector_all("[data-set]", "els => els.map(e => e.dataset.set)")
+    for gone in ("onlyNewAirings", "lineupChannel", "startTimeslot", "oneShot"):
+        assert gone not in ids
+
+
+def test_a_sports_filter_arrives_with_padding_filled_in(add):
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    assert int(add.input_value('[data-set="endOffsetMinutes"]')) >= 30
+    assert "Sport overruns" in add.locator("#ovlbox").inner_text()
+
+
+def test_the_padding_you_set_is_what_gets_booked(add):
+    from tests import fake_plex
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    add.fill('[data-set="endOffsetMinutes"]', "45")
+    add.fill("#sfname", "Football")
+    add.click("#rgo")
+    add.wait_for_function(
+        "() => document.getElementById('rgo').textContent === 'Done'", timeout=30000)
+    assert fake_plex.STATE.created[0]["prefs"]["endOffsetMinutes"] == "45"
+
+
+def test_editing_a_smart_pass_shows_the_padding_it_saved(page):
+    from app import web
+    web._make_pass("smart", smart={"field": "genre", "cmp": "is", "value": "Football"},
+                   name="Football", prefs={"endOffsetMinutes": "90"})
+    page.goto("/recordings")
+    page.click('.subtab[data-sub="passes"]')
+    page.wait_for_selector(".passrow", timeout=15000)
+    page.click('.passrow [data-act="edit"]')
+    page.wait_for_selector('[data-set="endOffsetMinutes"]', timeout=20000)
+    assert page.input_value('[data-set="endOffsetMinutes"]') == "90"

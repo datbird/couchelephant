@@ -33,7 +33,7 @@ def _future_airings(horizon_days=30):
     limit = _now() + horizon_days * 86400
     return db.query(
         """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary,
-                  c.network AS channel_network
+                  p.section, c.network AS channel_network
            FROM airings a
            JOIN programs p ON p.guid = a.program_guid
            LEFT JOIN channels c ON c.vcn = a.channel_vcn
@@ -80,7 +80,7 @@ def smart_airings(tree, horizon_days=30):
     limit = _now() + horizon_days * 86400
     return db.query(
         f"""SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams, p.summary,
-                   c.network AS channel_network
+                   p.section, c.network AS channel_network
             FROM airings a
             JOIN programs p ON p.guid = a.program_guid
             LEFT JOIN channels c ON c.vcn = a.channel_vcn

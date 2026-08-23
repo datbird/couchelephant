@@ -108,6 +108,17 @@ def _settings():
          "label": "Resolution", "enumValues": "0:Prefer HD|720:HD only"},
         {"id": "startOffsetMinutes", "value": "0", "type": "int",
          "label": "Minutes before start"},
+        {"id": "endOffsetMinutes", "value": "0", "type": "int",
+         "label": "Minutes after end"},
+        {"id": "recordPartials", "value": "true", "type": "bool",
+         "label": "Allow partial airings"},
+        {"id": "comskipMethod", "value": "0", "type": "int",
+         "label": "Detect commercials"},
+        # A recurring rule can honour these. A one-shot booking cannot, so a
+        # pass must not be offered them.
+        {"id": "onlyNewAirings", "value": "1", "type": "int", "label": "Airings"},
+        {"id": "autoDeletionItemPolicyWatchedLibrary", "value": "0", "type": "int",
+         "label": "Delete episodes after playing"},
         {"id": "lineupChannel", "value": "", "type": "text",
          "label": "Limit to channel",
          "enumValues": ":Any|id-41-1:41.1 KQGGDT (NBC)"},
