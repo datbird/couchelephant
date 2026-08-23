@@ -466,31 +466,31 @@ def full_sync():
 
 
 def _sync_everything(plex):
-    if True:
-        provider, shows, sports, movies = discover(plex)
-        db.set_setting("epg_provider", provider)
-        db.set_setting("shows_section", shows or "")
-        db.set_setting("sports_section", sports or "")
-        db.set_setting("movies_section", movies or "")
+    """Every sync step in order. Raises on failure; full_sync logs it."""
+    provider, shows, sports, movies = discover(plex)
+    db.set_setting("epg_provider", provider)
+    db.set_setting("shows_section", shows or "")
+    db.set_setting("sports_section", sports or "")
+    db.set_setting("movies_section", movies or "")
 
-        chans = sync_channels(plex)
-        teams = sync_teams(plex, provider, sports)
-        # A pass made for a team that had not played yet starts working here,
-        # the moment the guide first carries it.
-        woke = resolve_team_passes()
-        guide = sync_guide(plex, provider, shows, sports, movies)
-        enriched = enrich_sports(plex, provider)
-        got, bad, tried = cache_logos()
-        subs = sync_recordings(plex)
-        prune_history()
+    chans = sync_channels(plex)
+    teams = sync_teams(plex, provider, sports)
+    # A pass made for a team that had not played yet starts working here,
+    # the moment the guide first carries it.
+    woke = resolve_team_passes()
+    guide = sync_guide(plex, provider, shows, sports, movies)
+    enriched = enrich_sports(plex, provider)
+    got, bad, tried = cache_logos()
+    subs = sync_recordings(plex)
+    prune_history()
 
-        cov = logo_coverage()
-        nch = cov["channels"]
-        detail = (f"{guide['programs']} programs, {guide['airings']} airings, "
-                  f"{teams} teams, {enriched} sports enriched, "
-                  + (f"{woke} pass(es) resolved, " if woke else "")
-                  + f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
-                  + (f" (+{got} fetched)" if got else "")
-                  + (f" ({bad} failed)" if bad else "")
-                  + f", {subs} subscriptions")
-        return 1, detail
+    cov = logo_coverage()
+    nch = cov["channels"]
+    detail = (f"{guide['programs']} programs, {guide['airings']} airings, "
+              f"{teams} teams, {enriched} sports enriched, "
+              + (f"{woke} pass(es) resolved, " if woke else "")
+              + f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
+              + (f" (+{got} fetched)" if got else "")
+              + (f" ({bad} failed)" if bad else "")
+              + f", {subs} subscriptions")
+    return 1, detail
