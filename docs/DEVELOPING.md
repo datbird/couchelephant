@@ -126,6 +126,11 @@ but not teams, a guid that is answered 400 when it arrives encoded twice, a
 create that returns a key and then discards the subscription, `oneShot` coming
 back as the string `'true'`, `mediaIndex` as a string.
 
+A fake that is easier than the real server is worse than no fake. Its commercial
+detection setting used to be a plain number where the real one is a wide
+dropdown, so a label the dropdown squeezed off the screen passed the test.
+When a UI bug survives a green suite, check what the fake is sending first.
+
 Those quirks are the point. They are each a debugging round that happened once,
 and the client is exercised through httpx against a real socket rather than
 mocked, so a regression in `plex.py` is caught here instead of in front of a

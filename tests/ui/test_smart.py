@@ -414,6 +414,17 @@ def test_the_record_panel_and_the_pass_panel_look_the_same(page):
     assert max(heights) <= 64
 
 
+def test_no_option_label_is_truncated(add):
+    """A control sized on its content squeezed the label instead of itself."""
+    _ready_filter(add)
+    add.wait_for_selector('[data-set="comskipMethod"]', timeout=20000)
+    clipped = add.eval_on_selector_all(
+        ".optgrid .optname",
+        "els => els.filter(e => e.scrollWidth > e.clientWidth + 1)"
+        ".map(e => e.textContent)")
+    assert clipped == [], f"labels cut off: {clipped}"
+
+
 def test_the_options_stay_two_columns_of_single_rows(add):
     """The complaint that produced this test: the explanations turned a tidy
     two-column grid into one long scroll."""

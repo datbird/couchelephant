@@ -132,6 +132,11 @@ def _settings():
                     "the scheduled time."},
         {"id": "comskipMethod", "value": "0", "type": "int",
          "label": "Detect commercials",
+         # A dropdown, and a wide one. The fake used to send this as a plain
+         # number, so the option grid was easier here than on a real server
+         # and a truncated label passed the test.
+         "enumValues": "0:Disabled|1:Detect and delete commercials"
+                       "|2:Detect commercials and mark for skip",
          # The long one. Inline it was twenty lines.
          "summary": "Attempt to automatically detect and remove commercials from "
                     "recordings. This process may take a long time and cause high "

@@ -403,8 +403,13 @@ tr:hover td{background:var(--panel2)}
 /* Every row the same height, so the grid reads as a grid rather than as a
    ragged column of whatever each label needed. */
 .optrow{min-height:36px}
+/* The control takes half the row and no more. Sized on its content it
+   claimed whatever its longest option needed, and squeezed the label until
+   "Detect commercials" read "Detect com...". The dropdown truncates its own
+   text now, which is the one that can afford to. */
 .optrow select,.optrow input[type=number],.optrow input[type=text]{
-  flex:0 1 auto;max-width:52%;min-width:0;padding:5px 8px;font-size:13px}
+  flex:0 1 50%;max-width:50%;min-width:0;padding:5px 8px;font-size:13px}
+.optrow select{text-overflow:ellipsis}
 .optrow input[type=number]{width:82px}
 .optrow input[type=checkbox]{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto}
 /* Whose feature is this. Amber is CouchElephant throughout the app, and the
