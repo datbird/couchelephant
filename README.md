@@ -199,6 +199,7 @@ and they can be remade whenever the interface changes.
 | [Accounts](docs/AUTH.md) | Off, local, or Cloudflare Access |
 | [Your data](docs/DATA.md) | Export and import, snapshots, and a two-way backing store |
 | [Developing](docs/DEVELOPING.md) | Running it locally, the test suite, the deploy script |
+| [Releasing](docs/RELEASING.md) | Tagging a version, the published image, Unraid Community Applications |
 | [Plex API notes](docs/PLEX-NOTES.md) | What the server really returns, and the traps in it |
 
 ## Licence
