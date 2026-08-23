@@ -22,6 +22,14 @@ subscription rather than 2.
 Searching and filtering fold case across the whole of Unicode. SQLite stops at
 Z, so a search for "muller" never found "MULLER" with an umlaut.
 
+Setting up pulls the guide straight away rather than waiting for the sync
+loop's next turn, and the empty grid says what it is doing. It used to read
+"End of the channel list", which on a minute-old install looks like a broken
+app rather than an early one.
+
+The guide's day strip is written in the viewer's language and date order. It
+was built on the server in English.
+
 ### Fixed
 
 - **Following a team as a plain Plex rule made a rule for the whole league.**

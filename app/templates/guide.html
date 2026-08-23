@@ -18,7 +18,9 @@
 <div class="daybar">
   {% for d in days %}
     <a href="/?day={{ d.key }}{% if channel %}&channel={{ channel }}{% endif %}{% if sports %}&sports=1{% endif %}"
-       class="{{ 'on' if d.key == day }}">{{ d.label }}</a>
+       class="{{ 'on' if d.key == day }}"
+       {% if not loop.first %}data-ts="{{ d.ts }}" data-fmt="dayshort"{% endif %}
+       >{{ d.label }}</a>
   {% endfor %}
 </div>
 {% endif %}
@@ -177,7 +179,8 @@
       loadH = document.getElementById('loadh'),
       timesEl = document.getElementById('gtimes'),
       rowsEl = document.getElementById('grows'),
-      status = document.getElementById('gstatus');
+      status = document.getElementById('gstatus'),
+      SYNCED = {{ 'true' if last_sync and last_sync.ok else 'false' }};
 
   // Fit the grid to whatever space is actually left below the controls.
   function fit() {
@@ -349,8 +352,22 @@
       d.airings.forEach(place);
       widen();
       schedule();
-      status.textContent = moreChannels ? '' : 'End of the channel list.';
-      status.style.display = moreChannels ? 'none' : 'block';
+      if (moreChannels) {
+        status.textContent = '';
+        status.style.display = 'none';
+      } else if (!rowsEl.querySelector('.growr')) {
+        // Nothing at all. On a new install that means the first sync has not
+        // finished, and "End of the channel list" reads as a broken app.
+        status.textContent = SYNCED
+          ? 'No channels. Check that your Plex DVR has a tuner and a guide.'
+          : 'Fetching your channels and guide from Plex. This takes a minute '
+            + 'the first time, and the page fills in as it arrives.';
+        status.style.display = 'block';
+        if (!SYNCED) setTimeout(function () { location.reload(); }, 8000);
+      } else {
+        status.textContent = 'End of the channel list.';
+        status.style.display = 'block';
+      }
       pinOverlays();
     }).finally(function () { busy = false; busyV(false); });
   }

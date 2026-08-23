@@ -262,7 +262,9 @@ def guide(request: Request, day: str = "", channel: str = "", sports: int = 0,
             hour=0, minute=0, second=0, microsecond=0)
         for i in range(12):
             d = base + datetime.timedelta(days=i)
-            days.append({"key": d.strftime("%Y-%m-%d"),
+            # The label is a fallback. It carries its timestamp so the page
+            # can rewrite it in the viewer's own language and date order.
+            days.append({"key": d.strftime("%Y-%m-%d"), "ts": int(d.timestamp()),
                          "label": "Today" if i == 0 else d.strftime("%a %-d")})
 
     return page(request, "guide.html", rows=rows, days=days,

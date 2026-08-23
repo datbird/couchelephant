@@ -228,12 +228,16 @@
      fallback and the browser corrects it. Runs again after a partial is
      inserted, or the second page of results keeps the fallback. */
   function localizeTimes(root) {
-    var els = (root || document).querySelectorAll('time[data-ts]');
+    var els = (root || document).querySelectorAll('[data-ts]');
     Array.prototype.forEach.call(els, function (el) {
       var ts = parseInt(el.getAttribute('data-ts'), 10);
       if (!ts) return;
-      el.textContent = el.getAttribute('data-fmt') === 'when'
-        ? fmtWhen(ts) : fmtTime(ts);
+      var how = el.getAttribute('data-fmt');
+      if (how === 'when') el.textContent = fmtWhen(ts);
+      else if (how === 'dayshort') {
+        el.textContent = new Date(ts * 1000).toLocaleDateString(undefined,
+          {weekday: 'short', day: 'numeric'});
+      } else el.textContent = fmtTime(ts);
     });
   }
   if (document.readyState === 'loading') {

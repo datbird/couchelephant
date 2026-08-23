@@ -1,10 +1,11 @@
 """First run, sign in, sign out, theme."""
+import asyncio
 import urllib.parse
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from .. import auth, db
+from .. import auth, db, sync
 from ._shared import ZONES, current_user, page
 from .settings import _test_plex
 
@@ -24,8 +25,8 @@ def welcome(request: Request):
 
 
 @router.post("/welcome")
-def welcome_save(plex_url: str = Form(""), plex_token: str = Form(""),
-                 timezone: str = Form("UTC")):
+async def welcome_save(plex_url: str = Form(""), plex_token: str = Form(""),
+                       timezone: str = Form("UTC")):
     """Test first, then save. A wrong address saved quietly is what makes the
     first five minutes confusing."""
     url, token = plex_url.strip().rstrip("/"), plex_token.strip()
@@ -41,6 +42,10 @@ def welcome_save(plex_url: str = Form(""), plex_token: str = Form(""),
     db.set_setting("plex_token", token)
     db.set_setting("timezone", timezone)
     db.set_setting("dry_run", "1")
+    # Pull the guide now rather than waiting for the loop's next turn. Without
+    # this a new install lands on an empty grid and has no idea whether it is
+    # broken or just early.
+    asyncio.create_task(asyncio.to_thread(sync.full_sync))
     return JSONResponse({"ok": True, "detail": detail})
 
 
