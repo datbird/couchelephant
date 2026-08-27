@@ -282,7 +282,11 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
         # Plex, not to the filter.
         rows = rows or passes.any_airing()
     elif kind == "team":
-        rows = passes.candidate_airings(_int(team_id)) or (
+        # The name goes with the id, because Plex renumbers its team ids and a
+        # stale id on its own finds nothing.
+        _t = db.one("SELECT name FROM teams WHERE id = ?", (_int(team_id),))
+        rows = passes.candidate_airings(_int(team_id),
+                                        team_name=_t["name"] if _t else None) or (
             passes.any_airing() if ce_pass else [])
     else:
         rows = passes.series_airings((series or "").strip()) or (
@@ -603,7 +607,8 @@ async def api_rule_create(kind: str = Form("team"), team_id: str = Form(""),
     if kind == "team":
         t = db.one("SELECT * FROM teams WHERE id = ?", (team_id or 0,))
         if t:
-            label, rows = t["name"], passes.candidate_airings(t["id"])
+            label, rows = t["name"], passes.candidate_airings(t["id"],
+                                                              team_name=t["name"])
         else:
             # Picked from the catalogue, and not yet in the guide. Plex has no
             # id for it and no rule it could hold, so CouchElephant keeps this

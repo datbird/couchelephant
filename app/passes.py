@@ -17,7 +17,7 @@ Selection order for a game:
 """
 import time
 
-from . import db, smartfilter
+from . import db, smartfilter, teamcat
 from .plex import Plex, PlexError
 
 # Give a game this much slack before treating it as too late to schedule.
@@ -50,13 +50,38 @@ def _future(extra="", args=(), horizon_days=30, limit=None):
     return db.query(sql, (cutoff, until, *args))
 
 
-def candidate_airings(team_id: int, horizon_days: int = 30) -> list:
-    """Future airings of games featuring this team, newest guide data only."""
-    if not team_id:
+def candidate_airings(team_id: int | None, horizon_days: int = 30,
+                      team_name: str | None = None) -> list:
+    """Future airings of games featuring this team.
+
+    Matched on Plex's id OR on the team's name, because the id is not stable.
+    Measured on a live server: one guide refresh moved the Kansas City Chiefs
+    from 236 to 245 on the same game, with the same programme guid. Following
+    the id alone meant a pass silently stopped matching, and "nothing matched"
+    looks exactly like a team with no games this week.
+
+    Both halves are needed, not one. A pass corrected to the new id still has
+    to find programmes cached under the old one, and a programme carrying the
+    new id still has to be found by a pass that has not been corrected yet.
+
+    The name is compared through `teamcat.ident`, which folds case, accents and
+    punctuation and nothing else. Deliberately not `teamcat.norm`: that also
+    drops club words, which is right for *finding* a team in the catalogue and
+    wrong for deciding what to record. It folds "Real Madrid" and "Atletico
+    Madrid" both to "madrid", and does the same to Cincinnati and FC
+    Cincinnati, and to four more pairs in the shipped catalogue.
+
+    Spelling is kept in step at the other end instead: `sync.resolve_team_passes`
+    adopts Plex's own spelling for the team when it repoints a pass, so a pass
+    made from the catalogue stops carrying a name the guide has never used.
+    """
+    if not team_id and not team_name:
         return []
+    key = teamcat.ident(team_name or "")
     return _future("EXISTS (SELECT 1 FROM json_each(p.teams) t "
-                   "WHERE json_extract(t.value, '$.id') = ?)",
-                   (int(team_id),), horizon_days)
+                   "WHERE json_extract(t.value, '$.id') = ? "
+                   "   OR (? != '' AND tident(json_extract(t.value, '$.name')) = ?))",
+                   (int(team_id or 0), key, key), horizon_days)
 
 
 def series_airings(series_guid: str, horizon_days: int = 30) -> list:
@@ -95,16 +120,15 @@ def any_airing(horizon_days: int = 30) -> list:
 
 def rule_airings(rule, horizon_days: int = 30) -> list:
     """Everything a rule could record, before the source limit is applied."""
-    if rule["kind"] == "team" and not rule["team_id"]:
-        # Followed from the catalogue before the team had ever played. An
-        # airing carries Plex's ids, so there is nothing to match on yet.
-        # `sync.resolve_team_passes` fills the id in when it appears.
-        return []
     if rule["kind"] == "smart":
         return smart_airings(db.unjs(rule["filter"], {}) or {}, horizon_days)
     if rule["kind"] == "series":
         return series_airings(rule["series_guid"] or rule["series_title"], horizon_days)
-    return candidate_airings(rule["team_id"], horizon_days)
+    # The name goes with the id. A pass followed from the catalogue has only a
+    # name until the team first plays, and after Plex renumbers, the name is
+    # the half that is still true.
+    return candidate_airings(rule["team_id"], horizon_days,
+                             team_name=rule["team_name"])
 
 
 def allowed_sources(rule) -> tuple[list[str], list[str]]:
