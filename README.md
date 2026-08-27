@@ -30,7 +30,7 @@ CouchElephant reads the flag, chooses the airing, and creates a one-shot
 recording pinned with `lineupChannel` and `startTimeslot`. Every decision it
 makes, including the ones it declines, is written down and shown to you.
 
-It also does two things Plex cannot say at all:
+It also does several things Plex cannot say at all:
 
 - **Limit a rule to several networks or channels.** A Plex rule takes one
   channel, or none. "Only ABC, CBS and FOX" cannot be expressed to Plex, so
@@ -43,6 +43,11 @@ It also does two things Plex cannot say at all:
   follow one programme or one team and cannot be given conditions at all.
 - **Always take the live broadcast**, for every game a team plays, without you
   looking at the guide.
+- **Tell you when Plex stops keeping its own guide up to date.** When that
+  happens nothing breaks: passes keep running, syncs keep succeeding, and the
+  guide gets a day shorter every day until what you wanted is past the end of
+  it. You find out the evening the recording does not happen. CouchElephant
+  checks every sync and badges the sync button instead.
 
 ## What it looks like
 
@@ -105,6 +110,15 @@ Plex's own settings are on every pass, padding included, with Plex's own
 explanation of each one a hover away.
 
 ![Setting explanations](docs/images/record-tooltip.png)
+
+### When Plex is the problem
+
+CouchElephant can only record from the airings Plex offers it, so it checks
+that Plex is doing its own job. Every sync it asks Plex how often it intends to
+refresh the guide, when it last did, and how far ahead the guide now reaches.
+A problem badges the sync button, because a guide that has stopped moving is a
+sync problem. A notice says what is wrong and what to do, clears itself when
+the condition clears, and cannot be dismissed.
 
 ### Settings
 

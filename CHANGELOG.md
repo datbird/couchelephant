@@ -1,5 +1,109 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **CouchElephant now watches whether Plex is keeping its own guide up to
+  date.** It can only choose from the airings Plex offers, and when Plex stops
+  refreshing, nothing here breaks. Passes keep running, syncs keep succeeding,
+  and the guide gets a day shorter every day until the game you wanted is past
+  the end of it. Nothing errors. You find out the evening the recording does
+  not happen.
+
+  Plex is asked what it intends rather than assumed at. `/butler` gives the
+  real interval of its guide refresh and whether it is switched on; the DVR
+  gives when it last actually ran. A weekly task five days late is fine and a
+  daily one five days late is broken, and now the app can tell the difference
+  because Plex told it which this is.
+
+  Four things raise a notice: the refresh task switched off, the guide not
+  refreshed within twice its own interval, the guide reaching less than three
+  days ahead, and Plex unreachable. A daily task that slipped one day is late
+  rather than broken, and saying so would only teach you to ignore the badge.
+
+  It shows as a badge on the sync button, not a fourth icon in the bar. A guide
+  that has stopped moving is a sync problem. The badge is its own button, so
+  reading what is wrong does not start a sync you did not ask for.
+
+  A notice clears itself when the condition clears, and cannot be dismissed. A
+  health warning you can click away is one you will click away. It remembers
+  when the problem started, because "since when" is the question you ask on
+  finding a stale guide four days late.
+
+  Every sync also writes down when Plex last refreshed and how far its guide
+  reached, so a guide that has stopped moving is visible the next day rather
+  than the week after.
+
+### Fixed
+
+- **Plex renumbers its team ids, and a team pass did not survive it.** Measured
+  on a live server: one guide refresh moved the Kansas City Chiefs from 236 to
+  245 and the Seattle Seahawks from 132 to 244, on the same game with the same
+  programme guid. A pass followed the stored id, so from that moment it matched
+  nothing, and said nothing about it, because matching nothing is what a team
+  with no games this week looks like. You would find out on a Sunday.
+
+  The name is the identity and the id is a handle into whatever guide Plex
+  currently holds. A pass is now repointed at today's id on every sync, and an
+  airing is matched on the id **or** the team's name.
+
+  Both halves are needed. `programs.teams` is enriched once and then preserved,
+  so a cached programme keeps the old ids long after Plex has moved on:
+  verified live, a pass correctly repointed to 245 matched zero airings against
+  a cache still holding 236. Correcting the id alone would have made it worse.
+
+  Names are compared on spelling only: case, accents and punctuation folded,
+  every word kept. Not the catalogue's own folding, which also drops club words
+  and would make "Real Madrid" match Atletico Madrid, and Cincinnati match FC
+  Cincinnati. Where a pass and the guide spell a team differently, that is now
+  settled at the source: repointing a pass also adopts Plex's own spelling, so
+  a pass made from the shipped catalogue stops carrying a name the guide has
+  never used.
+
+- **Team names outside Latin script folded to nothing, so they were all one
+  team.** Both folds ended with `[^a-z0-9]`, which does not narrow a Cyrillic,
+  Greek, Japanese, Hebrew or Arabic name so much as delete it. An empty string
+  is not a miss, it is a key. Three things followed. The catalogue answered VfB
+  Stuttgart for every such name, because the alias "VFB" also folds away and
+  claimed that key. Every non-Latin team was tagged Bundesliga. And four
+  distinct teams in one guide collapsed into a single entry, so a pass for
+  Zenit was repointed at the Hanshin Tigers and had its name overwritten to
+  match.
+
+  The fold now keeps anything Unicode calls alphanumeric, and every lookup
+  refuses an empty key rather than looking it up.
+
+  Combining marks come off only where the letter is ASCII. Beyond Latin they
+  carry meaning: the Japanese dakuten is the difference between KA and GA, so
+  stripping it turned the Hanshin Tigers into a word that is not "tigers".
+
+  A name made entirely of club words, like "Athletic Club", keeps them rather
+  than folding to nothing.
+
+- **A team pass that can find no game now says so.** That silence is what let
+  the renumbering hide. A team out of season trips it too, which is the point:
+  being told a pass is idle is cheap, and finding out months late is not.
+
+- **A sports programme with no teams was re-fetched from Plex every hour.**
+  Enrichment asks Plex for the team tags a bulk listing does not carry, and
+  skips any row that already has them. A row Plex has no teams for never gets
+  any, so it qualified again on the next sync, and the one after that, for as
+  long as it stayed in the guide. Most sport in a guide is not a game: a
+  phone-in, a highlights show, a shop. On a 63-channel lineup that was 72
+  requests an hour, about 1,700 a day, every one of them answering the same
+  nothing. Every attempt is now dated in `programs.teams_tried_at`, whatever
+  it found.
+
+  The note expires after a day rather than settling it for good. A game can
+  reach the guide before Plex tags it, and a permanent "no teams" would hide
+  that game from a team pass for the rest of its run. A call that fails is not
+  an answer and is not written down.
+
+  The sync line now reports what it asked as well as what it found. "0 sports
+  enriched" used to mean either "nothing to do" or "asked seventy times and
+  found nothing".
+
 ## 1.0.1 - 2026-08-23
 
 The first public release. Published as `ghcr.io/datbird/couchelephant` for

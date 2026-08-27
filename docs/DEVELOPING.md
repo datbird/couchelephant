@@ -114,6 +114,22 @@ Chromium and its libraries, pinned to the same Playwright version as
 `requirements-dev.txt`. The app is pure Python with pinned dependencies, so it
 behaves the same either way.
 
+### Upgrading is tested against a frozen schema
+
+`tests/schemas/v1.0.1.sql` is the database schema exactly as the published
+version shipped it, taken from the tag. `tests/test_upgrade.py` builds a
+database from it, puts rows in, runs `db.init()`, and checks the result has
+every column a fresh install would.
+
+That baseline has to be a real historical schema. Deriving it from
+`db.MIGRATIONS` makes the check circular: a migration nobody wrote is also a
+column nobody strips, so the old database already has it and the upgrade passes
+while proving nothing. The first version of that file did exactly that, and
+deleting a migration entry did not fail it.
+
+Freeze a newer baseline when a release goes out. Never to make a failure go
+away: that failure is the test working.
+
 ### It refuses to run anywhere real
 
 `tests/isolation.py` is checked before a single test is collected. It rejects

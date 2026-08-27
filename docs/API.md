@@ -17,6 +17,7 @@ export/import. See [AUTH.md](AUTH.md).
 | `GET /api/grid` | A window of the guide. `start`, `end`, `choffset`, `chlimit`. Returns channels and airings for that window |
 | `GET /api/program?airing_id=` | One programme: every airing of it, which is live, the teams, and **why** it is being recorded if it is |
 | `GET /api/facets` | Counts for the filter panel: kinds, channels, genres, teams |
+| `GET /api/notices` | What is wrong with Plex right now, and how long it has been wrong |
 | `GET /partial/airings` | Search result rows, for infinite scroll |
 | `GET /logo/{vcn}` | A channel logo. Yours if you supplied one, otherwise the guide's, otherwise a blank |
 
