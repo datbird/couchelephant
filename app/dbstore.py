@@ -99,12 +99,16 @@ SECRET_SETTINGS = frozenset(("plex_token", "cf_aud", "pg_password", "my_password
 # anything anybody decided. `backingstore_status` in particular is written by
 # the sync itself, so carrying it made every run find one changed record and
 # push it, for ever.
-TRANSIENT_SETTINGS = frozenset(("backingstore_status",))
+TRANSIENT_SETTINGS = frozenset(("backingstore_status",
+                                # The last health reading of Plex's own guide.
+                                # A snapshot of another machine's Plex, not a
+                                # decision of this user's worth carrying.
+                                "epg_refreshed_at", "guide_ends_at"))
 
 # What a restore must never bring back. These rebuild from Plex on the next
 # sync, and a stale copy is worse than an empty one.
 CACHE_TABLES = ("programs", "airings", "channels", "teams", "plex_subscriptions",
-                "plex_grabs", "sync_log")
+                "plex_grabs", "sync_log", "notices")
 
 
 def _con(which):

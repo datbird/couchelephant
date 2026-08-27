@@ -137,7 +137,8 @@ def test_the_length_condition_reads_minutes_not_milliseconds(synced):
     """Plex sends duration in milliseconds. A person types 90."""
     assert _titles({"field": "duration", "cmp": "gt", "value": "100"}) == \
         ["Chiefs at Buccaneers"]
-    assert _titles({"field": "duration", "cmp": "lt", "value": "70"}) == ["Quiz Night"]
+    assert _titles({"field": "duration", "cmp": "lt", "value": "70"}) == \
+        ["Football Fan Shop", "Quiz Night"]
 
 
 def test_hd_compares_as_a_number(synced):

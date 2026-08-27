@@ -9,6 +9,8 @@ DVR.
 Reproduced faithfully:
   - a bulk section listing carries Genre but NOT Team
   - per-programme metadata carries Team
+  - a sports programme that has no Team array at all, which is most of them
+  - `/butler` is NOT wrapped in a MediaContainer, unlike everything else
   - a guid that arrives percent-encoded twice is answered 400
   - a create returns the new subscription key in its body
   - `oneShot` comes back as the string 'true'
@@ -29,6 +31,7 @@ PROVIDER = "tv.plex.providers.epg.cloud:5"
 GAME_GUID = "plex://episode/game1"
 EPISODE_GUID = "plex://episode/ep1"
 DRM_GUID = "plex://episode/drm1"
+NO_TEAM_GUID = "plex://episode/shop1"
 
 CHANNELS = {
     "41.1": ("KQGGDT", "41.1 KQGGDT (NBC)", "id-41-1"),
@@ -48,6 +51,7 @@ LIVE_AT = int(os.environ.get("COUCHELEPHANT_FAKE_ANCHOR")
 REPEAT_AT = LIVE_AT + 2 * 86400
 EPISODE_AT = LIVE_AT + 3600
 DRM_AT = LIVE_AT + 7200
+NO_TEAM_AT = LIVE_AT + 10800
 
 
 def _media(vcn, begins, premiere=False, drm=False, res="720"):
@@ -77,6 +81,17 @@ SPORTS_ITEMS = [{
     # A bulk listing carries no Team. This is the quirk B1 depended on.
     "Media": [_media("41.1", LIVE_AT, premiere=True),
               _media("38.1", REPEAT_AT)],
+}, {
+    # Sport, but not a game: a studio show with no Team array anywhere. Plex
+    # answers 200 and simply omits Team, so enrichment can never fill this row
+    # in. Most of a real guide's sports section looks like this, which is why
+    # an attempt has to be written down even when it finds nothing.
+    "guid": NO_TEAM_GUID, "ratingKey": "plex%3A%2F%2Fepisode%2Fshop1",
+    "title": "Football Fan Shop", "grandparentTitle": "Football Fan Shop",
+    "summary": "Merchandise.", "type": "episode", "year": 2026,
+    "duration": 1_800_000,
+    "Genre": [{"tag": "Sports talk"}],
+    "Media": [_media("38.1", NO_TEAM_AT)],
 }]
 
 SHOW_ITEMS = [{
@@ -184,6 +199,12 @@ class State:
         self.metadata_calls = 0
         self.drop_next_create = False   # make Plex discard what it just made
         self.seen_urls = []        # every request line, to check what leaks
+        # What the DVR reports about its own upkeep. A health check reads
+        # these, so a test drives them directly rather than waiting a week.
+        self.refreshed_at = None        # None means "as of now"
+        self.epg_task_enabled = True
+        self.epg_task_interval = 1
+        self.serve_butler = True        # a server too old to have /butler
         self.reset()
 
     def reset(self):
@@ -194,6 +215,10 @@ class State:
         self.metadata_calls = 0
         self.drop_next_create = False
         self.seen_urls = []
+        self.refreshed_at = None
+        self.epg_task_enabled = True
+        self.epg_task_interval = 1
+        self.serve_butler = True
 
 
 STATE = State()
@@ -223,10 +248,27 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/":
             return self._container(friendlyName="fakeplex", version="1.0.0-test")
 
+        if p == "/butler":
+            if not STATE.serve_butler:
+                return self._send({"error": "no such route"}, 404)
+            # The trap: this one is NOT a MediaContainer. Unwrapping it the
+            # usual way gives an empty dict, which a health check would read
+            # as "Plex has no scheduled tasks" and act on.
+            return self._send({"ButlerTasks": {"ButlerTask": [
+                {"name": "BackupDatabase", "interval": 3, "enabled": True},
+                {"name": "RefreshEpgGuides",
+                 "interval": STATE.epg_task_interval,
+                 "enabled": STATE.epg_task_enabled},
+                {"name": "RefreshLibraries", "interval": 1, "enabled": True},
+            ]}})
+
         if p == "/livetv/dvrs":
             return self._container(Dvr=[{
                 "key": "5", "epgIdentifier": PROVIDER,
                 "lineupTitle": "Test Lineup",
+                "refreshedAt": (STATE.refreshed_at
+                                if STATE.refreshed_at is not None
+                                else int(time.time())),
                 "Device": [{"key": "1", "ChannelMapping": [
                     {"deviceIdentifier": v, "channelKey": c[2]}
                     for v, c in CHANNELS.items()]}],

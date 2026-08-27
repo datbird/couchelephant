@@ -3,7 +3,7 @@ import os
 import time
 import traceback
 
-from . import db, teamcat
+from . import db, health, passes, teamcat
 from .plex import Plex, discover
 
 LOGO_DIR = os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
@@ -212,17 +212,33 @@ def logo_coverage() -> dict[str, int]:
     return {"channels": total, "with_logo": have, "no_logo_upstream": none_offered}
 
 
-def enrich_sports(plex: Plex, provider: str) -> int:
-    """Fill in per-programme team tags for sports.
+TEAMS_RETRY_AGE = 86400     # ask again about an untagged sports row daily
+
+
+def enrich_sports(plex: Plex, provider: str) -> tuple[int, int]:
+    """Fill in per-programme team tags for sports. Returns (asked, filled).
 
     A bulk section listing does not carry the Team array, so each sports
     programme is fetched once. Rows that already have teams are skipped, so
     this costs a burst on first run and almost nothing afterwards.
+
+    Most of a real guide's sports section is not a game: a highlights show, a
+    phone-in, a shop. Plex answers 200 for those and simply omits Team, so the
+    row can never be filled in. Every attempt is therefore written down,
+    whatever it found, or the row qualifies again on the next sync and the app
+    asks the same seventy questions every hour for as long as it is on air.
+
+    The note expires rather than settling it for good. A game can reach the
+    guide before Plex tags it, and a permanent "no teams" would hide that game
+    from a team pass for the rest of its run.
     """
     rows = db.query(
         "SELECT guid, rating_key FROM programs "
-        "WHERE section = 'sports' AND (teams IS NULL OR teams = '[]')")
+        "WHERE section = 'sports' AND (teams IS NULL OR teams = '[]') "
+        "  AND (teams_tried_at IS NULL OR teams_tried_at < ?)",
+        (_now() - TEAMS_RETRY_AGE,))
     now = _now()
+    asked = 0
     done = 0
     for r in rows:
         if not r["rating_key"]:
@@ -230,17 +246,26 @@ def enrich_sports(plex: Plex, provider: str) -> int:
         try:
             m = plex.metadata(provider, r["rating_key"])
         except Exception:
+            # A failed call is not an answer, so it is not written down. The
+            # row keeps its old note and is asked again next sync.
             continue
+        asked += 1
         if not m:
             continue
         teams = [{"id": t.get("id"), "name": t.get("tag")} for t in (m.get("Team") or [])]
-        if not teams:
-            continue
         with db.tx() as c:
-            c.execute("UPDATE programs SET teams = ?, updated_at = ? WHERE guid = ?",
-                      (db.js(teams), now, r["guid"]))
-        done += 1
-    return done
+            if teams:
+                c.execute(
+                    "UPDATE programs SET teams = ?, teams_tried_at = ?, updated_at = ? "
+                    "WHERE guid = ?", (db.js(teams), now, now, r["guid"]))
+            else:
+                # Asked, and Plex had none. Only the note moves: `updated_at`
+                # is what sync_guide prunes on, and this is not a sighting.
+                c.execute("UPDATE programs SET teams_tried_at = ? WHERE guid = ?",
+                          (now, r["guid"]))
+        if teams:
+            done += 1
+    return asked, done
 
 
 def sync_teams(plex: Plex, provider: str, sports) -> int:
@@ -279,30 +304,97 @@ def sync_teams(plex: Plex, provider: str, sports) -> int:
 
 
 def resolve_team_passes() -> int:
-    """Give an id to a pass that was made for a team Plex had not heard of.
+    """Point every team pass at the id Plex is using for that team *today*.
 
-    A team can be followed from the catalogue before it plays. Such a pass has
-    a name and no id, and matches nothing, because an airing carries ids. Once
-    the team turns up in the guide the id is known, and this is where the pass
-    stops waiting and starts working.
+    This used to fill in a NULL id and nothing else, on the belief that a team
+    id was a stable identity. It is not. Measured on a live server, one guide
+    refresh moved the Kansas City Chiefs from 236 to 245 and the Seattle
+    Seahawks from 132 to 244, on the same game with the same programme guid. A
+    pass holding the old number matched nothing from then on, and said nothing
+    about it, because matching nothing is what a team with no games this week
+    looks like.
 
-    Returns how many passes were resolved.
+    So the name is the identity and the id is a handle into whatever guide Plex
+    currently holds. Every sync re-reads the handle.
+
+    Only teams Plex knows *now* can win it. After a renumber the old row and
+    the new one both sit in `teams` under the same name, and picking whichever
+    the query happened to return last would have been a coin toss.
+
+    A team that has dropped out of the guide keeps its pass pointed where it
+    was, rather than being blanked. Out of season is not the same as renamed,
+    and `candidate_airings` matches on the name as well, so the pass keeps
+    working either way.
+
+    Returns how many passes were repointed.
     """
-    waiting = db.query("SELECT id, team_name FROM passes "
-                       "WHERE kind = 'team' AND team_id IS NULL AND team_name != ''")
-    if not waiting:
+    rules = db.query("SELECT id, team_id, team_name FROM passes "
+                     "WHERE kind = 'team' AND team_name IS NOT NULL AND team_name != ''")
+    if not rules:
         return 0
-    known = {teamcat.norm(r["name"]): r["id"]
-             for r in db.query("SELECT id, name FROM teams WHERE name IS NOT NULL")}
+    known = {}
+    for r in db.query("SELECT id, name FROM teams "
+                      "WHERE name IS NOT NULL AND in_guide = 1"):
+        key = teamcat.norm(r["name"])
+        # A name that folds to nothing is not a key. Keying on one collapsed
+        # every team written in a non-Latin script into a single entry, and a
+        # pass for Zenit came back pointed at the Hanshin Tigers.
+        if key:
+            known[key] = (r["id"], r["name"])
     done = 0
     with db.tx() as c:
-        for p in waiting:
-            hit = known.get(teamcat.norm(p["team_name"]))
+        for p in rules:
+            key = teamcat.norm(p["team_name"])
+            hit = known.get(key) if key else None
             if hit is None:
                 continue
-            c.execute("UPDATE passes SET team_id = ? WHERE id = ?", (hit, p["id"]))
+            team_id, plex_name = hit
+            if team_id == p["team_id"] and plex_name == p["team_name"]:
+                continue
+            # Adopt Plex's own spelling as well as its id. A pass made from the
+            # shipped catalogue carries the catalogue's spelling, which the
+            # guide may never use, and `candidate_airings` compares names
+            # strictly on purpose. This is the one place the loose fold is
+            # right, and it is where the two spellings are reconciled for good.
+            c.execute("UPDATE passes SET team_id = ?, team_name = ? WHERE id = ?",
+                      (team_id, plex_name, p["id"]))
             done += 1
     return done
+
+
+def check_team_passes() -> int:
+    """Say so when a team pass can find no game at all.
+
+    The silence is the danger. A pass that matches nothing produces no error
+    and no log line, and looks identical to a team that simply is not playing
+    this week. That is how a renumber could go unnoticed for a season.
+
+    So a pass with no candidate anywhere in the guide is reported, and the
+    notice names the passes rather than saying something is wrong somewhere.
+    A team genuinely out of season will trip this too, which is the right
+    trade: being told your pass is idle is cheap, and finding out in October
+    that it has been idle since August is not.
+    """
+    idle = []
+    for p in db.query("SELECT * FROM passes WHERE kind = 'team' AND enabled = 1"):
+        if not passes.candidate_airings(p["team_id"], team_name=p["team_name"]):
+            idle.append(p["team_name"] or f"pass {p['id']}")
+    now = _now()
+    raised = []
+    if idle:
+        names = ", ".join(sorted(idle))
+        raised = [{
+            "code": health.TEAM_PASS_UNMATCHED,
+            "severity": "warn",
+            "title": "A team you follow has no games in the guide",
+            "detail": f"Nothing in the guide matches {names}. That is normal out "
+                      f"of season. It is not normal in season, and it is what a "
+                      f"pass looks like when it has stopped working.",
+            "hint": "Check the team is spelled as Plex spells it, and that the "
+                    "guide reaches far enough ahead to hold its next game.",
+        }]
+    health.record(raised, now, owns=health.TEAM_CODES)
+    return len(idle)
 
 
 def network_of(title: str | None) -> str | None:
@@ -442,6 +534,43 @@ def sync_recordings(plex: Plex) -> int:
     return len(subs)
 
 
+def plex_guide_snapshot(plex: Plex) -> tuple[int | None, int | None, list[dict]]:
+    """What Plex says about its own guide: when it refreshed, how far it reaches.
+
+    `refreshedAt` is Plex's word for it and is the only place the schedule is
+    visible; the furthest airing we hold is the consequence, and the thing that
+    actually costs a recording. Both are read every sync so a guide that stops
+    moving is visible the next day rather than the week after.
+    """
+    refreshed = None
+    for d in plex.dvrs():
+        v = int(d.get("refreshedAt") or 0)
+        if v:
+            refreshed = max(refreshed or 0, v)
+    row = db.one("SELECT MAX(begins_at) m FROM airings")
+    ends = int(row["m"]) if row and row["m"] else None
+    try:
+        tasks = plex.butler_tasks()
+    except Exception:
+        # An older or stripped-down server may not serve /butler at all. No
+        # task list means no schedule to hold Plex to, which the checks read
+        # as "cannot say" rather than "not scheduled".
+        tasks = []
+    return refreshed, ends, tasks
+
+
+def check_plex_health(plex: Plex) -> int:
+    """Raise or clear the notices about Plex's own guide upkeep."""
+    refreshed, ends, tasks = plex_guide_snapshot(plex)
+    now = _now()
+    db.set_setting("epg_refreshed_at", refreshed or "")
+    db.set_setting("guide_ends_at", ends or "")
+    raised = health.check(tasks=tasks, refreshed_at=refreshed,
+                          guide_ends_at=ends, now=now)
+    health.record(raised, now, owns=health.PLEX_CODES)
+    return len(raised)
+
+
 def full_sync() -> tuple[int, str]:
     """One pass over everything. Returns a short human-readable summary."""
     started = _now()
@@ -456,9 +585,19 @@ def full_sync() -> tuple[int, str]:
         tb = traceback.extract_tb(e.__traceback__)
         where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(tb[-4:]))
         detail = f"{type(e).__name__}: {e} [{where}]"
+    if not ok:
+        # A sync that never reached Plex has no snapshot to check, so the
+        # failure itself is the notice. Raised here rather than in
+        # `_sync_everything`, which does not run when the connection is what
+        # broke.
+        health.record(health.unreachable(detail), _now(), owns=health.REACH_CODES)
     with db.tx() as c:
-        c.execute("INSERT INTO sync_log (started_at, ended_at, ok, detail) VALUES (?,?,?,?)",
-                  (started, _now(), ok, detail))
+        c.execute("INSERT INTO sync_log (started_at, ended_at, ok, detail, "
+                  "                      epg_refreshed_at, guide_ends_at) "
+                  "VALUES (?,?,?,?,?,?)",
+                  (started, _now(), ok, detail,
+                   _int_or_none(db.get_setting("epg_refreshed_at")),
+                   _int_or_none(db.get_setting("guide_ends_at"))))
         c.execute("DELETE FROM sync_log WHERE id NOT IN "
                   "(SELECT id FROM sync_log ORDER BY id DESC LIMIT 50)")
     return ok, detail
@@ -478,16 +617,20 @@ def _sync_everything(plex):
     # the moment the guide first carries it.
     woke = resolve_team_passes()
     guide = sync_guide(plex, provider, shows, sports, movies)
-    enriched = enrich_sports(plex, provider)
+    asked, enriched = enrich_sports(plex, provider)
     got, bad, tried = cache_logos()
     subs = sync_recordings(plex)
     prune_history()
+    check_plex_health(plex)
+    idle = check_team_passes()
 
     cov = logo_coverage()
     nch = cov["channels"]
     detail = (f"{guide['programs']} programs, {guide['airings']} airings, "
-              f"{teams} teams, {enriched} sports enriched, "
-              + (f"{woke} pass(es) resolved, " if woke else "")
+              f"{teams} teams, {enriched} sports enriched"
+              + (f" ({asked} asked)" if asked else "") + ", "
+              + (f"{woke} pass(es) repointed, " if woke else "")
+              + (f"{idle} team pass(es) matching nothing, " if idle else "")
               + f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
               + (f" (+{got} fetched)" if got else "")
               + (f" ({bad} failed)" if bad else "")

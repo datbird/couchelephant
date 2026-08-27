@@ -48,6 +48,43 @@ def test_a_second_sync_does_not_re_enrich_anything(plex, synced):
     assert len(teams) == 2, "and the tags must survive it"
 
 
+def test_a_sports_programme_with_no_teams_is_asked_once_not_hourly(plex, synced):
+    """The other half of B1. Plex answers 200 and omits Team for a studio
+    show, so the row can never be filled in. It used to qualify for enrichment
+    again on the next sync, and the one after that, forever: on a real guide
+    that is seventy-odd fetches an hour, all answering the same nothing."""
+    row = db.one("SELECT teams, teams_tried_at FROM programs WHERE guid = ?",
+                 (fake_plex.NO_TEAM_GUID,))
+    assert row["teams"] in (None, "[]"), "Plex really has no teams for it"
+    assert row["teams_tried_at"], "but the attempt has to be written down"
+
+    before = fake_plex.STATE.metadata_calls
+    sync.full_sync()
+    assert fake_plex.STATE.metadata_calls == before, "asking again changes nothing"
+
+
+def test_an_untagged_sports_programme_is_asked_again_the_next_day(plex, synced):
+    """Written down, not written off. A game can reach the guide before Plex
+    tags it, and a permanent 'no teams' would hide that game from a team pass
+    for good. So the note expires."""
+    stale = sync._now() - sync.TEAMS_RETRY_AGE - 60
+    with db.tx() as c:
+        c.execute("UPDATE programs SET teams_tried_at = ? WHERE guid = ?",
+                  (stale, fake_plex.NO_TEAM_GUID))
+
+    before = fake_plex.STATE.metadata_calls
+    sync.full_sync()
+    assert fake_plex.STATE.metadata_calls > before, "a stale note is asked again"
+
+
+def test_the_sync_line_separates_asking_from_finding(plex):
+    """'0 sports enriched' used to mean either 'nothing to do' or 'asked
+    seventy times and found nothing'. Those are different."""
+    _ok, detail = sync.full_sync()
+    assert "1 sports enriched" in detail
+    assert "2 asked" in detail
+
+
 def test_network_is_read_from_the_channel_title(synced):
     assert db.one("SELECT network FROM channels WHERE vcn = '41.1'")["network"] == "NBC"
     assert db.one("SELECT network FROM channels WHERE vcn = '9.1'")["network"] == "ABC"

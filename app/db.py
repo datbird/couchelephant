@@ -11,6 +11,8 @@ import threading
 import uuid
 from contextlib import contextmanager
 
+from . import teamcat
+
 DB_PATH = os.environ.get("COUCHELEPHANT_DB", "/data/couchelephant.db")
 _local = threading.local()
 
@@ -51,6 +53,10 @@ CREATE TABLE IF NOT EXISTS programs (
     year                  INTEGER,
     content_rating        TEXT,
     duration              INTEGER,
+    -- When we last asked Plex for this row's teams, whatever the answer. A
+    -- sports programme that has none is most of them, and without this the
+    -- row qualifies for enrichment again on every sync, forever.
+    teams_tried_at        INTEGER,
     updated_at            INTEGER
 );
 
@@ -178,6 +184,26 @@ CREATE TABLE IF NOT EXISTS sync_log (
     ok         INTEGER,
     detail     TEXT
 );
+
+-- Something wrong that the person running this needs to know about, almost
+-- always something Plex is or is not doing. A notice is raised by a check and
+-- cleared by the same check passing again. It is never dismissed: a health
+-- problem you can click away is a health problem you forget about.
+--
+-- `code` is the primary key, so a condition that keeps failing stays one row
+-- with a growing age rather than a pile of duplicates. `first_seen` is the
+-- answer to "how long has this been broken", which is the question you ask
+-- when you find out four days late.
+CREATE TABLE IF NOT EXISTS notices (
+    code        TEXT PRIMARY KEY,
+    severity    TEXT,
+    title       TEXT,
+    detail      TEXT,
+    hint        TEXT,
+    first_seen  INTEGER,
+    last_seen   INTEGER,
+    resolved_at INTEGER
+);
 """
 
 DEFAULTS = {
@@ -211,6 +237,12 @@ def connect() -> sqlite3.Connection:
         # for "muller" never matched "MÜLLER" and "ÉTÉ" never matched "été".
         # Python's str.lower() folds the whole of Unicode.
         conn.create_function("ulower", 1, _ulower, deterministic=True)
+        # Team identity, folded the same way in SQL as in Python. Plex renumbers
+        # its team ids on every guide refresh, so the name is the stable half
+        # and a query has to be able to compare it. `ident` and not `norm`:
+        # `norm` drops club words and would fold Real Madrid into Atletico
+        # Madrid. See `teamcat.ident`.
+        conn.create_function("tident", 1, teamcat.ident, deterministic=True)
         _local.conn = conn
     return _local.conn
 
@@ -276,6 +308,15 @@ MIGRATIONS = [
     # machines agree on. See [[dbstore]].
     ("passes", "uid", "TEXT"),
     ("our_grabs", "pass_uid", "TEXT"),
+    # A "we asked and Plex had none" note, so an untagged sports programme is
+    # not re-fetched every hour for as long as it stays in the guide.
+    ("programs", "teams_tried_at", "INTEGER"),
+    # What Plex's own guide looked like at the moment of this sync: when Plex
+    # last refreshed it, and how far ahead it reached. Two numbers per sync is
+    # all it takes to see a guide stop moving, which is otherwise invisible
+    # until a recording you expected never happens.
+    ("sync_log", "epg_refreshed_at", "INTEGER"),
+    ("sync_log", "guide_ends_at", "INTEGER"),
 ]
 
 
