@@ -25,6 +25,58 @@ _lock = threading.Lock()
 _cache = None
 
 
+def _strip_marks(name: str) -> str:
+    """Accents off Latin letters, and nothing else touched.
+
+    A combining mark is only decoration where the base letter is Latin. Beyond
+    that it carries meaning: the Japanese dakuten is the difference between
+    KA and GA, so folding it away turns the Hanshin Tigers into a word that is
+    not "tigers". Hebrew niqqud and Arabic harakat are the same shape of
+    mistake. So a mark is dropped only when the letter it sits on is ASCII.
+    """
+    out = []
+    for c in unicodedata.normalize("NFKD", name or ""):
+        if unicodedata.combining(c):
+            if out and out[-1].isascii():
+                continue
+            out.append(c)
+        else:
+            out.append(c)
+    # Recomposed, so a mark that survived is one character again. A bare
+    # combining mark is not alphanumeric, and the separator pass below would
+    # drop it right back out.
+    return unicodedata.normalize("NFC", "".join(out))
+
+
+def _fold(name: str) -> str:
+    """Case, accents and punctuation removed. Every letter kept.
+
+    The separator pass keeps anything Unicode calls alphanumeric rather than
+    keeping `a-z0-9`. That distinction is the whole of this function: an
+    `[^a-z0-9]` filter does not narrow a Cyrillic, Greek, Japanese, Hebrew or
+    Arabic name, it deletes it. An empty string is not a miss. It is a key, and
+    every team written in one of those scripts arrived at the same one.
+    """
+    out = _strip_marks(name).lower().replace("&", " and ")
+    out = "".join(c if c.isalnum() else " " for c in out)
+    return " ".join(out.split())
+
+
+def ident(name: str) -> str:
+    """A team's name folded only as far as spelling, never as far as identity.
+
+    `norm` also drops club words, which is right for finding a team in the
+    catalogue and wrong for deciding what to record: it folds "Real Madrid" and
+    "Atletico Madrid" both to "madrid", and does the same to five real pairs in
+    the shipped catalogue, among them Cincinnati and FC Cincinnati.
+
+    This keeps every word and removes only the things that are not identity:
+    case, accents and punctuation. Two spellings of one team still meet here.
+    Two different teams never do.
+    """
+    return _fold(name)
+
+
 def norm(name: str) -> str:
     """The form two spellings of one team have in common.
 
@@ -34,14 +86,15 @@ def norm(name: str) -> str:
     """
     # Plex writes "San Jose State" and the catalogue "San Jose State" with an
     # accent. One team, two strings, until the accents come off.
-    s = unicodedata.normalize("NFKD", name or "")
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    s = s.lower().replace("&", " and ")
+    base = _fold(name)
     # Club words carry no identity: "Club Tijuana" is "Tijuana" elsewhere.
     s = re.sub(r"\b(fc|sc|cf|afc|ac|cd|rcd|vfb|sv|bk|club|deportivo|"
-               r"real|athletic|atletico)\b", " ", s)
-    s = re.sub(r"[^a-z0-9]+", " ", s)
-    return " ".join(s.split())
+               r"real|athletic|atletico)\b", " ", base)
+    s = " ".join(s.split())
+    # "Athletic Club" is a real side and every word in it is on that list.
+    # Stripping to nothing would hand back a key that everything else with no
+    # Latin letters also arrives at, so the unstripped form stands instead.
+    return s or base
 
 
 def _load():
@@ -71,8 +124,18 @@ def all_teams() -> list[dict]:
 
 
 def find(name: str) -> dict | None:
-    """The catalogue entry a Plex team name belongs to, or None."""
-    return _load()[1].get(norm(name))
+    """The catalogue entry a Plex team name belongs to, or None.
+
+    An empty key is refused rather than looked up. A name with nothing
+    alphanumeric in it has told us nothing, and answering it with whatever
+    entry happens to sit at that key is the fail-open shape: a miss that comes
+    back looking like a hit. It did exactly that, answering VfB Stuttgart for
+    every name written in Cyrillic or Japanese.
+    """
+    key = norm(name)
+    if not key:
+        return None
+    return _load()[1].get(key)
 
 
 def leagues() -> list[str]:

@@ -78,16 +78,29 @@ def norm(s):
     """
     # Plex writes "San Jose State" and ESPN writes "San Jose State" with an
     # accent, which is one team and two strings until the accents come off.
-    s = unicodedata.normalize("NFKD", s or "")
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    s = s.lower().replace("&", " and ")
+    # A combining mark is decoration on a Latin letter and meaning elsewhere:
+    # the Japanese dakuten is the difference between KA and GA. So a mark comes
+    # off only when the letter it sits on is ASCII.
+    out = []
+    for c in unicodedata.normalize("NFKD", s or ""):
+        if unicodedata.combining(c) and out and out[-1].isascii():
+            continue
+        out.append(c)
+    # Recomposed, so a surviving mark is one character again: a bare combining
+    # mark is not alphanumeric and the separator pass would drop it.
+    s = unicodedata.normalize("NFC", "".join(out)).lower().replace("&", " and ")
+    # Anything Unicode calls alphanumeric, not `a-z0-9`. The latter does not
+    # narrow a Cyrillic or Japanese name, it deletes it, and every such team
+    # then shares one key.
+    base = " ".join("".join(c if c.isalnum() else " " for c in s).split())
     # Club prefixes and suffixes carry no identity. Plex says "Club Tijuana"
     # and "FC Bayern Munchen"; the same sides are "Tijuana" and "Bayern"
     # elsewhere.
     s = re.sub(r"\b(fc|sc|cf|afc|ac|cd|rcd|vfb|sv|bk|club|deportivo|"
-               r"real|athletic|atletico)\b", " ", s)
-    s = re.sub(r"[^a-z0-9]+", " ", s)
-    return " ".join(s.split())
+               r"real|athletic|atletico)\b", " ", base)
+    s = " ".join(s.split())
+    # "Athletic Club" is a real side made entirely of words on that list.
+    return s or base
 
 
 def fetch(path):
