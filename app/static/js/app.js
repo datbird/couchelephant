@@ -994,3 +994,26 @@ window.wireSettings = function (root) {
     if (b) { b.classList.add('spinning'); b.disabled = true; }
   });
 })();
+
+// The health notices, hung off the sync button.
+//
+// Its own control rather than part of the sync form: clicking the badge to
+// read what is wrong must not start a sync, and a sync takes a minute.
+(function () {
+  var btn = document.getElementById('noticebtn'),
+      menu = document.getElementById('noticemenu');
+  if (!btn || !menu) return;
+  function shut() {
+    menu.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+  btn.addEventListener('click', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var open = menu.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  menu.addEventListener('click', function (e) { e.stopPropagation(); });
+  document.addEventListener('click', shut);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
+})();

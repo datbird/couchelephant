@@ -76,10 +76,39 @@ class Plex:
         except Exception:
             raise PlexError(f"GET {path} returned non-JSON: {r.text[:200]}") from None
 
+    def _get_root(self, path, params=None):
+        """The response body itself, not its MediaContainer.
+
+        Almost everything Plex serves is wrapped in a MediaContainer. `/butler`
+        is not: its root element is ButlerTasks. Unwrapping it the usual way
+        returns an empty dict and reads as "no tasks", which is the wrong
+        answer to give a health check.
+        """
+        r = self._client().get(self.base + path, params=dict(params or {}))
+        if r.status_code >= 400:
+            raise PlexError(f"GET {path} -> HTTP {r.status_code}: {r.text[:200]}",
+                            r.status_code)
+        try:
+            return r.json()
+        except Exception:
+            raise PlexError(f"GET {path} returned non-JSON: {r.text[:200]}") from None
+
     # ---------- identity ----------
 
     def server_info(self) -> dict:
         return self._get("/")
+
+    # ---------- maintenance ----------
+
+    def butler_tasks(self) -> list[dict]:
+        """Plex's own scheduled maintenance tasks, with their intervals.
+
+        This is how the app knows how often Plex is *supposed* to refresh the
+        guide, rather than assuming a number. `interval` is in days and
+        `enabled` is a bool.
+        """
+        root = self._get_root("/butler").get("ButlerTasks") or {}
+        return root.get("ButlerTask", []) or []
 
     # ---------- DVR ----------
 

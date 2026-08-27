@@ -7,7 +7,7 @@ import urllib.parse
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from .. import auth, cf_access, db, passes, sync
+from .. import auth, cf_access, db, health, passes, sync
 from ..plex import Plex, PlexError
 from ._shared import ZONES, current_user, page
 
@@ -257,6 +257,30 @@ async def refetch_logos():
     """Force every channel logo to be downloaded again."""
     await asyncio.to_thread(sync.cache_logos, True)
     return RedirectResponse("/settings", status_code=303)
+
+
+@router.get("/api/notices")
+def api_notices():
+    """What is wrong with Plex right now, and how long it has been wrong.
+
+    Read by the badge on the sync button. A notice lives until the check that
+    raised it passes again, so this list is the current truth rather than a
+    log of things that once happened.
+    """
+    now = int(time.time())
+    out = []
+    for n in health.open_notices():
+        out.append({
+            "code": n["code"],
+            "severity": n["severity"],
+            "title": n["title"],
+            "detail": n["detail"],
+            "hint": n["hint"],
+            "since": n["first_seen"],
+            "age_seconds": max(0, now - (n["first_seen"] or now)),
+        })
+    return JSONResponse({"notices": out,
+                         "bad": sum(1 for n in out if n["severity"] == "bad")})
 
 
 @router.post("/sync")

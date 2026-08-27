@@ -7,7 +7,7 @@ import zoneinfo
 
 from fastapi.templating import Jinja2Templates
 
-from .. import auth, cf_access, db
+from .. import auth, cf_access, db, health
 from ..plex import Plex
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,7 +65,29 @@ def fmt(ts, pattern="%a %d %b, %H:%M"):
     return datetime.datetime.fromtimestamp(int(ts), tz()).strftime(pattern)
 
 
+def ago(ts):
+    """How long ago, in the words a person would use.
+
+    A health notice is about duration, not about a clock time. "4 days ago"
+    says the thing; "Sat 22 Aug, 06:00" makes you do the subtraction.
+    """
+    if not ts:
+        return "just now"
+    secs = max(0, int(time.time()) - int(ts))
+    if secs < 90:
+        return "just now"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins} minutes ago"
+    hours = mins // 60
+    if hours < 36:
+        return "an hour ago" if hours == 1 else f"{hours} hours ago"
+    days = round(secs / 86400)
+    return "a day ago" if days == 1 else f"{days} days ago"
+
+
 templates.env.filters["fmt"] = fmt
+templates.env.filters["ago"] = ago
 templates.env.filters["unjs"] = db.unjs
 
 
@@ -141,6 +163,9 @@ def page(request, name, **ctx):
     ctx.setdefault("settings", db.all_settings())
     ctx.setdefault("configured", bool(db.get_setting("plex_url") and db.get_setting("plex_token")))
     ctx.setdefault("last_sync", db.one("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1"))
+    # Rendered into the header on every page, so a problem with Plex is visible
+    # wherever you happen to be rather than only on the page that noticed it.
+    ctx.setdefault("notices", health.open_notices())
     ctx.setdefault("now", int(time.time()))
     ctx.setdefault("version", VERSION)
     ctx.setdefault("asset_v", ASSET_V)
