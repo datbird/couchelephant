@@ -4,6 +4,38 @@
 
 ### Added
 
+- **CouchElephant now checks that the recordings it booked are still the ones
+  it asked for.** A pass books a game once and then stops looking at it. Change
+  the pass afterwards and the booking keeps the settings it was made with, for
+  ever. Nothing errors: the pass ran, the recording exists, and the game is cut
+  off at the end. That is how a real game got recorded with no padding here,
+  because the booking was made two hours before the padding setting existed.
+
+  Every sync now re-reads each future booking from Plex and compares it against
+  the pass as it stands now. Four things have to be true: Plex still holds the
+  subscription, Plex has actually scheduled a recording against it, every
+  setting matches, and the pin still names the airing the pass chose. A
+  subscription whose settings all read correctly with nothing scheduled behind
+  it looks healthy from every angle except the one that matters, so that is
+  checked on its own.
+
+  A real difference is repaired: cancelled and booked again from what the pass
+  says now, with a `repaired` line in the pass history saying what changed.
+
+  The hard half is refusing to invent a difference. Plex answers `oneShot` as
+  the string `true` to the `1` we sent, and returns numbers as strings on one
+  payload and ints on another. Reading either as drift would cancel and re-book
+  the same recording on every sync, for ever. So values compare as numbers
+  first, then booleans, then text, and a setting Plex does not report is
+  recorded as unchecked rather than as different. Plex being unreachable is
+  unchecked too: only a definite 404 means a recording is gone.
+
+  Nothing is cancelled close to a broadcast. Repair needs more than two sync
+  intervals of room, and never less than half an hour, so a re-book that fails
+  still has a later sync to put it right. Drift found closer than that raises a
+  notice instead. Wrong padding on a game you are recording beats no recording
+  of it.
+
 - **CouchElephant now watches whether Plex is keeping its own guide up to
   date.** It can only choose from the airings Plex offers, and when Plex stops
   refreshing, nothing here breaks. Passes keep running, syncs keep succeeding,

@@ -148,6 +148,29 @@ class Plex:
         subs = self._get(f"/media/subscriptions/{key}").get("MediaSubscription", []) or []
         return subs[0] if subs else None
 
+    def subscription_state(self, key: str) -> tuple[str, dict | None]:
+        """Plex's copy of one subscription: ('ok', body), ('gone', None) or
+        ('unknown', None).
+
+        Only a definite 404 means gone. A timeout, a refused connection or a
+        500 means the question could not be asked, and answering "gone" to
+        that would have the drift check cancel and re-book every recording on
+        the server the first time Plex hiccupped.
+        """
+        try:
+            r = self._client().get(f"{self.base}/media/subscriptions/{key}")
+        except Exception:
+            return "unknown", None
+        if r.status_code == 404:
+            return "gone", None
+        if r.status_code >= 400:
+            return "unknown", None
+        try:
+            subs = r.json().get("MediaContainer", {}).get("MediaSubscription") or []
+        except Exception:
+            return "unknown", None
+        return ("ok", subs[0]) if subs else ("gone", None)
+
     def scheduled(self) -> list[dict]:
         return self._get("/media/subscriptions/scheduled").get("MediaGrabOperation", []) or []
 

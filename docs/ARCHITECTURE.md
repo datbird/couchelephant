@@ -17,6 +17,7 @@ readable by whoever inherits it.
 | `app/passes.py` | **Choosing which airing to record.** The heart of the app |
 | `app/smartfilter.py` | The smart filter: a nested condition tree, compiled to SQL |
 | `app/health.py` | **Watching Plex do its own job**, and the notices that come of it |
+| `app/verify.py` | **Comparing a booking against the pass that made it**, without inventing a difference |
 | `app/teamcat.py` | The shipped team catalogue, and matching a Plex team to it |
 | `app/filters.py` | The guide's filter tokens |
 | `app/auth.py` | Accounts, sessions and per-user preferences |
@@ -102,7 +103,9 @@ A background task started at boot:
 6. Trim pass history older than 60 days.
 7. Check that Plex is keeping its own guide up to date, and raise or clear the
    notices that follow. See [Health notices](#health-notices).
-8. Run every enabled pass.
+8. Check that every recording a pass booked still matches what the pass says,
+   and put right the ones that do not. See [Bookings drift](#bookings-drift).
+9. Run every enabled pass.
 
 Then sleep for the configured interval. The sync icon in the header runs one
 immediately.
@@ -181,6 +184,65 @@ It shows as a badge on the sync button rather than a fourth icon in the header.
 A guide that has stopped moving is a sync problem, and it belongs on the
 control you would reach for anyway. The badge is its own button: reading what
 is wrong must not start a sync.
+
+
+## Bookings drift
+
+A pass books a game once and then stops looking at it. `passes.already_handled`
+asks "did we book this game" and never "is that booking still right", which is
+correct for booking and wrong for everything after it.
+
+That cost a real recording here. A team pass booked a game, the pass's settings
+were changed two hours later, and the booking kept the settings it was made
+with. Nothing errored. The pass ran, the recording existed, and the game was cut
+off at the scheduled end.
+
+So every sync re-reads each future booking from Plex and compares it against the
+pass as it stands now. Four things have to be true, and the last two are the
+ones a settings check would miss:
+
+1. Plex still holds the subscription.
+2. Plex has actually scheduled a recording against it. A subscription whose
+   settings all read correctly, with no grab behind it, looks healthy from every
+   angle except the one that matters.
+3. Every setting the pass carries matches Plex's copy.
+4. The pin still names the airing the pass chose. The guide can move a game
+   after it was booked, and a stale pin hands the choice back to Plex.
+
+A real difference is repaired: cancel, then book again from what the pass says
+now. Delete before create, because creating first would leave two subscriptions
+if the delete then failed and Plex would record the game twice.
+
+### Refusing to invent a difference
+
+This is the hard half, and `verify.same` is where it lives. Plex answers
+`oneShot` as the string `true` to the `1` we sent. It returns numbers as strings
+on one payload and ints on another. It omits a setting rather than reporting it
+empty.
+
+A comparison that read any of those as drift would cancel and re-book the same
+recording on every sync, for ever, against a live DVR. So values are compared as
+numbers first, then as booleans, then as text, and a setting Plex did not report
+is `unchecked` rather than different. Not knowing is not the same as
+disagreeing, and only the second is grounds for cancelling a recording.
+
+The same rule covers Plex being unreachable. `Plex.subscription_state` answers
+`gone` only for a definite 404; a timeout or a 500 is `unknown`, and nothing is
+touched. Reading a network blip as "the recording is gone" would cancel and
+re-book every booking on the server at once.
+
+### When it will not repair
+
+Repair has a moment in the middle with nothing scheduled, so it needs room. It
+runs only when the broadcast is more than two sync intervals away, and never
+inside half an hour whatever the interval, so a re-book that fails still has a
+later sync to put it right. Drift found closer than that raises a notice instead
+of being fixed: wrong padding on a game you are recording beats no recording of
+it.
+
+A repair that worked is not a notice. It is written to `pass_actions` as a
+`repaired` row carrying what changed, and counted in the sync line. Only what is
+still wrong belongs on the badge.
 
 
 ## Team ids are not stable

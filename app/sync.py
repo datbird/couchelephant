@@ -3,8 +3,8 @@ import os
 import time
 import traceback
 
-from . import db, health, passes, teamcat
-from .plex import Plex, discover
+from . import db, health, passes, teamcat, verify
+from .plex import Plex, PlexError, discover
 
 LOGO_DIR = os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
 
@@ -397,6 +397,199 @@ def check_team_passes() -> int:
     return len(idle)
 
 
+# A repair cancels and re-books against a live DVR. A sync that decided to do
+# that to everything at once would be indistinguishable from a fault, so it is
+# capped and the rest waits for the next sync.
+MAX_REPAIRS = 10
+
+_BOOKING_SQL = """
+    SELECT o.airing_id, o.subscription, o.title, o.program_guid, o.pass_id,
+           o.begins_at AS booked_at, o.channel_vcn AS booked_vcn,
+           a.begins_at, a.channel_identifier, a.channel_vcn, p.prefs
+      FROM our_grabs o
+      JOIN passes p ON p.id = o.pass_id
+      LEFT JOIN airings a ON a.id = o.airing_id
+     WHERE o.source = 'pass'
+       AND COALESCE(a.begins_at, o.begins_at) > ?
+"""
+
+
+def _airing_for_schedule(airing_id):
+    """One airing, with everything `passes._schedule` needs to re-book it."""
+    return db.one(
+        """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams,
+                  p.summary, p.section
+             FROM airings a JOIN programs p ON p.guid = a.program_guid
+            WHERE a.id = ?""", (airing_id,))
+
+
+def _has_grab(key, vcn, begins_at) -> bool:
+    """Whether Plex has actually scheduled a recording for this booking.
+
+    Its own question, and the one a settings check would miss. Plex will hold
+    a subscription whose settings all read correctly and have nothing
+    scheduled against it, which looks healthy from every angle except the one
+    that matters.
+
+    Matched on the subscription key or on the broadcast, because the key we
+    hold can be the one Plex minted before it re-made the grab.
+    """
+    return bool(db.one(
+        """SELECT 1 FROM plex_grabs
+            WHERE (subscription = ? AND ? != '')
+               OR (channel_vcn = ? AND begins_at = ?)
+            LIMIT 1""", (key or "", key or "", vcn, begins_at)))
+
+
+def _repair(plex, row, diffs, now):
+    """Cancel this booking and make it again from what the pass says now.
+
+    Delete then create, in that order. Creating first would leave two
+    subscriptions if the delete then failed, and Plex would record the game
+    twice; this way a failure leaves one gap that the next sync fills, which
+    is why `verify.can_repair` refuses to run inside two sync intervals of
+    kickoff.
+    """
+    airing = _airing_for_schedule(row["airing_id"])
+    if not airing:
+        return False, "the airing is no longer in the guide"
+    old = row["subscription"]
+    if old:
+        try:
+            plex.delete_subscription(old)
+        except PlexError:
+            # Already gone is the normal case here: that is often the drift.
+            pass
+    prefs = dict(db.unjs(row["prefs"]) or {})
+    try:
+        passes._schedule(plex, airing, None, "pass", prefs=prefs,
+                         pass_id=row["pass_id"])
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+    with db.tx() as c:
+        c.execute(
+            """INSERT INTO pass_actions (pass_id, program_guid, airing_id,
+                                         program_title, channel_vcn, begins_at,
+                                         action, reason, dry_run, created_at)
+               VALUES (?,?,?,?,?,?,'repaired',?,0,?)""",
+            (row["pass_id"], row["program_guid"], row["airing_id"], row["title"],
+             airing["channel_vcn"], airing["begins_at"], verify.describe(diffs), now))
+    return True, verify.describe(diffs)
+
+
+def check_bookings(plex, now: int | None = None) -> dict:
+    """Is every recording a pass booked still what the pass asks for?
+
+    `passes.already_handled` stops a pass looking at a game twice, which is
+    right for booking and wrong for everything after it. Change a pass and its
+    existing bookings keep the old settings for ever; Plex drops a
+    subscription and nothing notices. Both failures are silent, and both are
+    only visible the evening the recording is wrong.
+
+    So every future booking is read back from Plex and compared against the
+    pass as it stands now. A real difference is repaired. Anything that cannot
+    be repaired safely, because kickoff is close or because the re-book
+    failed, becomes a notice instead of a silence.
+    """
+    now = now or _now()
+    lead = verify.repair_lead(int(db.get_setting("sync_minutes") or 60))
+    out = {"checked": 0, "repaired": 0, "drifted": 0, "unchecked": 0, "failed": 0}
+    drifted, failed = [], []
+
+    for row in db.query(_BOOKING_SQL, (now,)):
+        out["checked"] += 1
+        begins = row["begins_at"] or row["booked_at"]
+        vcn = row["channel_vcn"] or row["booked_vcn"]
+        key = row["subscription"]
+        if not key:
+            # Booked before the key was captured, or Plex was slow to list it.
+            # Looking it up beats assuming the recording is gone.
+            try:
+                key = plex.find_subscription(row["program_guid"], begins)
+            except Exception:
+                key = None
+
+        if key:
+            state, body = plex.subscription_state(key)
+        else:
+            state, body = "gone", None
+
+        if state == "unknown":
+            # Could not ask. Not knowing is never grounds for cancelling.
+            out["unchecked"] += 1
+            continue
+
+        if state == "gone":
+            diffs = verify.no_recording("subscription")
+        elif not row["begins_at"]:
+            # The guide no longer carries this airing, so there is nothing to
+            # compare the pin against and nothing to re-book from.
+            out["unchecked"] += 1
+            continue
+        else:
+            have = {s.get("id"): s.get("value") for s in (body.get("Setting") or [])}
+            diffs = verify.compare(want=verify.wanted(db.unjs(row["prefs"]), row),
+                                   have=have)
+            if not _has_grab(key, vcn, begins):
+                diffs = diffs + verify.no_recording()
+
+        if not verify.needs_repair(diffs):
+            continue
+
+        what = f"{row['title'] or 'a recording'}: {verify.describe(diffs)}"
+        if not verify.can_repair(begins_at=begins, now=now, lead=lead):
+            out["drifted"] += 1
+            drifted.append(what)
+            continue
+        if out["repaired"] >= MAX_REPAIRS:
+            out["drifted"] += 1
+            drifted.append(what)
+            continue
+
+        ok, detail = _repair(plex, row, diffs, now)
+        if ok:
+            out["repaired"] += 1
+        else:
+            out["failed"] += 1
+            failed.append(f"{row['title'] or 'a recording'}: {detail}")
+
+    health.record(_booking_notices(drifted, failed), now, owns=health.BOOKING_CODES)
+    return out
+
+
+def _booking_notices(drifted: list[str], failed: list[str]) -> list[dict]:
+    """What to say about bookings that could not be put right.
+
+    A repair that worked is not a notice. It is written into the pass history
+    and counted in the sync line, which is a permanent record rather than a
+    badge that clears itself an hour later. Only what is still wrong belongs
+    on the badge.
+    """
+    raised = []
+    if drifted:
+        raised.append({
+            "code": health.BOOKING_DRIFT,
+            "severity": "bad",
+            "title": "A scheduled recording does not match its pass",
+            "detail": "Plex is holding a recording that no longer matches what "
+                      "the pass asks for, and it is too close to the broadcast "
+                      "to change safely: " + "; ".join(sorted(drifted)[:5]),
+            "hint": "Cancel and re-book it from the Recordings tab if the "
+                    "difference matters for this one.",
+        })
+    if failed:
+        raised.append({
+            "code": health.BOOKING_REPAIR_FAILED,
+            "severity": "bad",
+            "title": "A recording could not be put right",
+            "detail": "CouchElephant tried to re-book a recording and Plex "
+                      "refused: " + "; ".join(sorted(failed)[:5]),
+            "hint": "Check the recording in the Recordings tab. The next sync "
+                    "will try again.",
+        })
+    return raised
+
+
 def network_of(title: str | None) -> str | None:
     """The network a channel carries.
 
@@ -623,6 +816,9 @@ def _sync_everything(plex):
     prune_history()
     check_plex_health(plex)
     idle = check_team_passes()
+    # After sync_recordings, so the grab check reads Plex's current schedule
+    # rather than last hour's.
+    book = check_bookings(plex)
 
     cov = logo_coverage()
     nch = cov["channels"]
@@ -631,6 +827,8 @@ def _sync_everything(plex):
               + (f" ({asked} asked)" if asked else "") + ", "
               + (f"{woke} pass(es) repointed, " if woke else "")
               + (f"{idle} team pass(es) matching nothing, " if idle else "")
+              + (f"{book['repaired']} recording(s) repaired, " if book["repaired"] else "")
+              + (f"{book['drifted']} recording(s) adrift, " if book["drifted"] else "")
               + f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
               + (f" (+{got} fetched)" if got else "")
               + (f" ({bad} failed)" if bad else "")

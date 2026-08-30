@@ -24,6 +24,8 @@ EPG_STALE = "epg_stale"
 GUIDE_SHORT = "guide_short"
 PLEX_UNREACHABLE = "plex_unreachable"
 TEAM_PASS_UNMATCHED = "team_pass_unmatched"
+BOOKING_DRIFT = "booking_drift"
+BOOKING_REPAIR_FAILED = "booking_repair_failed"
 
 # What each sweep is responsible for. A sweep clears the conditions it checked
 # and nothing else: `record` resolving everything it was not handed would mean
@@ -32,6 +34,7 @@ TEAM_PASS_UNMATCHED = "team_pass_unmatched"
 PLEX_CODES = frozenset((EPG_REFRESH_OFF, EPG_STALE, GUIDE_SHORT, PLEX_UNREACHABLE))
 REACH_CODES = frozenset((PLEX_UNREACHABLE,))
 TEAM_CODES = frozenset((TEAM_PASS_UNMATCHED,))
+BOOKING_CODES = frozenset((BOOKING_DRIFT, BOOKING_REPAIR_FAILED))
 
 # Plex's guide refresh is a daily task. Complaining the first time it slips a
 # day would cry wolf over one missed window, so a notice waits for twice the
