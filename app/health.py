@@ -14,6 +14,8 @@ that against the DVR's own `refreshedAt` is a fact, not a heuristic.
 A notice is raised by a check and cleared by the same check passing. There is
 no dismiss. A health warning you can click away is one you will click away.
 """
+import time
+
 from . import db
 
 # One code per condition. They are stable strings because they are the primary
@@ -27,6 +29,10 @@ TEAM_PASS_UNMATCHED = "team_pass_unmatched"
 BOOKING_DRIFT = "booking_drift"
 BOOKING_REPAIR_FAILED = "booking_repair_failed"
 EXPECTATION_MISSED = "expectation_missed"
+
+# A suggestion rather than a fault: something optional that would work better
+# if it were set up. The ONLY severity that may ever be dismissed.
+TIP = "tip"
 
 # What each sweep is responsible for. A sweep clears the conditions it checked
 # and nothing else: `record` resolving everything it was not handed would mean
@@ -188,8 +194,30 @@ def record(raised: list[dict], now: int, owns=None) -> None:
                       (now,))
 
 
+def dismiss(code: str) -> bool:
+    """Wave off a suggestion. Refuses anything that is not a suggestion.
+
+    The notices exist because a problem you can click away is a problem you
+    forget about. A tip is not a problem, so it may go. Everything else stays,
+    and this guard is the whole reason the two can live in one panel.
+    """
+    row = db.one("SELECT severity FROM notices WHERE code = ?", (code,))
+    if not row or row["severity"] != TIP:
+        return False
+    with db.tx() as c:
+        c.execute("UPDATE notices SET dismissed_at = ? WHERE code = ?",
+                  (int(time.time()), code))
+    return True
+
+
 def open_notices() -> list[dict]:
-    """What is wrong right now, worst first."""
-    rows = db.query("SELECT * FROM notices WHERE resolved_at IS NULL "
-                    "ORDER BY CASE severity WHEN 'bad' THEN 0 ELSE 1 END, first_seen")
+    """What is wrong right now, worst first. A dismissed tip is not shown.
+
+    The badge takes its colour from the first row, so a suggestion must never
+    sort above a fault and hide it.
+    """
+    rows = db.query(
+        "SELECT * FROM notices WHERE resolved_at IS NULL AND dismissed_at IS NULL "
+        "ORDER BY CASE severity WHEN 'bad' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END, "
+        "first_seen")
     return [dict(r) for r in rows]

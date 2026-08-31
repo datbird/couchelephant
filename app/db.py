@@ -233,7 +233,11 @@ CREATE TABLE IF NOT EXISTS notices (
     hint        TEXT,
     first_seen  INTEGER,
     last_seen   INTEGER,
-    resolved_at INTEGER
+    resolved_at INTEGER,
+    -- Only a `tip` may ever set this. A tip is a suggestion, and asking twice
+    -- is nagging. A health problem is never dismissible: one you can click
+    -- away is one you forget about. `health.dismiss` is where that is kept.
+    dismissed_at INTEGER
 );
 """
 
@@ -331,6 +335,9 @@ MIGRATIONS = [
     ("passes", "label", "TEXT"),
     # Teams are now remembered rather than dropped when they stop playing.
     ("teams", "league", "TEXT"),
+    # A suggestion the user has waved off. Health problems can never set it;
+    # `health.dismiss` refuses any severity but `tip`.
+    ("notices", "dismissed_at", "INTEGER"),
     ("teams", "in_guide", "INTEGER DEFAULT 0"),
     ("teams", "last_seen", "INTEGER"),
     # A pass's `id` is an autoincrement, which means a different number on

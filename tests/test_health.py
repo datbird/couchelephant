@@ -355,3 +355,58 @@ def test_the_guide_reading_is_not_carried_either(client, plex, synced):
                 assert "epg_refreshed_at" not in text, name
                 assert "guide_ends_at" not in text, name
         json.loads(z.read(portable.MANIFEST))
+
+
+def _raise(code, severity):
+    health.record([{"code": code, "severity": severity, "title": "T",
+                    "detail": "D", "hint": None}], 100, owns=frozenset({code}))
+
+
+def _open_codes():
+    return {n["code"] for n in health.open_notices()}
+
+
+def test_a_tip_can_be_waved_off():
+    _raise("keys_available", health.TIP)
+    assert health.dismiss("keys_available") is True
+    assert "keys_available" not in _open_codes()
+
+
+def test_a_health_problem_cannot_be_waved_off():
+    """The rule the notices were built on: a health problem you can click away
+    is a health problem you forget about. A dismissible tip must not become a
+    way around that.
+
+    Mutation-check this one. Take the severity guard out of `health.dismiss`
+    and this test has to fail.
+    """
+    for severity in ("bad", "warn"):
+        _raise("epg_stale", severity)
+        assert health.dismiss("epg_stale") is False
+        assert "epg_stale" in _open_codes()
+
+
+def test_a_notice_that_does_not_exist_cannot_be_waved_off():
+    assert health.dismiss("no_such_code") is False
+
+
+def test_a_waved_off_tip_stays_gone_when_it_is_raised_again():
+    """It is a suggestion. Asking a second time is nagging."""
+    _raise("keys_available", health.TIP)
+    health.dismiss("keys_available")
+    _raise("keys_available", health.TIP)
+    assert "keys_available" not in _open_codes()
+
+
+def test_a_real_fault_sorts_above_a_suggestion():
+    """The badge takes its colour from the first notice, so a tip must never
+    push a fault down the list and hide it."""
+    health.record([
+        {"code": "keys_available", "severity": health.TIP, "title": "T",
+         "detail": "D", "hint": None},
+        {"code": "guide_short", "severity": "warn", "title": "T",
+         "detail": "D", "hint": None},
+        {"code": "epg_stale", "severity": "bad", "title": "T",
+         "detail": "D", "hint": None},
+    ], 100, owns=frozenset({"keys_available", "guide_short", "epg_stale"}))
+    assert [n["severity"] for n in health.open_notices()] == ["bad", "warn", "tip"]

@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import auth, backingstore, backups, db, passes, sync
-from .routes import account, data, guide, record, settings
+from .routes import account, data, guide, notices, record, settings
 from .routes import passes as pass_routes
 from .routes._shared import ASSET_V, BASE, VERSION, current_user  # noqa: F401
 from .routes.account import _configured
@@ -195,5 +195,5 @@ def healthz():
     })
 
 
-for r in (account, data, guide, record, pass_routes, settings):
+for r in (account, data, guide, notices, record, pass_routes, settings):
     app.include_router(r.router)
