@@ -61,6 +61,22 @@ def settings_save(plex_url: str = Form(""), plex_token: str = Form(""),
     return RedirectResponse("/settings", status_code=303)
 
 
+@router.post("/settings/sources")
+def settings_sources(sportsdb_key: str = Form(""), tmdb_key: str = Form("")):
+    """The two optional keys, on a route of their own.
+
+    Not fields on `settings_save`: that one writes every Plex setting it is
+    handed, so a form posting to it without carrying the server URL, the
+    timezone and the rest as hidden fields would blank them.
+    """
+    db.set_setting("sportsdb_key", sportsdb_key.strip())
+    # Masked on the way out, so a form echoing asterisks back must not be saved
+    # over the real key. Same rule as `plex_token`.
+    if tmdb_key.strip() and not tmdb_key.startswith("*"):
+        db.set_setting("tmdb_key", tmdb_key.strip())
+    return RedirectResponse("/settings", status_code=303)
+
+
 @router.post("/settings/auth")
 def settings_auth(request: Request, auth_mode: str = Form("none"),
                   cf_team_domain: str = Form(""), cf_aud: str = Form("")):

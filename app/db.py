@@ -253,6 +253,10 @@ DEFAULTS = {
     "sports_section": "",
     "shows_section": "",
     "movies_section": "",
+    # Both optional. TVmaze needs no key, so following a series works with
+    # neither of these set.
+    "sportsdb_key": "",
+    "tmdb_key": "",
 }
 
 

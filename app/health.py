@@ -33,6 +33,7 @@ EXPECTATION_MISSED = "expectation_missed"
 # A suggestion rather than a fault: something optional that would work better
 # if it were set up. The ONLY severity that may ever be dismissed.
 TIP = "tip"
+KEYS_AVAILABLE = "keys_available"
 
 # What each sweep is responsible for. A sweep clears the conditions it checked
 # and nothing else: `record` resolving everything it was not handed would mean
@@ -43,6 +44,7 @@ REACH_CODES = frozenset((PLEX_UNREACHABLE,))
 TEAM_CODES = frozenset((TEAM_PASS_UNMATCHED,))
 BOOKING_CODES = frozenset((BOOKING_DRIFT, BOOKING_REPAIR_FAILED))
 EXPECT_CODES = frozenset((EXPECTATION_MISSED,))
+TIP_CODES = frozenset((KEYS_AVAILABLE,))
 
 # Plex's guide refresh is a daily task. Complaining the first time it slips a
 # day would cry wolf over one missed window, so a notice waits for twice the
@@ -192,6 +194,35 @@ def record(raised: list[dict], now: int, owns=None) -> None:
         else:
             c.execute("UPDATE notices SET resolved_at = ? WHERE resolved_at IS NULL",
                       (now,))
+
+
+def keys_tip(has_tmdb: bool, has_sportsdb: bool,
+             film_passes: int, team_passes: int) -> list[dict]:
+    """Offer a key only where one would actually add something.
+
+    TVmaze needs no key at all, so following a series already works for
+    everyone. This is about the two optional ones, and only for somebody
+    already following the kind of thing they help with. Anybody else is never
+    told they exist, because a suggestion you cannot use is just noise.
+    """
+    wants = []
+    if team_passes and not has_sportsdb:
+        wants.append("TheSportsDB, for the rest of a team's published season, "
+                     "free at thesportsdb.com")
+    if film_passes and not has_tmdb:
+        wants.append("TMDB, for films and their release dates, free at "
+                     "themoviedb.org/settings/api")
+    if not wants:
+        return []
+    return [{
+        "code": KEYS_AVAILABLE,
+        "severity": TIP,
+        "title": "Two optional keys would fill in more of what you follow",
+        "detail": ("CouchElephant already looks past the end of the guide using "
+                   "TVmaze, which needs no key and is always on. Also useful "
+                   "here: " + "; ".join(wants) + "."),
+        "hint": "Settings, then Sources. Both are free, and neither is required.",
+    }]
 
 
 def dismiss(code: str) -> bool:

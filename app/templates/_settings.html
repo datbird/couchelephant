@@ -118,6 +118,41 @@
         {% endif %}
       </section>
 
+      {# ---------------- Sources ---------------- #}
+      <section data-sec="plex" data-tab="sources" data-tab-label="Sources" hidden>
+        <h2>Looking past the guide</h2>
+        <p class="dim">
+          The Plex guide reaches about twelve days ahead. No guide source
+          anywhere reaches much further, paid ones included, because no
+          broadcaster has decided that far out. These fill in what has been
+          announced beyond it, so you can follow a show or a season before the
+          guide has heard of it.
+        </p>
+        <p class="dim">
+          TVmaze covers announced series. It needs no key and no account, and
+          it is always on. Both keys below are free and entirely optional.
+        </p>
+        <form method="post" action="/settings/sources" class="setform">
+          <label for="sdbkey">TheSportsDB key</label>
+          <input id="sdbkey" name="sportsdb_key"
+                 value="{{ settings.sportsdb_key or "" }}" placeholder="optional">
+          <p class="dim tiny">
+            Fills in the rest of a team season the guide has not reached.
+            Works without a key on the free tier; your own key raises the rate
+            limits. Free at thesportsdb.com.
+          </p>
+          <label for="tmdbkey">TMDB key</label>
+          <input id="tmdbkey" name="tmdb_key" type="password"
+                 value="{{ "*" * 12 if settings.tmdb_key else "" }}"
+                 placeholder="optional">
+          <p class="dim tiny">
+            Adds films and their release dates. Free at
+            themoviedb.org/settings/api.
+          </p>
+          <button type="submit" class="primary">Save</button>
+        </form>
+      </section>
+
       {# ---------------- Recording ---------------- #}
       <section data-sec="recording" data-tab="behaviour" data-tab-label="Behaviour" hidden>
         <h2>Recording</h2>

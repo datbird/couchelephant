@@ -828,6 +828,15 @@ def _sync_everything(plex):
         expectations.sweep_misses(
             _int_or_none(db.get_setting("guide_ends_at")), _now_at),
         _now_at, owns=health.EXPECT_CODES)
+    health.record(
+        health.keys_tip(
+            has_tmdb=bool(db.get_setting("tmdb_key")),
+            has_sportsdb=bool(db.get_setting("sportsdb_key")),
+            film_passes=db.one("SELECT COUNT(*) c FROM expectations "
+                               "WHERE source = 'tmdb'")["c"],
+            team_passes=db.one("SELECT COUNT(*) c FROM passes "
+                               "WHERE kind = 'team'")["c"]),
+        _now_at, owns=health.TIP_CODES)
     # After sync_recordings, so the grab check reads Plex's current schedule
     # rather than last hour's.
     book = check_bookings(plex)

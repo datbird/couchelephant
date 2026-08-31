@@ -410,3 +410,42 @@ def test_a_real_fault_sorts_above_a_suggestion():
          "detail": "D", "hint": None},
     ], 100, owns=frozenset({"keys_available", "guide_short", "epg_stale"}))
     assert [n["severity"] for n in health.open_notices()] == ["bad", "warn", "tip"]
+
+
+def test_no_key_is_offered_when_neither_would_help():
+    """An install that only follows broadcast series gains nothing from either
+    key, so it must never be nagged about them."""
+    assert health.keys_tip(has_tmdb=False, has_sportsdb=False,
+                           film_passes=0, team_passes=0) == []
+
+
+def test_the_sports_key_is_offered_only_to_someone_following_a_team():
+    raised = health.keys_tip(has_tmdb=False, has_sportsdb=False,
+                             film_passes=0, team_passes=2)
+    assert len(raised) == 1
+    assert raised[0]["severity"] == health.TIP
+    text = raised[0]["detail"] + raised[0]["hint"]
+    assert "TheSportsDB" in text
+    assert "thesportsdb.com" in text
+    assert "TMDB" not in text
+
+
+def test_the_film_key_is_offered_only_to_someone_following_a_film():
+    raised = health.keys_tip(has_tmdb=False, has_sportsdb=False,
+                             film_passes=1, team_passes=0)
+    text = raised[0]["detail"] + raised[0]["hint"]
+    assert "TMDB" in text
+    assert "themoviedb.org" in text
+    assert "TheSportsDB" not in text
+
+
+def test_nothing_is_offered_once_the_keys_are_set():
+    assert health.keys_tip(has_tmdb=True, has_sportsdb=True,
+                           film_passes=3, team_passes=3) == []
+
+
+def test_the_tip_says_that_series_already_work_without_a_key():
+    """Nobody should come away thinking the feature needs configuring."""
+    raised = health.keys_tip(has_tmdb=False, has_sportsdb=False,
+                             film_passes=0, team_passes=1)
+    assert "TVmaze" in raised[0]["detail"]

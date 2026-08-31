@@ -48,7 +48,7 @@ def test_each_section_has_its_own_sub_tabs(settings):
     settings.click('.nav-item[data-sec="plex"]')
     tabs = settings.eval_on_selector_all(
         "#settabs .tab", "els => els.map(e => e.textContent.trim())")
-    assert tabs == ["Server", "Guide"]
+    assert tabs == ["Server", "Guide", "Sources"]
 
     settings.click('.nav-item[data-sec="accounts"]')
     tabs = settings.eval_on_selector_all(
