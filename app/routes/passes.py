@@ -1,12 +1,14 @@
 """The recordings page: the schedule, passes, rules, smart filters."""
 import asyncio
 import time
+import uuid
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from .. import db, passes, smartfilter, sync, teamcat
+from .. import db, expectations, passes, smartfilter, sync, teamcat
 from ..plex import PlexError
+from ..sources import thesportsdb, tmdb, tvmaze
 from ._shared import _int, _logo_map, _plex, page
 from .guide import _PASS_ICON, _why_for  # noqa: F401
 from .record import _PASS_HIDDEN, SPORTS_PADDING, _make_pass, _pass_prefs, _template_payload
@@ -158,6 +160,86 @@ def api_series(q: str = ""):
            GROUP BY name ORDER BY airings DESC, name LIMIT 40""",
         (int(time.time()), q, like))
     return JSONResponse({"ok": True, "series": [dict(r) for r in rows]})
+
+
+@router.get("/api/announced")
+def api_announced(q: str = ""):
+    """Things outside the Plex guide that match what was typed.
+
+    A separate request from `/api/series` on purpose. The guide search has to
+    answer as fast as it does today, and a third party being slow or down must
+    never make it slow or break it. The page asks for guide results first and
+    for these behind them.
+
+    Each source is tried on its own. One that fails is skipped rather than
+    failing the lot: a provider being unreachable is not something the user can
+    act on, and the others may still hold the answer.
+    """
+    q = (q or "").strip()
+    if not q:
+        return JSONResponse({"ok": True, "announced": []})
+    tz = db.get_setting("timezone") or "UTC"
+    found = []
+    for call in (lambda: tvmaze.search(q),
+                 lambda: tmdb.search(q, key=db.get_setting("tmdb_key") or "")):
+        try:
+            found.extend(call())
+        except Exception:
+            continue
+    return JSONResponse({"ok": True, "announced": [{
+        "source": a.source,
+        "source_id": a.source_id,
+        "title": a.title,
+        "subtitle": a.subtitle,
+        "network": a.network,
+        "precision": a.precision,
+        # Rendered here rather than in the browser, because `precision` decides
+        # the format and a client that guessed would invent a time.
+        "when": expectations.render_when(a.expected_at, a.precision, tz),
+    } for a in found]})
+
+
+@router.post("/api/announced/follow")
+def api_announced_follow(source: str = Form(...), source_id: str = Form(...),
+                         title: str = Form(...)):
+    """Follow something the guide has not heard of yet.
+
+    This makes an ordinary pass. It is the same object the rest of the app
+    already understands, so when the guide finally carries the show nothing
+    special has to happen for it to record.
+
+    Nothing is booked here. An expectation is an intention, and only a guide
+    airing carries a channel.
+    """
+    title = (title or "").strip()
+    if not title:
+        return JSONResponse({"ok": False, "error": "A title is required."},
+                            status_code=400)
+    existing = db.one("SELECT id FROM passes WHERE kind = 'series' "
+                      "AND series_title = ?", (title,))
+    if existing:
+        pass_id = existing["id"]
+    else:
+        with db.tx() as c:
+            cur = c.execute(
+                "INSERT INTO passes (kind, series_title, uid, enabled, created_at) "
+                "VALUES ('series', ?, ?, 1, ?)",
+                (title, uuid.uuid4().hex, int(time.time())))
+            pass_id = cur.lastrowid
+    if source == "thesportsdb":
+        # `source_id` is the league, not one game: following a team means the
+        # whole published season, not the next fixture.
+        items = thesportsdb.season(
+            title, source_id, key=db.get_setting("sportsdb_key") or "")
+    else:
+        items = [a for a in tvmaze.search(title) if a.source_id == source_id]
+        if not items:
+            items = [a for a in tmdb.search(
+                title, key=db.get_setting("tmdb_key") or "")
+                if a.source_id == source_id]
+    expectations.store(pass_id, items)
+    return JSONResponse({"ok": True, "pass_id": pass_id,
+                         "waiting": len(expectations.waiting(pass_id))})
 
 
 TEAM_PAGE = 300
