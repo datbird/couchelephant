@@ -194,6 +194,37 @@ CREATE TABLE IF NOT EXISTS sync_log (
 -- with a growing age rather than a pile of duplicates. `first_seen` is the
 -- answer to "how long has this been broken", which is the question you ask
 -- when you find out four days late.
+-- Something the user has asked for that the guide does not carry yet: a series
+-- announced for next spring, a game the league has scheduled but no broadcaster
+-- has claimed. It is an intention, never a booking. Only a guide airing can be
+-- recorded, because only the guide knows the channel.
+--
+-- Deliberately not rows in `programs` and `airings`. Those are read by every
+-- query in the app, and mixing invented rows into them would mean auditing all
+-- of those queries, forever, for a flag they could forget.
+--
+-- UNIQUE is per pass, not global. Two passes waiting on the same game is two
+-- passes, not a duplicate.
+CREATE TABLE IF NOT EXISTS expectations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    pass_id       INTEGER NOT NULL,
+    source        TEXT NOT NULL,
+    source_id     TEXT NOT NULL,
+    title         TEXT NOT NULL,
+    subtitle      TEXT,
+    network       TEXT,
+    expected_at   INTEGER,
+    -- How much of `expected_at` is real: time, day, month or year. A league
+    -- gives a kickoff. An announcement often gives only a month. Rendering
+    -- more precision than this says is inventing a fact.
+    precision     TEXT NOT NULL,
+    matched_guid  TEXT,
+    matched_at    INTEGER,
+    missed_at     INTEGER,
+    updated_at    INTEGER,
+    UNIQUE (source, source_id, pass_id)
+);
+
 CREATE TABLE IF NOT EXISTS notices (
     code        TEXT PRIMARY KEY,
     severity    TEXT,
