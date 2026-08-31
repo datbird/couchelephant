@@ -4,6 +4,66 @@
 
 ### Added
 
+- **You can now follow a show or a team the guide has never heard of.** You read
+  that a series starts next March, or you want a whole season rather than the
+  fortnight the guide holds. Until now a pass could only match guide rows, so
+  there was nothing to make.
+
+  The thing worth knowing first: **no source of TV guide data goes further out
+  than about three weeks.** Not the free ones and not the paid ones. Schedules
+  Direct is the licensed Gracenote reseller and it accepts a request for at most
+  21 days. Free XMLTV feeds do 7 to 14. This is not a licensing problem to spend
+  money on. In August no broadcaster has decided what airs next March, so there
+  is nothing to sell.
+
+  What does exist months ahead is two other things, and no single source carries
+  both. Announcements: a title, a network, and a date that is often only a month.
+  And published league schedules: real dates and kickoffs, known long before any
+  broadcaster is named.
+
+  So this is not a better guide. It is holding an intention until the guide
+  catches up. Searching now returns guide results at the speed it always did,
+  and appends what the outside sources know behind them. Following one makes an
+  ordinary pass with a list of what it is waiting for. Every sync looks for each
+  one in the guide, and a match promotes it: from that moment it is a normal
+  pass and books through the path that already existed.
+
+  **Nothing outside the guide ever books a recording.** An expectation is an
+  intention. Only a guide airing carries a channel.
+
+  A date is only ever shown at the precision it was given. A league says a
+  kickoff, so you see a kickoff. An announcement often says only a month, so you
+  see a month. Rendering that as the first at midnight would put a broadcast
+  time on screen that nobody published, and you would plan around it.
+
+  If the guide reaches past the date and nothing matched, you are told, by name.
+  A show can slip, so that is a warning and never a deletion. It keeps looking.
+
+- **Three sources, and only one of them is required to do nothing.** TVmaze
+  covers announced series and needs no key and no account, so this works the
+  moment the container starts. TheSportsDB fills in a team's published season
+  and works on its free tier; a key of your own only raises the rate limits.
+  TMDB adds films and needs a free key you register. Both keys live in Settings,
+  under Sources.
+
+  The ESPN public JSON was tested and rejected. It works, and it is what
+  everyone reaches for, but it returns 403 to a browser user agent and 200 to a
+  plain script. It answers only when you do not look like a browser, and that is
+  bot protection we would be tiptoeing around until it broke without warning.
+
+- **A suggestion can now be waved off. A health problem still cannot.** If a key
+  would actually add something to what you already follow, a yellow badge says
+  which one and why, and links to Settings. It has a Not now button.
+
+  That button is new, and the rule it sits beside is not. These notices exist
+  because a problem you can click away is a problem you forget about. So a
+  suggestion is a separate class rather than a loosening of that: only a `tip`
+  may ever be dismissed, the server refuses anything else, and a real fault
+  always sorts above a suggestion so it can never be hidden behind one.
+
+  Nobody is nagged about a key they cannot use. Follow only broadcast series and
+  you will never see it.
+
 - **CouchElephant now checks that the recordings it booked are still the ones
   it asked for.** A pass books a game once and then stops looking at it. Change
   the pass afterwards and the booking keeps the settings it was made with, for

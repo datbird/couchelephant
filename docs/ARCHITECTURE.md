@@ -316,3 +316,18 @@ Because the failure is silent by nature, `check_team_passes` raises a notice
 when an enabled team pass can find no game anywhere in the guide. A team out of
 season trips it too, which is the right trade: being told a pass is idle is
 cheap, and finding out in October that it has been idle since August is not.
+
+## Looking past the end of the guide
+
+`app/sources/` holds the outside providers: `tvmaze.py` (announced series, no
+key), `thesportsdb.py` (published league schedules) and `tmdb.py` (films,
+optional key). They return `Announcement` records and never book anything.
+
+`app/expectations.py` is what a pass is still waiting for. `store` writes them,
+`promote` binds one to a real guide airing once it appears, `sweep_misses`
+reports a date the guide reached past without a match, and `render_when` shows
+a date at exactly the precision the source gave it.
+
+The `expectations` table is deliberately separate from `programs` and
+`airings`. Those are read by every query in the app, and invented rows in them
+would mean auditing all of those queries, forever, for a flag they could forget.
