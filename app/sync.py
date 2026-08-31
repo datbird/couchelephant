@@ -3,7 +3,7 @@ import os
 import time
 import traceback
 
-from . import db, health, passes, teamcat, verify
+from . import db, expectations, health, passes, teamcat, verify
 from .plex import Plex, PlexError, discover
 
 LOGO_DIR = os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
@@ -816,6 +816,10 @@ def _sync_everything(plex):
     prune_history()
     check_plex_health(plex)
     idle = check_team_passes()
+    # The guide may have just reached something a pass has been waiting months
+    # for. Bind it before the booking check runs, so it records on this sync
+    # rather than the next one.
+    promoted = expectations.promote(now=_now())
     # After sync_recordings, so the grab check reads Plex's current schedule
     # rather than last hour's.
     book = check_bookings(plex)
@@ -826,6 +830,7 @@ def _sync_everything(plex):
               f"{teams} teams, {enriched} sports enriched"
               + (f" ({asked} asked)" if asked else "") + ", "
               + (f"{woke} pass(es) repointed, " if woke else "")
+              + (f"{promoted} now in the guide, " if promoted else "")
               + (f"{idle} team pass(es) matching nothing, " if idle else "")
               + (f"{book['repaired']} recording(s) repaired, " if book["repaired"] else "")
               + (f"{book['drifted']} recording(s) adrift, " if book["drifted"] else "")

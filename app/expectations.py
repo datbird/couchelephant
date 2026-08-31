@@ -83,3 +83,51 @@ def render_when(expected_at: int | None, precision: str, tz: str) -> str:
     except ValueError:
         # Some libc builds reject the %-d dash-padding form.
         return when.strftime(fmt.replace("%-", "%"))
+
+
+# How far either side of an expected date a guide airing may sit and still be
+# the same broadcast. A published kickoff should land within a day of what the
+# league said. A month-precision guess is a whole month wide by definition.
+#
+# The window is what stops a title that repeats next season from binding to an
+# expectation made this one.
+_WINDOW = {
+    "time": 86400,
+    "day": 2 * 86400,
+    "month": 31 * 86400,
+    "year": 366 * 86400,
+}
+
+
+def promote(now: int | None = None) -> int:
+    """Bind an expectation to a real guide airing, once one exists.
+
+    From that moment the pass behaves like every other pass and books through
+    the path that already exists. Nothing here books anything: it only stops
+    the waiting.
+
+    An expectation with no date is left alone. There is nothing to match it
+    against, and binding on the title alone would catch a broadcast years off.
+    """
+    now = int(now if now is not None else time.time())
+    matched = 0
+    for item in waiting():
+        if not item["expected_at"]:
+            continue
+        span = _WINDOW.get(item["precision"], _WINDOW["year"])
+        row = db.one(
+            """SELECT p.guid AS guid FROM airings a
+                 JOIN programs p ON p.guid = a.program_guid
+               WHERE ulower(COALESCE(NULLIF(p.grandparent_title, ''), p.title))
+                     = ulower(?)
+                 AND a.begins_at BETWEEN ? AND ?
+               ORDER BY a.begins_at LIMIT 1""",
+            (item["title"], item["expected_at"] - span, item["expected_at"] + span))
+        if not row:
+            continue
+        with db.tx() as c:
+            c.execute("UPDATE expectations SET matched_guid = ?, matched_at = ?, "
+                      "missed_at = NULL WHERE id = ?",
+                      (row["guid"], now, item["id"]))
+        matched += 1
+    return matched
