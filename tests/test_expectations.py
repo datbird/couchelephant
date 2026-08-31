@@ -188,3 +188,54 @@ def test_the_series_title_matches_when_the_episode_title_differs():
                   (WHEN + 3600,))
     _expect(65, "p7", "Gobiligook", WHEN)
     assert expectations.promote(now=WHEN) == 1
+
+
+def test_a_show_the_guide_reached_and_never_carried_is_reported():
+    _expect(70, "m1", "Never Aired", WHEN)
+    raised = expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400,
+                                       now=WHEN + 5 * 86400)
+    assert len(raised) == 1
+    assert "Never Aired" in raised[0]["detail"]
+    assert raised[0]["severity"] == "warn"
+    assert db.one("SELECT missed_at FROM expectations "
+                  "WHERE source_id = 'm1'")["missed_at"]
+
+
+def test_a_miss_keeps_looking_rather_than_being_deleted():
+    """A show can slip a week. Deleting the expectation would be giving up on
+    it quietly, which is the one thing this feature exists to prevent."""
+    _expect(70, "m1", "Never Aired", WHEN)
+    expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400, now=WHEN + 5 * 86400)
+    assert db.one("SELECT 1 FROM expectations WHERE source_id = 'm1'") is not None
+    assert [e["source_id"] for e in expectations.waiting(70)] == ["m1"]
+
+
+def test_nothing_is_reported_while_the_guide_has_not_got_there_yet():
+    """Silence before the date is the guide being short, not the show being
+    missing. Warning then would cry wolf every day for months."""
+    _expect(71, "m2", "Still Coming", WHEN)
+    assert expectations.sweep_misses(guide_ends_at=WHEN - 86400, now=WHEN) == []
+    assert db.one("SELECT missed_at FROM expectations "
+                  "WHERE source_id = 'm2'")["missed_at"] is None
+
+
+def test_nothing_is_reported_when_the_guide_end_is_unknown():
+    _expect(72, "m3", "Unknown Guide End", WHEN)
+    assert expectations.sweep_misses(guide_ends_at=None, now=WHEN) == []
+
+
+def test_a_promoted_expectation_is_never_called_missing():
+    _guide_row("plex://x/m4", "Arrived", "a-m4", WHEN + 3600)
+    _expect(73, "m4", "Arrived", WHEN)
+    expectations.promote(now=WHEN)
+    assert expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400,
+                                     now=WHEN + 5 * 86400) == []
+
+
+def test_many_misses_are_one_notice_and_not_a_pile():
+    for n in range(5):
+        _expect(74, f"many-{n}", f"Show {n}", WHEN)
+    raised = expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400,
+                                       now=WHEN + 5 * 86400)
+    assert len(raised) == 1
+    assert "and others" in raised[0]["detail"]

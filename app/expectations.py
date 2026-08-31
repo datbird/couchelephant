@@ -131,3 +131,47 @@ def promote(now: int | None = None) -> int:
                       (row["guid"], now, item["id"]))
         matched += 1
     return matched
+
+
+# Naming every one of them turns a notice into a wall of text. Three plus a
+# count says the same thing and can be read at a glance.
+_NAMES_SHOWN = 3
+
+
+def sweep_misses(guide_ends_at: int | None, now: int | None = None) -> list[dict]:
+    """Report anything the guide has now reached past and never carried.
+
+    Only judged once the guide actually extends beyond the expected date.
+    Before that, silence is the guide being short rather than the show being
+    missing, and warning then would cry wolf every day for months.
+
+    A miss is a warning and never a deletion. A show can slip a week, and
+    throwing the expectation away would be giving up on it quietly, which is
+    the one thing this whole feature exists to prevent.
+    """
+    now = int(now if now is not None else time.time())
+    if not guide_ends_at:
+        return []
+    late = [e for e in waiting()
+            if e["expected_at"] and e["expected_at"] < guide_ends_at]
+    if not late:
+        return []
+    with db.tx() as c:
+        for item in late:
+            c.execute("UPDATE expectations SET missed_at = ? WHERE id = ?",
+                      (now, item["id"]))
+    names = sorted({e["title"] for e in late})
+    shown = ", ".join(names[:_NAMES_SHOWN])
+    if len(names) > _NAMES_SHOWN:
+        shown += " and others"
+    return [{
+        "code": "expectation_missed",
+        "severity": "warn",
+        "title": "Something you are waiting for did not reach the guide",
+        "detail": (f"The guide now runs past the date announced for {shown}, "
+                   f"and no airing matched. The date may have moved, the title "
+                   f"may be spelled differently in the guide, or it may not be "
+                   f"carried on a channel you receive."),
+        "hint": ("CouchElephant keeps looking. Check the title against the "
+                 "guide, or remove the pass if it is not coming."),
+    }]

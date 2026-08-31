@@ -820,6 +820,14 @@ def _sync_everything(plex):
     # for. Bind it before the booking check runs, so it records on this sync
     # rather than the next one.
     promoted = expectations.promote(now=_now())
+    # Judged against how far the guide actually reaches, not against today.
+    # Before the guide gets there, silence means a short guide and not a
+    # missing show.
+    _now_at = _now()
+    health.record(
+        expectations.sweep_misses(
+            _int_or_none(db.get_setting("guide_ends_at")), _now_at),
+        _now_at, owns=health.EXPECT_CODES)
     # After sync_recordings, so the grab check reads Plex's current schedule
     # rather than last hour's.
     book = check_bookings(plex)
