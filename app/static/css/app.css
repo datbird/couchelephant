@@ -1004,6 +1004,24 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 .nm-detail{color:var(--text);font-size:12.5px;line-height:1.45;margin-top:3px}
 .nm-hint{color:var(--dim);font-size:12px;line-height:1.45;margin-top:5px}
 .nm-since{color:var(--dim);font-size:11px;margin-top:5px}
+/* A suggestion. It borrows the warn colours because it is yellow to the eye,
+   but it is a different class of thing and only it can be dismissed. */
+.nm-item.tip{border-left-color:var(--warn-bd)}
+.nm-item.tip .nm-title{color:var(--warn-fg)}
+.sync-badge.tip{background:var(--warn-fg)}
+/* Quiet on purpose: waving off a suggestion is not what the panel is for. */
+.nm-dismiss{margin-top:6px;font:inherit;font-size:11px;padding:3px 8px;
+  border-radius:6px;border:1px solid var(--line);background:none;
+  color:var(--dim);cursor:pointer}
+.nm-dismiss:hover{color:var(--text);border-color:var(--accent)}
+.nm-dismiss:disabled{opacity:.55;cursor:default}
+/* A plan is not a booking. Dashed and dimmer on purpose: nothing here will
+   record until the guide carries it. */
+.plan{display:flex;align-items:center;gap:10px;padding:8px 10px;margin:6px 0;
+  border:1px dashed var(--line);border-radius:8px;color:var(--dim);font-size:13px}
+.plan-title{color:var(--text);font-weight:600}
+.plan-when{margin-left:auto}
+.plan-src{font-size:11px;text-transform:uppercase;letter-spacing:.04em}
 /* The sync the icon used to do, moved into the panel and named. It has to
    read as an action rather than as one more line of the report, so it gets a
    border and the full width. */

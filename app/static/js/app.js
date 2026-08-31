@@ -1035,3 +1035,65 @@ window.wireSettings = function (root) {
   document.addEventListener('click', shut);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
 })();
+
+// The plans: what a pass is waiting for that the guide has not reached yet.
+//
+// Fetched rather than rendered server side, because /recordings is a shell:
+// the schedule and the rules on that page arrive the same way. The dates are
+// already formatted by the server, because `precision` decides the format and
+// a client left to guess would put a time on the screen nobody published.
+(function () {
+  var card = document.getElementById('plancard'),
+      list = document.getElementById('planlist');
+  if (!card || !list) return;
+  fetch('/api/expectations')
+    .then(function (r) { return r.json(); })
+    .then(function (body) {
+      var rows = (body && body.rows) || [];
+      if (!rows.length) return;
+      rows.forEach(function (e) {
+        var el = document.createElement('div');
+        el.className = 'plan';
+        el.setAttribute('data-expectation', e.source_id);
+        var parts = ['<span class="plan-title"></span>'];
+        if (e.subtitle) parts.push('<span class="plan-sub"></span>');
+        parts.push('<span class="plan-when"></span>',
+                   '<span class="plan-src"></span>');
+        if (e.missed_at) {
+          parts.push('<span class="pill warn">not in the guide</span>');
+        }
+        el.innerHTML = parts.join('');
+        // textContent, never innerHTML, for anything a third party sent us.
+        el.querySelector('.plan-title').textContent = e.title;
+        if (e.subtitle) el.querySelector('.plan-sub').textContent = e.subtitle;
+        el.querySelector('.plan-when').textContent = e.when;
+        el.querySelector('.plan-src').textContent = e.source;
+        list.appendChild(el);
+      });
+      card.hidden = false;
+    })
+    .catch(function () { /* the page is still useful without this card */ });
+})();
+
+// Waving off a suggestion. Only a tip is given a button, and the server
+// refuses anything else even if one appeared here by mistake.
+//
+// Bound in the CAPTURE phase. The notice panel stops propagation on its own
+// clicks, so it keeps the panel open while you read it. A delegated listener
+// on the bubble phase therefore never fires for a button inside that panel.
+// Capture runs on the way down, before the panel can stop anything.
+(function () {
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-dismiss]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    btn.disabled = true;
+    fetch('/api/notices/' + encodeURIComponent(btn.dataset.dismiss) + '/dismiss',
+          {method: 'POST'})
+      .then(function (r) {
+        if (r.ok) { location.reload(); } else { btn.disabled = false; }
+      })
+      .catch(function () { btn.disabled = false; });
+  }, true);
+})();

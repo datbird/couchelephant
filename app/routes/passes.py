@@ -162,6 +162,20 @@ def api_series(q: str = ""):
     return JSONResponse({"ok": True, "series": [dict(r) for r in rows]})
 
 
+@router.get("/api/expectations")
+def api_expectations():
+    """What every pass is still waiting for, with the dates already rendered.
+
+    Rendered on this side rather than in the browser because `precision`
+    decides the format, and a client left to guess would put a time on the
+    screen that nobody published.
+    """
+    tz = db.get_setting("timezone") or "UTC"
+    return JSONResponse({"ok": True, "rows": [
+        dict(e, when=expectations.render_when(e["expected_at"], e["precision"], tz))
+        for e in expectations.waiting()]})
+
+
 @router.get("/api/announced")
 def api_announced(q: str = ""):
     """Things outside the Plex guide that match what was typed.

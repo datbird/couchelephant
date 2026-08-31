@@ -106,6 +106,13 @@ Plex has {{ count }} problem{{ plural }}. Click to read {{ 'it' if count == 1 el
               <div class="nm-detail">{{ n.detail }}</div>
               {% if n.hint %}<div class="nm-hint">{{ n.hint }}</div>{% endif %}
               <div class="nm-since">Noticed {{ n.first_seen|ago }}</div>
+              {# Only a suggestion. A health problem is answered by fixing
+                 it, and the server refuses to dismiss one even if a button
+                 appeared here. #}
+              {% if n.severity == 'tip' %}
+                <button type="button" class="nm-dismiss"
+                        data-dismiss="{{ n.code }}">Not now</button>
+              {% endif %}
             </div>
           {% endfor %}
           {# The sync the icon used to do, kept and named. #}

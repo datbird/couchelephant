@@ -19,6 +19,17 @@
   <button type="button" class="subtab" data-sub="passes">Passes<span class="n" id="pcount"></span></button>
 </div>
 
+{# Filled from /api/expectations. Hidden until there is something in it, so a
+   server with no waiting passes looks exactly as it did before. #}
+<div class="card" id="plancard" hidden>
+  <h2 style="margin:0 0 4px;font-size:15px">Waiting for the guide</h2>
+  <div class="sub" style="margin-bottom:10px">
+    Announced, but not in the guide yet. Nothing here is booked. Each one
+    becomes a real recording the moment Plex carries an airing for it.
+  </div>
+  <div id="planlist"></div>
+</div>
+
 {# ---------------- Schedule ---------------- #}
 <div data-pane="schedule">
   <div class="row" style="justify-content:space-between;margin-bottom:14px">
