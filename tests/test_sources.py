@@ -2,7 +2,7 @@
 import pytest
 
 from app import sources
-from app.sources import tvmaze
+from app.sources import thesportsdb, tvmaze
 from tests import fake_sources
 
 
@@ -62,3 +62,34 @@ def test_tvmaze_returns_nothing_for_a_title_that_does_not_exist(base):
 
 def test_tvmaze_does_not_call_out_for_an_empty_query(base):
     assert tvmaze.search("   ", base=base) == []
+
+
+def test_a_scheduled_game_with_a_kickoff_keeps_the_time(base):
+    games = thesportsdb.season("Ravens", "4391", base=base)
+    first = [g for g in games if g.source_id == "2000001"][0]
+    assert first.precision == "time"
+    assert first.subtitle == "Ravens vs Falcons"
+    assert first.title == "Ravens"
+
+
+def test_a_scheduled_game_with_no_kickoff_is_only_a_day(base):
+    """The league has announced the date but not the kickoff. Showing 12:00 AM
+    would be a time nobody published."""
+    games = thesportsdb.season("Ravens", "4391", base=base)
+    second = [g for g in games if g.source_id == "2000002"][0]
+    assert second.precision == "day"
+
+
+def test_only_this_team_is_returned(base):
+    """The season endpoint answers the whole league. A pass follows one team."""
+    ids = {g.source_id for g in thesportsdb.season("Ravens", "4391", base=base)}
+    assert ids == {"2000001", "2000002"}
+
+
+def test_the_away_side_counts_as_the_team_playing(base):
+    ids = {g.source_id for g in thesportsdb.season("Pilots", "4391", base=base)}
+    assert ids == {"2000002", "2000003"}
+
+
+def test_no_league_means_no_call(base):
+    assert thesportsdb.season("Ravens", "", base=base) == []
