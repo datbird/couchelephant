@@ -91,3 +91,21 @@ def test_every_script_is_asked_for_by_build():
     base = (TEMPLATES / "base.html").read_text()
     for m in re.finditer(r'<(?:script src|link rel="stylesheet" href)="(/static/[^"]+)"', base):
         assert "?v=" in m.group(1), f"{m.group(1)} is not versioned"
+
+
+def test_the_asset_version_moves_when_an_asset_does():
+    """A version that cannot change is a cache the browser never drops.
+
+    This walked `routes/static`, which does not exist: static/ and templates/
+    are siblings of routes/, not children. Every miss was swallowed as OSError
+    and the stamp came out "0" for every build ever made, so a shipped fix sat
+    on the server looking like it had not been made. That is the exact fault
+    the function's own comment says it exists to prevent.
+    """
+    from app.routes import _shared
+
+    version = _shared._asset_version()
+    stamp = version.rsplit("-", 1)[1]
+    assert stamp != "0", f"{version}: the walk found no assets to date"
+    newest = max(int(p.stat().st_mtime) for p in STATIC.rglob("*") if p.is_file())
+    assert int(stamp) >= newest, f"{version} predates the newest asset"

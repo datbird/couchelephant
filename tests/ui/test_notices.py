@@ -127,3 +127,89 @@ def test_the_badge_is_legible_in_light_mode_too(light_system):
     assert colours[0] != colours[1], "the glyph and its ground are the same colour"
     assert "rgba(0, 0, 0, 0)" not in colours[0], "the badge has no fill"
     fake_plex.STATE.refreshed_at = None
+
+
+def test_with_a_problem_the_sync_button_opens_it_instead_of_syncing(unwell):
+    """Syncing is the reflex, and with the guide stale that reflex spends a
+    minute re-reading a guide Plex has not moved. It answers nothing. The
+    reason is the click worth making, so the button in the bar makes it."""
+    before = db.one("SELECT COUNT(*) c FROM sync_log")["c"]
+    unwell.click("#syncbtn")
+    unwell.wait_for_selector("#noticemenu.open", timeout=5000)
+    unwell.wait_for_timeout(600)
+    assert db.one("SELECT COUNT(*) c FROM sync_log")["c"] == before
+    # And it has to be out of the form, not merely decline to submit it. A
+    # later edit that tucked it back inside would pass the count check above on
+    # a fast machine and fail on a slow one.
+    inside = unwell.evaluate(
+        """() => !!document.querySelector('#syncbtn').closest('form')""")
+    assert not inside, "the bar's sync button is still a submit"
+
+
+def test_the_panel_can_still_sync_anyway(unwell):
+    """None of these problems stop a sync from working. Taking the sync off the
+    bar without putting it back would just be removing it."""
+    before = db.one("SELECT COUNT(*) c FROM sync_log")["c"]
+    unwell.click("#syncbtn")
+    unwell.wait_for_selector("#noticemenu.open")
+    assert unwell.locator("#syncanyway").is_visible()
+    with unwell.expect_navigation():
+        unwell.click("#syncanyway")
+    unwell.wait_for_selector("header")
+    assert db.one("SELECT COUNT(*) c FROM sync_log")["c"] > before
+
+
+def test_the_sync_anyway_button_is_really_on_top(unwell):
+    """`is_visible` believes a button the panel is drawing over. Ask the
+    browser what is painted at the point instead."""
+    unwell.click("#syncbtn")
+    unwell.wait_for_selector("#noticemenu.open")
+    box = unwell.locator("#syncanyway").bounding_box()
+    assert box and box["width"] > 40 and box["height"] > 14, box
+    hit = unwell.evaluate(
+        """([x, y]) => {
+             const el = document.elementFromPoint(x, y);
+             return el ? el.closest('#syncanyway') !== null : false;
+           }""",
+        [box["x"] + box["width"] / 2, box["y"] + box["height"] / 2])
+    assert hit, "something is painted over the sync button in the panel"
+
+
+def test_the_badge_and_the_icon_open_the_same_panel(unwell):
+    """Two controls, one panel. The badge is what the eye goes to and the icon
+    is what the hand hits, and either has to work."""
+    unwell.click("#noticebtn")
+    unwell.wait_for_selector("#noticemenu.open")
+    unwell.keyboard.press("Escape")
+    unwell.wait_for_selector("#noticemenu.open", state="detached", timeout=3000)
+    unwell.click("#syncbtn")
+    unwell.wait_for_selector("#noticemenu.open")
+    assert unwell.locator("#noticemenu").count() == 1
+
+
+def test_a_healthy_sync_button_still_just_syncs(page):
+    """The new behaviour is the exception, not the rule. With nothing wrong
+    there is no panel, and the icon syncs in one click as it always did."""
+    with db.tx() as c:
+        c.execute("UPDATE notices SET resolved_at = 1 WHERE resolved_at IS NULL")
+    page.goto("/")
+    page.wait_for_selector("header")
+    assert page.locator("#noticemenu").count() == 0
+    inside = page.evaluate(
+        """() => !!document.querySelector('#syncbtn').closest('form')""")
+    assert inside, "with nothing wrong the sync button must submit the sync form"
+    before = db.one("SELECT COUNT(*) c FROM sync_log")["c"]
+    with page.expect_navigation():
+        page.click("#syncbtn")
+    assert db.one("SELECT COUNT(*) c FROM sync_log")["c"] > before
+
+
+def test_the_sync_button_says_what_it_will_do_now(unwell):
+    """A control that has changed what it does has to say so. Otherwise the
+    tooltip is a lie and a screen reader announces a sync that will not
+    happen."""
+    label = unwell.get_attribute("#syncbtn", "aria-label")
+    assert "problem" in label.lower(), label
+    tip = unwell.get_attribute("#syncbtn", "title")
+    assert "sync anyway" in tip.lower(), tip
+    assert "Last synced" in tip or "Never synced" in tip, tip

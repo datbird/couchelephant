@@ -67,7 +67,39 @@
   reached, so a guide that has stopped moving is visible the next day rather
   than the week after.
 
+### Changed
+
+- **With a problem open, the sync button reads the problem instead of
+  syncing.** Syncing is the reflex. A badge on the sync button says something
+  is wrong, so the hand goes to the sync button, and with a stale guide that
+  is a minute of work spent re-reading a guide Plex has not moved. It answers
+  nothing and the badge is still there afterwards, so it gets clicked again.
+
+  Clicking the icon now opens the panel that says what is wrong. The badge
+  already did that, and the icon under it is the larger target, so both now
+  open the same panel. The button says so: its tooltip and its label both name
+  the problems rather than promising a sync.
+
+  The sync itself moved into the foot of that panel as **Sync anyway**. None of
+  these problems stop a sync from working, and trying one is sometimes the
+  right thing to do, so it had to stay reachable rather than be removed.
+
+  With nothing wrong, nothing changes: there is no panel, and the icon syncs
+  in one click as it always did.
+
 ### Fixed
+
+- **A change to the stylesheet or the scripts never reached a browser that had
+  been to the site before.** The version stamped onto every asset URL exists to
+  drop the browser's cached copy on a deploy. It was built by walking
+  `routes/static`, and `static/` is a sibling of `routes/`, not a child. The
+  directory does not exist, every miss was swallowed as `OSError`, and the
+  stamp came out `0` for every build ever made. So the URL never changed and
+  the cache never dropped. That is the exact fault the code's own comment says
+  it exists to prevent, and it had been shipping since the version was added.
+
+  It now walks the right directory, and refuses to start if the walk finds
+  nothing to date rather than quietly reporting `0` again.
 
 - **Plex renumbers its team ids, and a team pass did not survive it.** Measured
   on a live server: one guide refresh moved the Kansas City Chiefs from 236 to

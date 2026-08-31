@@ -986,33 +986,51 @@ window.wireSettings = function (root) {
 
 // Spin the sync icon while the request is in flight. A full page reload
 // follows, so this only has to survive until the server answers.
+//
+// The icon that spins is always the one in the bar, which is not always the
+// button that was pressed: with a problem open, the sync lives in the panel.
 (function () {
   var f = document.querySelector('form[action="/sync"]');
   if (!f) return;
   f.addEventListener('submit', function () {
+    var icon = document.getElementById('syncbtn');
+    if (icon) icon.classList.add('spinning');
     var b = f.querySelector('button');
-    if (b) { b.classList.add('spinning'); b.disabled = true; }
+    if (!b) return;
+    b.disabled = true;
+    // A text button cannot spin, so it says so instead.
+    if (b.dataset.busy) b.textContent = b.dataset.busy;
   });
 })();
 
 // The health notices, hung off the sync button.
 //
-// Its own control rather than part of the sync form: clicking the badge to
-// read what is wrong must not start a sync, and a sync takes a minute.
+// Two controls open this panel: the badge, and the sync icon under it. Once
+// Plex has a problem the icon stops syncing and reads the problem instead,
+// because syncing is the reflex and it only re-reads a guide that has not
+// moved. Neither control is inside the sync form, so opening the panel cannot
+// start a minute of work nobody asked for. The sync itself is in the panel.
 (function () {
-  var btn = document.getElementById('noticebtn'),
-      menu = document.getElementById('noticemenu');
-  if (!btn || !menu) return;
-  function shut() {
-    menu.classList.remove('open');
-    btn.setAttribute('aria-expanded', 'false');
+  var menu = document.getElementById('noticemenu');
+  if (!menu) return;
+  var triggers = [].slice.call(document.querySelectorAll('[data-notice-toggle]'));
+  if (!triggers.length) return;
+  function set(open) {
+    menu.classList.toggle('open', open);
+    for (var i = 0; i < triggers.length; i++) {
+      triggers[i].setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
   }
-  btn.addEventListener('click', function (e) {
-    e.preventDefault();
-    e.stopPropagation();
-    var open = menu.classList.toggle('open');
-    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  function shut() { set(false); }
+  triggers.forEach(function (t) {
+    t.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      set(!menu.classList.contains('open'));
+    });
   });
+  // The sync form lives inside. Closing on its click would take the panel away
+  // before the click became a submit.
   menu.addEventListener('click', function (e) { e.stopPropagation(); });
   document.addEventListener('click', shut);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });

@@ -37,6 +37,13 @@
 <script src="/static/js/smartfilter.js?v={{ asset_v }}"></script>
 </head>
 <body class="{% block bodyclass %}{% endblock %}">
+{# The sync icon is drawn by two different buttons now: the one that syncs,
+   and the one that opens a problem. One copy so they cannot drift apart. #}
+{% macro sync_icon() %}<svg viewBox="0 0 24 24" width="19" height="19" fill="none"
+     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.5-4"/>
+  <path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.5 4"/>
+  <path d="M19.5 3v4h-4"/><path d="M4.5 21v-4h4"/></svg>{% endmacro %}
 <div class="topbar">
 <header>
   {# Mark, then the wordmark stacked over the tagline, so the tagline reads as a
@@ -59,31 +66,39 @@
 
        A problem with Plex's own guide upkeep badges this same button rather
        than adding a fourth icon: a guide that has stopped moving is a sync
-       problem, and it belongs on the control you would reach for anyway. #}
+       problem, and it belongs on the control you would reach for anyway.
+
+       And once there is a problem, this button stops syncing and opens the
+       problem instead. Syncing is the reflex, so a stale guide gets clicked at
+       over and over, and every click is a minute spent re-reading a guide Plex
+       has not moved. The reason is the useful click. The sync is still one
+       click away, at the foot of the panel, because none of these problems
+       stop a sync from working and trying it is sometimes right. #}
     <div class="sync-wrap {{ 'has-notices' if notices }}" id="syncwrap">
-      <form method="post" action="/sync" style="margin:0">
-        <button type="submit" class="iconbtn" title="{% if last_sync %}Last synced {{ last_sync.ended_at|fmt('%H:%M') }}{% if not last_sync.ok %} and it failed{% endif %}. {{ last_sync.detail }}{% else %}Never synced yet{% endif %}
-Click to sync the guide now." aria-label="Sync the guide now">
-          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor"
-               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.5-4"/>
-            <path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.5 4"/>
-            <path d="M19.5 3v4h-4"/><path d="M4.5 21v-4h4"/></svg>
-        </button>
-      </form>
+      {% set sync_title %}{% if last_sync %}Last synced {{ last_sync.ended_at|fmt('%H:%M') }}{% if not last_sync.ok %} and it failed{% endif %}. {{ last_sync.detail }}{% else %}Never synced yet{% endif %}{% endset %}
       {% if notices %}
-        {# The badge is a button of its own, sitting over the sync icon. Reading
-           what is wrong must not trigger a sync: they are different intents and
-           one of them takes a minute. #}
+        {% set count = notices|length %}
+        {% set plural = '' if count == 1 else 's' %}
+        <button type="button" class="iconbtn" id="syncbtn" data-notice-toggle
+                aria-haspopup="true" aria-expanded="false"
+                title="{{ sync_title }}
+Plex has {{ count }} problem{{ plural }}. Click to read {{ 'it' if count == 1 else 'them' }}, or to sync anyway."
+                aria-label="{{ count }} problem{{ plural }} with Plex">
+          {{ sync_icon() }}
+        </button>
+        {# The badge is a control of its own, sitting over the sync icon. Both
+           open the same panel: the badge is what the eye goes to, the icon is
+           what the hand hits. #}
         <button type="button" class="sync-badge {{ notices[0].severity }}"
-                id="noticebtn" aria-haspopup="true" aria-expanded="false"
-                aria-label="{{ notices|length }} problem{{ '' if notices|length == 1 else 's' }} with Plex">
+                id="noticebtn" data-notice-toggle
+                aria-haspopup="true" aria-expanded="false"
+                aria-label="{{ count }} problem{{ plural }} with Plex">
           <span aria-hidden="true">!</span>
         </button>
         <div class="notice-menu" id="noticemenu" role="dialog"
              aria-label="Problems with Plex">
           <div class="nm-head">
-            {{ notices|length }} problem{{ '' if notices|length == 1 else 's' }} with Plex
+            {{ count }} problem{{ plural }} with Plex
           </div>
           {% for n in notices %}
             <div class="nm-item {{ n.severity }}">
@@ -93,8 +108,21 @@ Click to sync the guide now." aria-label="Sync the guide now">
               <div class="nm-since">Noticed {{ n.first_seen|ago }}</div>
             </div>
           {% endfor %}
+          {# The sync the icon used to do, kept and named. #}
+          <form method="post" action="/sync" class="nm-sync">
+            <button type="submit" class="nm-syncbtn" id="syncanyway"
+                    data-busy="Syncing..." title="{{ sync_title }}">Sync anyway</button>
+          </form>
           <div class="nm-foot">These clear themselves when the problem goes away.</div>
         </div>
+      {% else %}
+        <form method="post" action="/sync" style="margin:0">
+          <button type="submit" class="iconbtn" id="syncbtn"
+                  title="{{ sync_title }}
+Click to sync the guide now." aria-label="Sync the guide now">
+            {{ sync_icon() }}
+          </button>
+        </form>
       {% endif %}
     </div>
 

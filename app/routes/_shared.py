@@ -19,9 +19,14 @@ VERSION = "1.0.1"
 # fix would sit on the server while the browser served yesterday's copy from
 # cache. That happened, and the fix looked like it had not been made.
 def _asset_version():
-    here = os.path.dirname(os.path.abspath(__file__))
+    # BASE, not this module's own directory. static/ and templates/ are
+    # siblings of routes/, not children of it, so this walked a path that does
+    # not exist. Every miss was swallowed as OSError and the version pinned
+    # itself at "1.0.1-0" for every build ever made. The cache-busting this
+    # function exists for was never happening, which is the exact fault the
+    # comment above describes. So the walk has to find something.
     newest = 0
-    for root, _dirs, files in os.walk(os.path.join(here, "static")):
+    for root, _dirs, files in os.walk(os.path.join(BASE, "static")):
         for f in files:
             try:
                 newest = max(newest, int(os.path.getmtime(os.path.join(root, f))))
@@ -31,9 +36,11 @@ def _asset_version():
     for f in ("templates/base.html", "templates/recordings.html",
               "templates/guide.html", "templates/_settings.html"):
         try:
-            newest = max(newest, int(os.path.getmtime(os.path.join(here, f))))
+            newest = max(newest, int(os.path.getmtime(os.path.join(BASE, f))))
         except OSError:
             pass
+    if not newest:
+        raise RuntimeError("asset version found no files to date; check BASE")
     return f"{VERSION}-{newest}"
 
 

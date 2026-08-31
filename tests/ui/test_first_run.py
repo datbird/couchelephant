@@ -8,7 +8,9 @@ def fresh(page):
     db.set_setting("plex_url", "")
     db.set_setting("plex_token", "")
     page.goto("/")
-    page.wait_for_selector("form")
+    # By id: the header carries a form of its own now, hidden in the notice
+    # panel, and it resolves first.
+    page.wait_for_selector("#wform")
     return page
 
 

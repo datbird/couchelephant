@@ -12,7 +12,7 @@ def test_nothing_scrolls_sideways_off_the_screen(phone):
 def test_the_tagline_gives_way_to_the_controls(phone):
     phone.goto("/")
     assert not phone.locator(".tagline").is_visible()
-    assert phone.locator('[aria-label="Sync the guide now"]').is_visible()
+    assert phone.locator("#syncbtn").is_visible()
     assert phone.locator("#gearbtn").is_visible()
     assert phone.locator("#pbtn").is_visible()
 

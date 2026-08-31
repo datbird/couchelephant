@@ -37,17 +37,19 @@ def test_a_divider_separates_the_header_from_the_tabs(page):
 
 def test_the_header_holds_sync_settings_and_account_in_that_order(page):
     page.goto("/")
+    # By id, not by label. The sync button's label follows what the button
+    # does, and with a problem open it reads the problem rather than syncing.
     order = page.eval_on_selector_all(
         "header .right button, header .right a",
-        "els => els.map(e => e.getAttribute('aria-label') || e.id)")
+        "els => els.map(e => e.id || e.getAttribute('aria-label'))")
     order = [o for o in order if o]
-    assert order.index("Sync the guide now") < order.index("Settings")
-    assert order.index("Settings") < order.index("pbtn")
+    assert order.index("syncbtn") < order.index("gearbtn")
+    assert order.index("gearbtn") < order.index("pbtn")
 
 
 def test_the_sync_time_is_a_tooltip_not_a_line_of_text(page):
     page.goto("/")
-    tip = page.get_attribute('[aria-label="Sync the guide now"]', "title")
+    tip = page.get_attribute("#syncbtn", "title")
     assert "sync" in tip.lower()
     assert "Never synced" in tip or "Last synced" in tip
     assert "synced" not in page.locator("header").inner_text().lower()
