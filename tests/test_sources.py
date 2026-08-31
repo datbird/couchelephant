@@ -2,7 +2,7 @@
 import pytest
 
 from app import sources
-from app.sources import thesportsdb, tvmaze
+from app.sources import thesportsdb, tmdb, tvmaze
 from tests import fake_sources
 
 
@@ -93,3 +93,18 @@ def test_the_away_side_counts_as_the_team_playing(base):
 
 def test_no_league_means_no_call(base):
     assert thesportsdb.season("Ravens", "", base=base) == []
+
+
+def test_tmdb_is_silent_without_a_key(base):
+    """It is optional. With no key it answers nothing rather than raising, so
+    search still works for everyone who never set one."""
+    assert tmdb.search("Quorbis", key="", base=base) == []
+    assert tmdb.search("Quorbis", key="   ", base=base) == []
+
+
+def test_tmdb_finds_an_unreleased_film(base):
+    hits = tmdb.search("Quorbis", key="demo-key", base=base)
+    assert len(hits) == 1
+    assert hits[0].source == "tmdb"
+    assert hits[0].title == "Quorbis Rising"
+    assert hits[0].precision == "day"
