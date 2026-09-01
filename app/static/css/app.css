@@ -25,6 +25,10 @@
   --bad:#e5484d; --bad-fg:#ff8b8e; --bad-soft:rgba(229,72,77,.15); --bad-bd:rgba(229,72,77,.35);
   --warn-fg:#f3a30b; --warn-soft:rgba(229,160,13,.15); --warn-bd:rgba(229,160,13,.35);
   --info-fg:#8ab8ff; --info-soft:rgba(61,139,253,.15); --info-bd:rgba(61,139,253,.35);
+  /* Announced, not booked. Violet is the one hue the schedule does not already
+     spend: amber is ours, blue-grey is Plex's, and warn is amber again. */
+  --wait:#a07cd6; --wait-fg:#b79ae0; --wait-soft:rgba(160,124,214,.14);
+  --wait-bd:rgba(160,124,214,.45);
   /* The plate a channel logo sits on. Broadcasters ship white-on-transparent
      artwork, so this stays dark in BOTH themes; tinting the image instead
      would ruin the logos that do carry their own colour. */
@@ -52,6 +56,8 @@
   --bad:#c62828; --bad-fg:#a81f1f; --bad-soft:rgba(198,40,40,.12); --bad-bd:rgba(198,40,40,.38);
   --warn-fg:#8a5a00; --warn-soft:rgba(224,148,10,.18); --warn-bd:rgba(176,116,8,.38);
   --info-fg:#17539f; --info-soft:rgba(23,83,159,.12); --info-bd:rgba(23,83,159,.35);
+  --wait:#6a48a0; --wait-fg:#5b3f8c; --wait-soft:rgba(122,88,176,.13);
+  --wait-bd:rgba(106,72,160,.45);
   --tile:#1e2b38;
   --scrim:rgba(20,30,40,.42);
   --shadow:0 6px 18px rgba(22,34,46,.14);
@@ -252,6 +258,7 @@ tr:hover td{background:var(--panel2)}
 .legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
 .legend i.ce{background:var(--accent)}
 .legend i.plex{background:var(--live-dot)}
+.legend i.wait{background:var(--wait)}
 
 /* ---- filter panel (same shape as Ludodex: searchable, sectioned, tri-state) ---- */
 .fwrap{position:relative}
@@ -547,9 +554,26 @@ tr:hover td{background:var(--panel2)}
   padding:3px 5px;border-radius:4px;cursor:pointer;background:var(--panel2);
   border-left:3px solid var(--live)}
 .calitem.ce{border-left-color:var(--accent);background:var(--accent-soft)}
+/* Announced, not booked. DASHED carries the meaning, colour only reinforces it:
+   the plan card already says "a plan is dashed", and a colour-blind reader gets
+   the same answer from the border style alone. Default cursor because there is
+   no programme to open yet, which is what waiting means. */
+.calitem.wait{border-left:3px dashed var(--wait);background:var(--wait-soft);
+  color:var(--wait-fg);cursor:default}
+.calitem.wait:hover{background:var(--wait-soft)}
 .calitem:hover{background:var(--hover)}
 .calitem span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .calmore{font-size:11px;color:var(--dim);padding-left:5px}
+/* The band under the grid, for expectations that name a month or a year but no
+   day. They cannot go in a cell without inventing a broadcast date, and they
+   must not vanish, so they sit below the month they belong to. */
+.calwait{margin-top:12px;padding:10px 12px;border:1px dashed var(--wait-bd);
+  border-radius:8px;background:var(--wait-soft)}
+.calwait h3{margin:0 0 2px;font-size:13px;color:var(--wait-fg);font-weight:600}
+.calwait .sub{margin:0 0 8px}
+.calwaitrow{display:flex;align-items:baseline;gap:8px;font-size:12px;padding:2px 0}
+.calwaitrow b{font-weight:600}
+.calwaitrow .cwwhen{color:var(--dim);font-size:11px;white-space:nowrap}
 
 /* ---- passes ---- */
 .passrow{display:flex;align-items:center;gap:12px;padding:12px;cursor:pointer;

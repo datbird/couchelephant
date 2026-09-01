@@ -36,6 +36,7 @@
     <div class="legend" style="margin:0">
       <span><i class="ce"></i> CouchElephant booked it</span>
       <span><i class="plex"></i> Scheduled in Plex</span>
+      <span><i class="wait"></i> Waiting for the guide</span>
     </div>
     <div class="viewsw">
       <button type="button" class="on" data-view="agenda">Agenda</button>
@@ -57,6 +58,17 @@
       <button type="button" id="caltoday">Today</button>
     </div>
     <div class="calgrid" id="calgrid"></div>
+    {# Expectations that name a month or a year but no day. A calendar cell IS a
+       day, so putting them in one would state a broadcast date nobody published
+       — the thing `precision` exists to stop. They belong to the month, so they
+       sit under it. Hidden whenever the month has none. #}
+    <div class="calwait" id="calwait" hidden>
+      <h3>Waiting for the guide</h3>
+      <div class="sub">Announced for this month, but no date yet. Nothing here is
+        booked. Each one becomes a real recording the moment Plex Guide data
+        carries an airing for it.</div>
+      <div id="calwaitlist"></div>
+    </div>
   </div>
 </div>
 
@@ -158,6 +170,24 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   var grid = document.getElementById('calgrid'), label = document.getElementById('calmonth');
   var cur = new Date(); cur.setDate(1); cur.setHours(0, 0, 0, 0);
 
+  var waitBox = document.getElementById('calwait');
+  var waitList = document.getElementById('calwaitlist');
+
+  function drawLoose(rows) {
+    // `e.when` comes from the server, which formatted it against `precision`.
+    // Formatting it here would mean re-deciding how much of the date is real,
+    // in the one place that has no way to know.
+    if (!waitBox || !waitList) return;
+    if (!rows.length) { waitBox.hidden = true; waitList.innerHTML = ''; return; }
+    waitList.innerHTML = rows.map(function (e) {
+      return '<div class="calwaitrow" data-cal-loose="' +
+             esc(e.source_id || '') + '"><b>' + esc(e.title || '') + '</b>' +
+             (e.network ? '<span class="cwwhen">' + esc(e.network) + '</span>' : '') +
+             '<span class="cwwhen">' + esc(e.when || '') + '</span></div>';
+    }).join('');
+    waitBox.hidden = false;
+  }
+
   function drawMonth() {
     var first = new Date(cur.getFullYear(), cur.getMonth(), 1);
     // Back up to the start of the viewer's week, which is not always Sunday.
@@ -167,16 +197,44 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
     var end = new Date(start); end.setDate(start.getDate() + 42);
     label.textContent = first.toLocaleDateString(undefined, {month: 'long', year: 'numeric'});
     grid.innerHTML = '<div class="agend" style="grid-column:1/-1">Loading...</div>';
-    fetch('/api/schedule?limit=1000&start=' + Math.floor(start.getTime() / 1000) +
-          '&end=' + Math.floor(end.getTime() / 1000))
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
+    // Bookings AND the things we are still waiting for. A month holding three
+    // announced games and no bookings used to draw as an empty month, which is
+    // the opposite of what the plan card was telling you two panes up.
+    Promise.all([
+      fetch('/api/schedule?limit=1000&start=' + Math.floor(start.getTime() / 1000) +
+            '&end=' + Math.floor(end.getTime() / 1000))
+        .then(function (r) { return r.json(); }),
+      // Not range-filtered: `waiting()` is the short list of what every enabled
+      // pass still owes, and it has to be re-bucketed per month anyway.
+      fetch('/api/expectations').then(function (r) { return r.json(); })
+        .catch(function () { return {rows: []}; })
+    ])
+      .then(function (both) {
+        var d = both[0], exp = both[1];
         var byDay = {};
         (d.rows || []).forEach(function (r) {
           if (!r.b) return;
           var k = new Date(r.b * 1000).toDateString();
           (byDay[k] = byDay[k] || []).push(r);
         });
+        // PRECISION DECIDES WHERE IT GOES, and this is the whole honesty of the
+        // feature. A kickoff (time) or an announced date (day) names a day, so
+        // it can sit in that day. A month or a year does not name one, and a
+        // cell would invent it. Anything undated is on the plan card already.
+        var loose = [];
+        (exp.rows || []).forEach(function (e) {
+          if (!e.expected_at) return;
+          var when = new Date(e.expected_at * 1000);
+          if (e.precision === 'time' || e.precision === 'day') {
+            var k = when.toDateString();
+            (byDay[k] = byDay[k] || []).push({exp: e, b: e.expected_at,
+                                              title: e.title});
+          } else if (when.getFullYear() === cur.getFullYear() &&
+                     (e.precision === 'year' || when.getMonth() === cur.getMonth())) {
+            loose.push(e);
+          }
+        });
+        drawLoose(loose);
         var h = '';
         CE.dayNames('short').forEach(function (n) {
           h += '<div class="caldow">' + n + '</div>';
@@ -189,6 +247,18 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
                     (day.toDateString() === today ? ' today' : '');
           h += '<div class="' + cls + '"><div class="cald">' + day.getDate() + '</div>';
           items.slice(0, 3).forEach(function (r) {
+            if (r.exp) {
+              // No data-aid: there is no airing to open yet, and the grid's
+              // click handler keys off that attribute. Its own `when` string is
+              // the tooltip, because the server rendered it at the right
+              // precision and the browser must not re-guess one.
+              h += '<div class="calitem wait" data-cal-expectation="' +
+                   esc(r.exp.source_id || '') + '" title="' +
+                   esc(r.title + '  (waiting for the guide: ' +
+                       (r.exp.when || '') + ')') + '">' +
+                   '<span>' + esc(r.title) + '</span></div>';
+              return;
+            }
             h += '<div class="calitem' + (r.who === 'ce' ? ' ce' : '') +
                  '" data-aid="' + esc(r.airing_id || '') + '" title="' +
                  esc(fmtTime(r.b) + '  ' + r.title + '  (' + r.reason + ')') + '">' +

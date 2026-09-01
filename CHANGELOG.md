@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.4 - 2026-09-01
+
+### Added
+
+- **The calendar draws what you are waiting for, not just what is booked.** A
+  month holding three announced games and no bookings used to render as an empty
+  month, which is the opposite of what the "Waiting for the guide" card was
+  saying one pane up. Expectations now appear on the grid in their own colour,
+  dashed, with a third legend entry. Dashed is the same "a plan, not a booking"
+  language the card already uses, so the difference survives a colour-blind
+  reader and a greyscale print.
+
+- **Where one goes is decided by its precision, and that is the honest part.** A
+  league gives a kickoff and an announcement often gives only a month. A calendar
+  cell IS a day, so putting a month-precision entry in one states a broadcast
+  date nobody published. So: time and day precision sit in their day; month and
+  year precision sit in a band under the grid, for the month they belong to;
+  anything with no date at all stays on the card above, where it already was.
+  Nothing invents a day it was not given.
+
 ## 1.0.3 - 2026-08-31
 
 ### Changed
