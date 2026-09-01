@@ -145,6 +145,16 @@ CREATE TABLE IF NOT EXISTS passes (
     -- change and the free tier is rate limited.
     sportsdb_team_id   TEXT,
     sportsdb_league_id TEXT,
+    -- When this pass was last asked about, whatever came back. Dated here and
+    -- not inferred from the rows, because an attempt that found nothing
+    -- produces no rows and would otherwise repeat on every single sync.
+    sportsdb_asked_at  INTEGER,
+    -- The name that was resolved, so a pass renamed under us is looked up
+    -- again instead of keeping another team's ids.
+    sportsdb_asked_for TEXT,
+    -- Whether there was a key at the time. Adding one should show the season
+    -- now rather than tomorrow.
+    sportsdb_asked_with TEXT,
     created_at   INTEGER
 );
 
@@ -349,6 +359,9 @@ MIGRATIONS = [
     # Where this team sits at TheSportsDB. Resolved once from the name.
     ("passes", "sportsdb_team_id", "TEXT"),
     ("passes", "sportsdb_league_id", "TEXT"),
+    ("passes", "sportsdb_asked_at", "INTEGER"),
+    ("passes", "sportsdb_asked_for", "TEXT"),
+    ("passes", "sportsdb_asked_with", "TEXT"),
     ("teams", "in_guide", "INTEGER DEFAULT 0"),
     ("teams", "last_seen", "INTEGER"),
     # A pass's `id` is an autoincrement, which means a different number on

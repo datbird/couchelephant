@@ -303,3 +303,76 @@ def test_a_disabled_pass_is_not_filled(sportsdb):
         c.execute("UPDATE passes SET enabled = 0 WHERE id = ?", (pass_id,))
     expectations.fill_team_passes(now=1)
     assert expectations.waiting(pass_id) == []
+
+
+def test_a_team_nobody_recognises_is_not_asked_about_again_all_day(sportsdb):
+    """The hole this closes: with no games stored there was nothing to date
+    the attempt by, so an unknown team was looked up on EVERY sync. On a rate
+    limited free tier that is the worst thing this could do."""
+    _team_pass("Not A Real Team")
+    expectations.fill_team_passes(now=1)
+    asked = db.one("SELECT sportsdb_asked_at FROM passes")["sportsdb_asked_at"]
+    assert asked == 1
+    expectations.fill_team_passes(now=2)
+    assert db.one("SELECT sportsdb_asked_at FROM passes")["sportsdb_asked_at"] == 1
+
+
+def test_a_team_that_returns_no_games_is_not_asked_about_again_all_day(sportsdb):
+    """Same hole, one step later. Out of season a real team answers nothing."""
+    from app.sources import thesportsdb
+    _team_pass()
+    expectations.fill_team_passes(now=1)
+    with db.tx() as c:
+        c.execute("DELETE FROM expectations")
+        c.execute("UPDATE passes SET sportsdb_asked_at = 1")
+    calls = []
+    real = thesportsdb.upcoming
+
+    def counted(*a, **kw):
+        calls.append(1)
+        return real(*a, **kw)
+
+    thesportsdb.upcoming = counted
+    try:
+        expectations.fill_team_passes(now=2)
+    finally:
+        thesportsdb.upcoming = real
+    assert calls == []
+
+
+def test_renaming_the_team_resolves_it_again(sportsdb):
+    """`resolve_team_passes` adopts Plex's own spelling, so a pass can be
+    renamed under us. Keeping the old ids would fill it with another team."""
+    pass_id = _team_pass()
+    expectations.fill_team_passes(now=1)
+    with db.tx() as c:
+        c.execute("UPDATE passes SET team_name = 'Not A Real Team' WHERE id = ?",
+                  (pass_id,))
+    expectations.fill_team_passes(now=2)
+    row = db.one("SELECT sportsdb_team_id, sportsdb_asked_for FROM passes "
+                 "WHERE id = ?", (pass_id,))
+    assert row["sportsdb_asked_for"] == "Not A Real Team"
+    assert row["sportsdb_team_id"] is None
+
+
+def test_adding_a_key_refills_at_once_rather_than_tomorrow(sportsdb):
+    """Somebody who pays for a season should see it now, not in a day."""
+    pass_id = _team_pass()
+    expectations.fill_team_passes(now=1)
+    assert len(expectations.waiting(pass_id)) == 1
+    db.set_setting("sportsdb_key", "sub-key")
+    expectations.fill_team_passes(now=2)
+    assert len(expectations.waiting(pass_id)) > 1
+
+
+def test_removing_a_key_also_counts_as_a_change(sportsdb):
+    pass_id = _team_pass()
+    db.set_setting("sportsdb_key", "sub-key")
+    expectations.fill_team_passes(now=1)
+    with_key = db.one("SELECT sportsdb_asked_with FROM passes "
+                      "WHERE id = ?", (pass_id,))["sportsdb_asked_with"]
+    db.set_setting("sportsdb_key", "")
+    expectations.fill_team_passes(now=2)
+    without = db.one("SELECT sportsdb_asked_with FROM passes "
+                     "WHERE id = ?", (pass_id,))["sportsdb_asked_with"]
+    assert with_key != without
