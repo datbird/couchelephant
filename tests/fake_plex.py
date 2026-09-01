@@ -46,8 +46,24 @@ CHANNELS = {
 # from it, which keeps assertions exact without pinning them to a date.
 #
 # It is computed once, at import, so one run sees one guide.
+#
+# A FULL HOUR OF SLACK, NOT THE NEXT HALF HOUR. This used to round up to the
+# next 1800-second boundary, which gives the suite anywhere between thirty
+# minutes and nothing at all: start a run at :29:50 and the live game has
+# already kicked off by the time the tests reach it. Every check that reads a
+# FUTURE booking then finds no rows, silently, and reports zero of everything.
+#
+# It cost a release. On 2026-09-01 the publish job for v1.0.5 failed on
+# `test_a_full_sync_runs_the_check` at 15:30:07 against an anchor of 15:30:00,
+# while CI on the identical commit passed minutes earlier. A test that depends
+# on which side of the half hour you push is not a test.
+#
+# Rounding up and adding an hour gives between 30 and 60 minutes of runway for
+# a suite that takes about three. It stays well inside `verify.repair_lead`
+# (two hours), so a repair is still refused for the live game and the tests
+# that reach the repair path still have to move it themselves.
 LIVE_AT = int(os.environ.get("COUCHELEPHANT_FAKE_ANCHOR")
-              or (int(time.time()) // 1800) * 1800 + 1800)
+              or (int(time.time()) // 1800) * 1800 + 3600)
 REPEAT_AT = LIVE_AT + 2 * 86400
 EPISODE_AT = LIVE_AT + 3600
 DRM_AT = LIVE_AT + 7200
