@@ -16,9 +16,16 @@ WHEN_UNKNOWN = "date not announced"
 # What each precision is allowed to show. Anything more is invented. A source
 # that said "2027-03" did not say the first of March at midnight, and a reader
 # takes an invented date for a real one.
+# Written the way `routes/_shared.fmt` writes every other time in the product:
+# 24 hour, day before month. CouchElephant is run worldwide, and a plan showing
+# "7:15 PM" on Sep 14 would be the only US formatted date anywhere in it.
+#
+# The month and day NAMES are still English, because Python formats them in the
+# C locale. That is true of every date in the app, not just these, so it is a
+# product-wide job rather than something to solve here.
 _FORMATS = {
-    "time": "%a %b %-d, %Y at %-I:%M %p",
-    "day": "%a %b %-d, %Y",
+    "time": "%a %d %b %Y, %H:%M",
+    "day": "%a %d %b %Y",
     "month": "%B %Y",
     "year": "%Y",
 }
@@ -84,12 +91,7 @@ def render_when(expected_at: int | None, precision: str, tz: str) -> str:
     except Exception:
         # A bad timezone setting must not take the page down with it.
         zone = zoneinfo.ZoneInfo("UTC")
-    when = datetime.datetime.fromtimestamp(expected_at, zone)
-    try:
-        return when.strftime(fmt)
-    except ValueError:
-        # Some libc builds reject the %-d dash-padding form.
-        return when.strftime(fmt.replace("%-", "%"))
+    return datetime.datetime.fromtimestamp(expected_at, zone).strftime(fmt)
 
 
 # How far either side of an expected date a guide airing may sit and still be

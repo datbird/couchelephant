@@ -5,6 +5,7 @@ delete it: Cyrillic, Greek, Japanese, Hebrew and Arabic all came out empty. An
 empty key is not a miss, it is a key, so every team written in one of those
 scripts became the same team as every other.
 """
+import re
 import time
 
 from app import db, passes, sync, teamcat
@@ -142,3 +143,68 @@ def test_a_dakuten_is_not_an_accent(clean_db):
     assert teamcat.ident("San José State") == teamcat.ident("San Jose State")
     assert teamcat.ident("Beşiktaş") == teamcat.ident("Besiktas")
     assert teamcat.ident("FC Bayern München") == teamcat.ident("FC Bayern Munchen")
+
+
+# ---- what a not-yet-scheduled thing looks like outside the United States ----
+
+def test_a_non_latin_team_expectation_promotes(clean_db):
+    """`promote` matches a team through `tident`, the same fold the pass engine
+    uses. If it ever regressed to a Latin-only fold, every team written in
+    Cyrillic, Greek, Japanese, Hebrew or Arabic would match every other one."""
+    from app import expectations
+    for n, name in enumerate(NON_LATIN):
+        guid, aid, pid = f"plex://x/i{n}", f"a-i{n}", 500 + n
+        with db.tx() as c:
+            c.execute("INSERT INTO passes (id, kind, team_name, uid, enabled, "
+                      "created_at) VALUES (?, 'team', ?, ?, 1, 1)",
+                      (pid, name, f"uid-i{n}"))
+            c.execute("INSERT INTO programs (guid, title, grandparent_title, "
+                      "section, teams) VALUES (?,?,'Football','sports',?)",
+                      (guid, f"{name} at Somebody", db.js([{"id": 900 + n,
+                                                            "name": name}])))
+            c.execute("INSERT INTO airings (id, program_guid, begins_at, "
+                      "channel_vcn) VALUES (?,?,?,'9.1')",
+                      (aid, guid, 1804204800 + 1800))
+            c.execute("INSERT INTO expectations (pass_id, source, source_id, "
+                      "title, expected_at, precision, updated_at) "
+                      "VALUES (?, 'thesportsdb', ?, ?, 1804204800, 'time', 1)",
+                      (pid, f"i{n}", name))
+    assert expectations.promote(now=1804204800) == len(NON_LATIN)
+
+
+def test_one_non_latin_team_does_not_match_another(clean_db):
+    """The bug that started this file: an empty key is not a miss, it is a key,
+    so every team folding to it became the same team."""
+    from app import expectations
+    with db.tx() as c:
+        c.execute("INSERT INTO passes (id, kind, team_name, uid, enabled, "
+                  "created_at) VALUES (600, 'team', 'Зенит', 'uid-z', 1, 1)")
+        c.execute("INSERT INTO programs (guid, title, grandparent_title, "
+                  "section, teams) VALUES ('plex://x/j1', 'x', 'Football', "
+                  "'sports', ?)", (db.js([{"id": 1, "name": "阪神タイガース"}]),))
+        c.execute("INSERT INTO airings (id, program_guid, begins_at, "
+                  "channel_vcn) VALUES ('a-j1','plex://x/j1',?, '9.1')",
+                  (1804204800 + 1800,))
+        c.execute("INSERT INTO expectations (pass_id, source, source_id, title, "
+                  "expected_at, precision, updated_at) "
+                  "VALUES (600, 'thesportsdb', 'j1', 'Зенит', 1804204800, "
+                  "'time', 1)")
+    assert expectations.promote(now=1804204800) == 0
+
+
+def test_a_date_is_written_the_way_the_rest_of_the_app_writes_one(clean_db):
+    """The app formats every other time as `%a %d %b, %H:%M`: 24 hour, day
+    before month. A plan showing "7:15 PM" on Sep 14 would be the only US
+    formatted date in the product, in an app people run worldwide."""
+    from app import expectations
+    when = expectations.render_when(1804204800, "time", "UTC")
+    assert "AM" not in when and "PM" not in when
+    # Weekday, then a two digit DAY, then the month: the shape `fmt` produces.
+    # Asserted as a shape rather than a literal, so it holds for any date.
+    assert re.match(r"^\w{3} \d{2} \w{3} \d{4}, \d{2}:\d{2}$", when), when
+
+
+def test_a_month_precision_date_carries_no_time_in_any_locale(clean_db):
+    from app import expectations
+    when = expectations.render_when(1804204800, "month", "UTC")
+    assert ":" not in when
