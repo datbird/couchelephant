@@ -155,6 +155,11 @@ CREATE TABLE IF NOT EXISTS passes (
     -- Whether there was a key at the time. Adding one should show the season
     -- now rather than tomorrow.
     sportsdb_asked_with TEXT,
+    -- The same three facts for a SERIES pass at TVmaze. No key column, because
+    -- TVmaze needs no key, so nothing about the answer can change with one.
+    tvmaze_show_id  TEXT,
+    tvmaze_asked_at INTEGER,
+    tvmaze_asked_for TEXT,
     created_at   INTEGER
 );
 
@@ -362,6 +367,12 @@ MIGRATIONS = [
     ("passes", "sportsdb_asked_at", "INTEGER"),
     ("passes", "sportsdb_asked_for", "TEXT"),
     ("passes", "sportsdb_asked_with", "TEXT"),
+    # Where this show sits at TVmaze, and when it was last asked about. A
+    # series pass used to get its expectations once, at creation, and never
+    # again, so it never learned about an episode announced later.
+    ("passes", "tvmaze_show_id", "TEXT"),
+    ("passes", "tvmaze_asked_at", "INTEGER"),
+    ("passes", "tvmaze_asked_for", "TEXT"),
     ("teams", "in_guide", "INTEGER DEFAULT 0"),
     ("teams", "last_seen", "INTEGER"),
     # A pass's `id` is an autoincrement, which means a different number on

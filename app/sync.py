@@ -823,6 +823,11 @@ def _sync_everything(plex):
     # search, so nothing else would ever reach the sports source. Filling here
     # covers a pass made today and one made months ago alike.
     expectations.fill_team_passes(now=_now())
+    # And the series half. A series pass used to be given its expectations once,
+    # at creation, so a followed show never learned about an episode announced
+    # afterwards. Both fills run before `promote`, so anything the guide has
+    # since reached is bound on this sync rather than the next one.
+    expectations.fill_series_passes(now=_now())
     promoted = expectations.promote(now=_now())
     # Judged against how far the guide actually reaches, not against today.
     # Before the guide gets there, silence means a short guide and not a

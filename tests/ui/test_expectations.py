@@ -48,6 +48,30 @@ def test_a_month_is_drawn_as_a_month(waiting):
     assert "00:00" not in text
 
 
+def test_a_whole_season_does_not_become_a_wall_of_rows(page):
+    """Series passes now fill with real episodes, so this card went from one
+    row to twenty-odd. It shows the soonest few and counts the rest. The DATA
+    is not capped: the calendar still draws every one of them."""
+    with db.tx() as c:
+        cur = c.execute("INSERT INTO passes (kind, series_title, uid, enabled, "
+                        "created_at) VALUES ('series', 'Longrun', 'uid-long', "
+                        "1, 1)")
+        for n in range(1, 21):
+            c.execute("INSERT INTO expectations (pass_id, source, source_id, "
+                      "title, subtitle, expected_at, precision, updated_at) "
+                      "VALUES (?, 'tvmaze', ?, 'Longrun', ?, ?, 'day', 1)",
+                      (cur.lastrowid, f"ep-{n}", f"S01E{n:02d}",
+                       WHEN + n * 86400))
+    page.goto("/recordings")
+    page.wait_for_selector("#planmore", timeout=10000)
+    assert page.locator("#planlist .plan").count() == 8
+    assert "12 more are waiting" in page.locator("#planmore").inner_text()
+
+
+def test_the_count_line_stays_away_when_everything_fits(waiting):
+    assert waiting.locator("#planmore").count() == 0
+
+
 def test_the_card_stays_hidden_when_nothing_is_waiting(page):
     page.goto("/recordings")
     page.wait_for_selector("header")

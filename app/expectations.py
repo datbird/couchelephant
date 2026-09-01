@@ -5,6 +5,7 @@ this, and a source outside Plex thinks it happens then". Only a guide airing
 carries a channel, so only a guide airing can be recorded. Nothing in here
 schedules anything.
 """
+import dataclasses
 import datetime
 import time
 import zoneinfo
@@ -221,6 +222,119 @@ def sweep_misses(guide_ends_at: int | None, now: int | None = None) -> list[dict
 # A published season does not change hourly, and the free tier is rate limited.
 # Asking once a day per pass is plenty.
 _REFILL_AFTER = 86400
+
+
+def fill_series_passes(now: int | None = None) -> int:
+    """Give every enabled series pass the episodes TVmaze has dated for it.
+
+    THE GAP THIS CLOSES. A series pass got its expectations exactly once, from
+    the announced search, at the moment it was made. `search` answers one row
+    per SHOW carrying its premiere date, and nothing ever asked again. So a
+    followed show held one row for ever: it never learned about next season,
+    and for a show that had already premiered that one row was a date in the
+    past that could only ever be swept as missed.
+
+    Nothing had to be bought to fix it. TVmaze's episode list is free and
+    unkeyed, exactly like the search that was already being used. This is the
+    series half of `fill_team_passes`, and it follows the same discipline.
+
+    **Knowing when NOT to ask is most of this function**, same as its sports
+    twin: it asks when a pass has never been asked, when a day has gone by, or
+    when the title changed under us so the stored show id belongs to another
+    programme. TVmaze allows roughly 20 calls per 10 seconds per address, so a
+    library of followed shows must not re-ask on every sync.
+
+    The attempt is dated BEFORE the calls. A show with no dated episodes
+    produces no rows, and inferring the attempt from the rows would re-ask on
+    every sync for ever.
+
+    ONLY FUTURE EPISODES ARE KEPT. The source hands back the whole run,
+    hundreds of rows for an old show, and an episode that already aired is not
+    something anyone is waiting for. `promote()` binds the rest as the guide
+    reaches them.
+    """
+    from .sources import tvmaze
+
+    now = int(now if now is not None else time.time())
+    filled = 0
+    rows = db.query(
+        """SELECT id, series_title, tvmaze_show_id, tvmaze_asked_at,
+                  tvmaze_asked_for
+           FROM passes
+           WHERE kind = 'series' AND enabled = 1
+             AND COALESCE(series_title, '') <> ''""")
+    for row in rows:
+        renamed = (row["tvmaze_asked_for"] or "") != row["series_title"]
+        fresh = bool(row["tvmaze_asked_at"]
+                     and now - row["tvmaze_asked_at"] < _REFILL_AFTER)
+        if fresh and not renamed:
+            continue
+
+        # A rename invalidates the id the same way it does for a team.
+        show_id = None if renamed else row["tvmaze_show_id"]
+        if not show_id:
+            # The pass may already carry the answer. `_follow` stored the show's
+            # own announcement against this pass, and its source_id IS the
+            # TVmaze show id, so a pass made through the announced search needs
+            # no lookup at all. Episode rows are prefixed, so they cannot be
+            # mistaken for the show.
+            found = db.one(
+                "SELECT source_id FROM expectations WHERE pass_id = ? "
+                "AND source = 'tvmaze' AND source_id NOT LIKE 'ep-%' LIMIT 1",
+                (row["id"],))
+            show_id = found["source_id"] if found else None
+
+        with db.tx() as c:
+            c.execute("""UPDATE passes SET tvmaze_asked_at = ?,
+                             tvmaze_asked_for = ?, tvmaze_show_id = ?
+                         WHERE id = ?""",
+                      (now, row["series_title"], show_id, row["id"]))
+
+        if not show_id:
+            # A pass made from the guide rather than the announced search has
+            # no id yet. Resolved by EXACT title only: a near match would fill
+            # the pass with another programme's episodes, which is the same
+            # refusal `thesportsdb.team` makes for an unknown team name.
+            try:
+                hits = tvmaze.search(row["series_title"])
+            except Exception:                       # noqa: BLE001 — retried tomorrow
+                continue
+            wanted = (row["series_title"] or "").strip().casefold()
+            exact = [h for h in hits if (h.title or "").strip().casefold() == wanted]
+            if len(exact) != 1:
+                continue                            # nothing, or nothing decidable
+            show_id = exact[0].source_id
+            with db.tx() as c:
+                c.execute("UPDATE passes SET tvmaze_show_id = ? WHERE id = ?",
+                          (show_id, row["id"]))
+
+        try:
+            found = tvmaze.episodes(show_id)
+        except Exception:                           # noqa: BLE001 — retried tomorrow
+            continue
+        # The source leaves the title empty because it only knows the episode.
+        # The pass knows the programme, so it is named here.
+        ahead = [
+            dataclasses.replace(e, title=row["series_title"])
+            for e in found if e.expected_at and e.expected_at > now
+        ]
+        if ahead:
+            store(row["id"], ahead, now=now)
+            # THE SHOW ROW IS SUPERSEDED, so drop it. `_follow` stored one row
+            # for the programme itself, dated at its PREMIERE. For a show that
+            # already premiered that date is in the past, and its only future
+            # was to be reported missing for ever by `sweep_misses`. Real dated
+            # episodes from the same source say strictly more.
+            #
+            # Only when episodes actually arrived, and never one already bound
+            # to an airing: an unannounced show has no episodes yet, and there
+            # its premiere row is the whole signal.
+            with db.tx() as c:
+                c.execute("DELETE FROM expectations WHERE pass_id = ? "
+                          "AND source = 'tvmaze' AND source_id NOT LIKE 'ep-%' "
+                          "AND matched_guid IS NULL", (row["id"],))
+            filled += 1
+    return filled
 
 
 def fill_team_passes(now: int | None = None) -> int:

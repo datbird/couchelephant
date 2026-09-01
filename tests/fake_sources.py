@@ -57,6 +57,26 @@ SPORTSDB_NEXT = [
      "dateEvent": "2027-01-10", "strTime": "20:15:00", "strTVStation": None},
 ]
 
+# Episodes, the half the app never asked for. Free and unkeyed, same as the
+# search. `airstamp` is an ISO instant WITH A ZONE, which is what earns an
+# episode `time` precision; the one with only `airdate` must come back as
+# `day`, and the one with neither must be dropped rather than dated by a guess.
+TVMAZE_EPISODES = {
+    "99999": [
+        {"id": 700001, "season": 1, "number": 1, "name": "Pilot",
+         "airdate": "2027-03-04", "airtime": "01:00",
+         "airstamp": "2027-03-04T01:00:00+00:00"},
+        {"id": 700002, "season": 1, "number": 2, "name": "The Second One",
+         "airdate": "2027-03-11", "airtime": "", "airstamp": None},
+        {"id": 700003, "season": 1, "number": 3, "name": "Undated",
+         "airdate": None, "airtime": None, "airstamp": None},
+        # Already aired. Nobody is waiting for it, so the fill must drop it.
+        {"id": 700000, "season": 0, "number": 1, "name": "Old Special",
+         "airdate": "2020-01-01", "airtime": "01:00",
+         "airstamp": "2020-01-01T01:00:00+00:00"},
+    ],
+}
+
 TMDB_HITS = [{"id": 55555, "title": "Quorbis Rising",
               "release_date": "2027-05-21", "overview": ""}]
 
@@ -82,6 +102,8 @@ class _Handler(BaseHTTPRequestHandler):
         term = (params.get("q") or params.get("query") or [""])[0].strip().lower()
         if parts.path == "/search/shows":
             self._send(TVMAZE_HITS.get(term, []))
+        elif parts.path.startswith("/shows/") and parts.path.endswith("/episodes"):
+            self._send(TVMAZE_EPISODES.get(parts.path.split("/")[2], []))
         elif parts.path.endswith("/searchteams.php"):
             name = (params.get("t") or [""])[0].strip().lower()
             self._send({"teams": SPORTSDB_TEAMS.get(name)})

@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.5 - 2026-09-01
+
+### Added
+
+- **A followed show now learns about episodes announced after you followed it.**
+  A series pass got its expectations exactly once, at the moment it was made,
+  from a search that answers one row per SHOW carrying its premiere date.
+  Nothing ever asked again. So a followed show held a single row for ever: it
+  never heard about next season, and for a show already on air that row was a
+  date in the past whose only future was to be reported missing.
+
+  `fill_series_passes` runs every sync and asks TVmaze for the show's episodes.
+  Nothing had to be bought. That endpoint is free and needs no key, exactly like
+  the search already in use. Only future episodes are kept, since an episode
+  that already aired is not something anyone is waiting for.
+
+  It keeps the same three disciplines as the sports fill: ask at most once a
+  day, because TVmaze allows about 20 calls per 10 seconds; date the attempt
+  before the call, or a show with no dated episodes is re-asked for ever; and
+  refuse an uncertain identity rather than fill a pass with another programme's
+  episodes. A pass made through the announced search already stored its show id
+  and needs no lookup at all.
+
+  The premiere row gives way once real episodes arrive, so an already-aired
+  premiere date stops being reported as missing. It survives untouched for a
+  show that has no dated episodes yet, where it is the whole signal.
+
+- **An episode keeps the broadcast time the source published.** `airstamp` is an
+  ISO instant with a zone, which none of the date formats matched, so every
+  episode used to lose its time. A bare `airdate` still reads as a day, and an
+  episode with neither is dropped rather than dated by guesswork.
+
+### Changed
+
+- The "Waiting for the guide" card shows the soonest eight and counts the rest.
+  A season at a time would otherwise turn the top of the page into a wall. The
+  data is not capped anywhere: everything is stored, everything is promoted, and
+  the calendar still draws all of it month by month.
+
 ## 1.0.4 - 2026-09-01
 
 ### Added

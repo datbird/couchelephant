@@ -56,6 +56,23 @@ def precision_of(text: str | None) -> tuple[int | None, str]:
     text = (text or "").strip()
     if not text:
         return None, "year"
+    # An ISO instant WITH A ZONE, which is what TVmaze publishes per episode
+    # (`airstamp`, "2027-03-04T01:00:00+00:00"). None of the formats below
+    # match one, so before this it fell through to "no date at all" and every
+    # episode lost its broadcast time.
+    #
+    # Narrowly gated on purpose. `fromisoformat` also happily parses a bare
+    # "2027-03-04" and would hand it back as midnight at `time` precision,
+    # which is the invented-time bug this whole function exists to prevent. So
+    # it is only tried when the string carries BOTH a time and a zone.
+    if "T" in text and (text.endswith("Z") or "+" in text[10:]
+                        or "-" in text[11:]):
+        try:
+            parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.tzinfo is not None:
+            return int(parsed.timestamp()), "time"
     for fmt, how in _FORMATS:
         try:
             parsed = datetime.datetime.strptime(text, fmt)

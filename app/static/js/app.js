@@ -1051,7 +1051,15 @@ window.wireSettings = function (root) {
     .then(function (body) {
       var rows = (body && body.rows) || [];
       if (!rows.length) return;
-      rows.forEach(function (e) {
+      // A season at a time now, not one premiere. Before series passes were
+      // filled with real episodes this card held a row or two; a followed show
+      // can hand it twenty-odd, and several shows turn the top of the page
+      // into a wall. So the card shows the soonest few and counts the rest.
+      // The DATA is not capped anywhere: everything is stored, everything is
+      // promoted, and the calendar draws the lot month by month.
+      var SHOWN = 8;
+      var extra = rows.length - SHOWN;
+      rows.slice(0, SHOWN).forEach(function (e) {
         var el = document.createElement('div');
         el.className = 'plan';
         el.setAttribute('data-expectation', e.source_id);
@@ -1070,6 +1078,14 @@ window.wireSettings = function (root) {
         el.querySelector('.plan-src').textContent = e.source;
         list.appendChild(el);
       });
+      if (extra > 0) {
+        var more = document.createElement('div');
+        more.className = 'plan-more';
+        more.id = 'planmore';
+        more.textContent = extra + (extra === 1 ? ' more is' : ' more are') +
+          ' waiting. The calendar shows them by month.';
+        list.appendChild(more);
+      }
       card.hidden = false;
     })
     .catch(function () { /* the page is still useful without this card */ });
