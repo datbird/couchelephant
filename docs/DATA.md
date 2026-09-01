@@ -144,6 +144,25 @@ which is what proves the shadow was rewritten.
 4. **The guide is never copied.** It is an output. A restore that resurrected a
    stale programme would be worse than one that left it empty.
 
+## Things a pass is still waiting for
+
+`expectations` holds what a pass wants that the guide has not reached: a series
+announced for next spring, a team's published season. Each row carries a
+`precision` of `time`, `day`, `month` or `year`, which says how much of its date
+is real. A league publishes a kickoff. An announcement often gives only a month,
+and showing that as a midnight would be a broadcast time nobody published.
+
+They are deliberately not rows in `programs` and `airings`. Those are read by
+every query in the app, and invented rows in them would mean auditing all of
+those queries, forever, for a flag they could forget.
+
+A row is tied to its pass. Delete or disable the pass and its plans stop
+showing and stop being reported missing, because they belong to something
+nobody follows any more.
+
+Rebuilt rather than exported. The sources are asked again on the next sync, the
+same way the guide rebuilds from Plex.
+
 ## What is not covered
 
 Recordings themselves. Those are files in your Plex library, and Plex owns

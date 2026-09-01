@@ -43,6 +43,14 @@ It also does several things Plex cannot say at all:
   follow one programme or one team and cannot be given conditions at all.
 - **Always take the live broadcast**, for every game a team plays, without you
   looking at the guide.
+- **Follow something the guide has not heard of yet.** Plex's guide reaches
+  about twelve days ahead, and no guide source anywhere reaches much further,
+  paid ones included, because no broadcaster has decided that far out. So a
+  series announced for next spring, or the rest of your team's season, cannot
+  be followed at all: there is no row to match. CouchElephant holds the
+  intention instead. It shows what it is waiting for, and the moment Plex's
+  guide carries a real airing it becomes an ordinary recording. Nothing outside
+  the guide ever books anything, because only the guide knows the channel.
 - **Tell you when Plex stops keeping its own guide up to date.** When that
   happens nothing breaks: passes keep running, syncs keep succeeding, and the
   guide gets a day shorter every day until what you wanted is past the end of
@@ -91,6 +99,15 @@ too, in the other colour.
 
 ![Passes](docs/images/passes.png)
 
+### Waiting for the guide
+
+A pass can follow something the guide has not reached. Those show as plans
+rather than bookings, with the date at exactly the precision the source gave
+it: a kickoff if the league published one, only a month if that is all anyone
+has announced. None of them are booked. Each becomes a real recording the
+moment Plex carries an airing for it, and if the guide runs past the date with
+no match, you are told which one.
+
 ### Adding a schedule
 
 Follow a team, a programme, or a set of conditions. Leave the source limit
@@ -124,6 +141,12 @@ the condition clears, and cannot be dismissed.
 
 Sections down the left, sub-tabs inside each, and a search that reads all of
 them.
+
+Under Plex there is a **Sources** tab for looking past the end of the guide.
+TVmaze covers announced series and needs no key and no account, so that works
+out of the box. Two optional free keys widen it: TheSportsDB for a team's
+published season, and TMDB for films. Neither is required, and you are only
+told about one if it would add something to what you already follow.
 
 | Plex | Accounts | Channel artwork |
 | --- | --- | --- |

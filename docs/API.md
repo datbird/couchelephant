@@ -46,6 +46,27 @@ export/import. See [AUTH.md](AUTH.md).
 | `POST /api/plexrule/{key}/delete` | Remove one of Plex's own rules |
 | `POST /passes/{id}/toggle` | Pause or resume a pass |
 | `POST /passes/{id}/delete` | Remove a pass |
+
+## Past the end of the guide
+
+Plex's guide reaches about twelve days. These cover the things it has not
+reached, which are held as intentions and never booked: only a guide airing
+carries a channel.
+
+| | |
+| --- | --- |
+| `GET /api/announced?q=` | Series and films the outside sources know about, whether or not the guide has them. A separate request from `/api/series` on purpose, so a slow third party can never slow the guide search down. A source that fails is skipped rather than failing the lot |
+| `POST /api/announced/follow` | Follow one of them. `source`, `source_id`, `title`. Creates an ordinary pass, so nothing special has to happen when the guide finally carries it. Following the same thing twice reuses the pass |
+| `GET /api/expectations` | What every pass is still waiting for, with `when` already rendered. Rendered on the server because `precision` decides the format, and a client left to guess would show a time nobody published |
+
+A team is never followed through here. The team picker makes that pass, and the
+sync fills in its games.
+
+## Notices
+
+| | |
+| --- | --- |
+| `POST /api/notices/{code}/dismiss` | Wave off a suggestion. **Refuses any severity but `tip`.** A health problem is answered by fixing it, not by clicking it away |
 | `POST /passes/run` | Run every pass now |
 
 ## Pages

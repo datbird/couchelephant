@@ -221,3 +221,68 @@ Before booking, a pass checks whether the game is covered. It skips when:
 
 That is why an entry can read `already scheduled by a pass` rather than
 `will schedule`.
+
+## Following something the guide has not reached
+
+Plex's guide reaches about twelve days ahead. **No guide source anywhere
+reaches much further.** Schedules Direct is the licensed Gracenote reseller and
+accepts a request for at most 21 days; free XMLTV feeds do 7 to 14. This is not
+a licensing problem to spend money on: in August no broadcaster has decided
+what airs next March, so there is nothing to sell.
+
+So a pass for a series announced for next spring, or for the rest of a team's
+season, has no guide row to match. CouchElephant holds the intention instead.
+
+**Nothing outside the guide ever books a recording.** Only a guide airing
+carries a channel, so only a guide airing can be recorded.
+
+### Where the dates come from
+
+| Source | Covers | Key |
+| --- | --- | --- |
+| TVmaze | announced series, premiere dates, networks | none, ever |
+| TheSportsDB | a team's published season | **needed for a season.** Without one it answers a single upcoming game per team |
+| TMDB | films and release dates | a free key you register |
+
+TVmaze needs no key and no account, so following a series works the moment the
+container starts. The other two are optional and you are only told about one if
+it would add something to what you already follow.
+
+The ESPN public JSON was tested and rejected. It returns a full season, free
+and keyless, but it answers a plain client and refuses a browser user agent.
+Using it would mean deliberately not looking like a browser, which is someone
+else's bot protection, and it would break one day without warning.
+
+### Precision, and why it matters
+
+Every date carries a precision of `time`, `day`, `month` or `year`, and is
+never shown at more than that. A league publishes a kickoff, so you see a
+kickoff. An announcement often gives only a month, so you see a month. Showing
+"March 2027" as the first of March at midnight would put a broadcast time on
+the screen that nobody published, and you would plan around it.
+
+### Becoming a real recording
+
+Every sync looks for each waiting item in the guide, inside a window that
+matches its precision. A published kickoff must land within a day of what the
+league said. A month-precision guess is a whole month wide. Without the window
+a title that repeats next season would bind to an intention made this one.
+
+Sport and everything else are matched differently, because the guide describes
+them differently. A game is titled by its matchup, "Kansas City Chiefs at
+Denver Broncos", with the league in `grandparent_title`, and the teams in a
+JSON array on the programme. That array is what a team is matched against,
+using the same fold the pass engine already uses to decide what to record.
+
+A match promotes the item. From that moment the pass behaves like any other
+pass and books through the path that already existed.
+
+### When it never arrives
+
+If the guide reaches past the date and nothing matched, you are told which one.
+That is judged against how far the guide actually reaches, not against today:
+before the guide gets there, silence means a short guide rather than a missing
+show.
+
+A miss is a warning and never a deletion. A show can slip a week, so the
+intention is kept and it goes on looking.
