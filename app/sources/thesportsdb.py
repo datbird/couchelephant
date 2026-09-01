@@ -14,6 +14,15 @@ was wrong and shipped that way.
 So this source is honest but thin without a key. TVmaze needs no key and is
 unaffected: following a series works for everyone either way.
 
+**And it was asking for the wrong season, measured live 2026-09-01.** The
+season call sent no `s` parameter at all. That does not mean "the current
+season": the API answers with its EARLIEST, so `eventsseason.php?id=4391`
+returned NFL games from 2007-09-06. The free tier's five-row answer was never
+this year's, and a subscriber key would have bought a season of the wrong
+decade. `current_season()` now reads the league's own `strCurrentSeason`,
+because the format is per league ("2026" for the NFL, "2025-2026" for a
+football league) and cannot be composed from the clock.
+
 `strTime` is missing on a game whose kickoff has not been set. That is a real
 answer and not a gap to paper over, so it lands as day precision. Inventing
 midnight would put a time on the screen that nobody published.
@@ -38,14 +47,54 @@ def season(team_name: str, league_id: str, key: str = "",
     league_id = (league_id or "").strip()
     if not league_id:
         return []
+    # WHICH SEASON. Asking without `s` does not mean "the current one": the API
+    # answers with its EARLIEST, which for the NFL is 2007. Measured live on
+    # 2026-09-01, `eventsseason.php?id=4391` came back with games from
+    # 2007-09-06. So a subscriber key would have bought a season of the wrong
+    # decade, and the free tier's answer was never this year's either.
+    #
+    # The league names its own, and the format is per league: the NFL says
+    # "2026", a football league says "2025-2026". Reading `strCurrentSeason`
+    # rather than composing one from the clock is what keeps both right.
+    current = current_season(league_id, key=key, base=base)
+    params = {"id": league_id}
+    if current:
+        params["s"] = current
     url = (f"{(base or BASE).rstrip('/')}/api/v1/json/"
            f"{(key or '').strip() or FREE_KEY}/eventsseason.php")
     with httpx.Client(timeout=TIMEOUT) as http:
-        response = http.get(url, params={"id": league_id})
+        response = http.get(url, params=params)
         response.raise_for_status()
         events = (response.json() or {}).get("events") or []
     return _as_announcements(events, want=(team_name or "").strip().casefold(),
                              title=team_name)
+
+
+def current_season(league_id: str, key: str = "",
+                   base: str | None = None) -> str:
+    """What the league itself calls the season on now, or "".
+
+    The season string is not a year and cannot be composed from the clock. The
+    NFL says "2026"; a football league says "2025-2026". `lookupleague.php`
+    states it, is free, and is right for every league without a table of
+    formats here that would drift.
+
+    An empty answer is not guessed at. The caller then asks without a season,
+    which is what it did before this existed.
+    """
+    league_id = (league_id or "").strip()
+    if not league_id:
+        return ""
+    url = (f"{(base or BASE).rstrip('/')}/api/v1/json/"
+           f"{(key or '').strip() or FREE_KEY}/lookupleague.php")
+    try:
+        with httpx.Client(timeout=TIMEOUT) as http:
+            response = http.get(url, params={"id": league_id})
+            response.raise_for_status()
+            leagues = (response.json() or {}).get("leagues") or []
+    except Exception:                    # noqa: BLE001 — a miss is not a season
+        return ""
+    return str((leagues[0] if leagues else {}).get("strCurrentSeason") or "").strip()
 
 
 def _as_announcements(events, want=None, title="") -> list[Announcement]:

@@ -22,7 +22,7 @@
 {# Filled from /api/expectations. Hidden until there is something in it, so a
    server with no waiting passes looks exactly as it did before. #}
 <div class="card" id="plancard" hidden>
-  <h2 style="margin:0 0 4px;font-size:15px">Waiting for the guide</h2>
+  <h2 style="margin:0 0 4px;font-size:15px">Waiting for the Plex guide data</h2>
   <div class="sub" style="margin-bottom:10px">
     Announced, but not in the guide yet. Nothing here is booked. Each one
     becomes a real recording the moment Plex Guide data carries an airing for it.
@@ -36,7 +36,7 @@
     <div class="legend" style="margin:0">
       <span><i class="ce"></i> CouchElephant booked it</span>
       <span><i class="plex"></i> Scheduled in Plex</span>
-      <span><i class="wait"></i> Waiting for the guide</span>
+      <span><i class="wait"></i> Waiting for the Plex guide data</span>
     </div>
     <div class="viewsw">
       <button type="button" class="on" data-view="agenda">Agenda</button>
@@ -63,7 +63,7 @@
        — the thing `precision` exists to stop. They belong to the month, so they
        sit under it. Hidden whenever the month has none. #}
     <div class="calwait" id="calwait" hidden>
-      <h3>Waiting for the guide</h3>
+      <h3>Waiting for the Plex guide data</h3>
       <div class="sub">Announced for this month, but no date yet. Nothing here is
         booked. Each one becomes a real recording the moment Plex Guide data
         carries an airing for it.</div>
@@ -254,7 +254,7 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
               // precision and the browser must not re-guess one.
               h += '<div class="calitem wait" data-cal-expectation="' +
                    esc(r.exp.source_id || '') + '" title="' +
-                   esc(r.title + '  (waiting for the guide: ' +
+                   esc(r.title + '  (waiting for the Plex guide data: ' +
                        (r.exp.when || '') + ')') + '">' +
                    '<span>' + esc(r.title) + '</span></div>';
               return;

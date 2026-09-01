@@ -43,6 +43,18 @@ SPORTSDB_EVENTS = [
      "dateEvent": "2027-01-24", "strTime": "13:00:00", "strTVStation": None},
 ]
 
+# The league names its own season, and the format is per league. Asking
+# without one does NOT get the current season: the real API answers with its
+# earliest, which is how this app spent months fetching NFL 2007.
+SPORTSDB_LEAGUES = {
+    "4391": [{"idLeague": "4391", "strLeague": "NFL",
+              "strCurrentSeason": "2027"}],
+}
+
+# Recorded so a test can prove WHICH season was asked for, not just that
+# something came back.
+ASKED = []
+
 SPORTSDB_TEAMS = {
     "ravens": [{"idTeam": "134931", "strTeam": "Ravens",
                 "idLeague": "4391", "strLeague": "NFL"}],
@@ -109,9 +121,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send({"teams": SPORTSDB_TEAMS.get(name)})
         elif parts.path.endswith("/eventsnext.php"):
             self._send({"events": SPORTSDB_NEXT})
+        elif parts.path.endswith("/lookupleague.php"):
+            lid = (params.get("id") or [""])[0].strip()
+            self._send({"leagues": SPORTSDB_LEAGUES.get(lid)})
         elif parts.path.endswith("/eventsseason.php"):
             # Only a subscriber key gets a season. The public test key is "3".
             key = parts.path.split("/")[-2]
+            ASKED.append(("eventsseason", (params.get("s") or [""])[0]))
             self._send({"events": SPORTSDB_EVENTS if key != "3" else []})
         elif parts.path == "/3/search/movie":
             self._send({"results": TMDB_HITS if term else []})
@@ -122,6 +138,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 def start() -> str:
     global _server, _thread
+    ASKED.clear()
     _server = HTTPServer(("127.0.0.1", 0), _Handler)
     _thread = threading.Thread(target=_server.serve_forever, daemon=True)
     _thread.start()

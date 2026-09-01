@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.6 - 2026-09-01
+
+### Fixed
+
+- **The season lookup was fetching 2007.** `season()` asked
+  `eventsseason.php?id=<league>` with no `s` parameter, and that does not mean
+  "the current season": the API answers with its earliest. Measured live,
+  `id=4391` returned NFL games from 2007-09-06.
+
+  The free tier hid it. Free caps that endpoint at five league-wide rows, so
+  after filtering to one team the answer was usually nothing either way, and the
+  wrong decade looked exactly like the thin free answer. The cost would have
+  landed on the first person to buy a subscriber key: a season paid for, and
+  2007 delivered.
+
+  `current_season()` now reads the league's own `strCurrentSeason`, which is free
+  to read. The season string cannot be composed from a clock, since the NFL calls
+  it "2026" and a football league calls it "2025-2026". A league that will not
+  say still gets asked without one, which is no worse than before.
+
+### Changed
+
+- "Waiting for the guide" now reads **"Waiting for the Plex guide data"**, in the
+  plan card, the calendar band, the legend and the calendar tooltip. Plex is the
+  server; the guide data is the thing that has to arrive.
+
 ## 1.0.5 - 2026-09-01
 
 ### Added

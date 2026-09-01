@@ -1,6 +1,6 @@
 """A thing you are waiting for belongs ON the calendar, and at its own precision.
 
-The "Waiting for the guide" card told you a plan existed. The calendar, which is
+The "Waiting for the Plex guide data" card told you a plan existed. The calendar, which is
 where you actually look to see what a month holds, did not draw one at all, so a
 month with three announced games and no bookings read as an empty month.
 
@@ -118,7 +118,8 @@ def test_the_band_states_the_month_and_invents_no_time(calendar_waiting):
 def test_the_legend_names_the_third_kind(calendar_waiting):
     """Three colours on the grid means three entries in the legend."""
     assert calendar_waiting.locator(".legend i.wait").count() == 1
-    assert "Waiting for the guide" in calendar_waiting.locator(".legend").inner_text()
+    assert ("Waiting for the Plex guide data"
+            in calendar_waiting.locator(".legend").inner_text())
 
 
 def test_an_expectation_is_not_clickable_as_a_programme(calendar_waiting):

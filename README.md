@@ -99,7 +99,7 @@ too, in the other colour.
 
 ![Passes](docs/images/passes.png)
 
-### Waiting for the guide
+### Waiting for the Plex guide data
 
 A pass can follow something the guide has not reached. Those show as plans
 rather than bookings, with the date at exactly the precision the source gave
