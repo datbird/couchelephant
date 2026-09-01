@@ -190,18 +190,30 @@ def main():
         shot(page, "schedule-agenda")
         page.click('[data-view="calendar"]')
         page.wait_for_selector("#calgrid .calday", timeout=20000)
-        # Put the legend at the top of the frame. At the default scroll the grid
-        # is cut off around the third week, which is above every date an
-        # expectation can plausibly carry: the demo guide reaches about twelve
-        # days, and a thing you are WAITING for is by definition further out
-        # than that. So the shot used to crop out the feature it is here to
-        # show. Anchored to the element rather than a pixel count, so a taller
-        # plan card does not silently push the grid back out of frame.
-        page.evaluate(
-            "document.querySelector('.legend').scrollIntoView({block: 'start'})")
+        # The one shot that needs a taller frame. It has to show three things at
+        # once: the legend that names the third colour, the grid cell holding a
+        # dated expectation, and the band under the grid holding a month-only
+        # one. At 900 the grid was cut off around the third week, which is above
+        # every date an expectation can plausibly carry, so the shot cropped out
+        # its own subject. Scrolling alone cannot fix it either, because legend
+        # to band is taller than 900 and something always falls off an end.
+        #
+        # The sticky header offset is read from the DOM rather than guessed, so
+        # changing the header cannot silently hide the legend behind it again.
+        page.set_viewport_size({"width": 1440, "height": 1120})
+        page.wait_for_timeout(200)
+        page.evaluate("""() => {
+            const nav = document.querySelector('.pt-nav');
+            const legend = document.querySelector('.legend');
+            const pad = nav ? nav.getBoundingClientRect().bottom + 14 : 130;
+            const top = legend.getBoundingClientRect().top + window.scrollY;
+            window.scrollTo(0, Math.max(0, top - pad));
+        }""")
         page.wait_for_timeout(300)
         shot(page, "schedule-calendar")
+        page.set_viewport_size({"width": 1440, "height": 900})
         page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(200)
 
         # ---- passes, with one open ----
         page.click('.subtab[data-sub="passes"]')
