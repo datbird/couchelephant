@@ -79,6 +79,7 @@ def start_app(plex_url):
     plex = __import__("app.plex", fromlist=["Plex"]).Plex(plex_url, "demo")
     sync.sync_recordings(plex)
     plex.close()
+    _seed_expectations()
 
     port = free_port()
     server = uvicorn.Server(uvicorn.Config(
@@ -90,6 +91,44 @@ def start_app(plex_url):
             raise SystemExit("the app never came up")
         time.sleep(0.05)
     return f"http://127.0.0.1:{port}", server
+
+
+def _seed_expectations():
+    """Two announced games the demo guide has not reached yet.
+
+    Both halves of the feature, because they are drawn in different places on
+    purpose. A dated one goes in its calendar cell; a month-only one goes in the
+    band under the grid, since a cell IS a day and putting a month in one states
+    a broadcast date nobody published.
+
+    Fixed days rather than offsets from today, so the docs image is the same
+    picture every time it is remade. Both sit ~3 weeks out, which is past where
+    any guide reaches, which is exactly why an expectation exists at all.
+    """
+    import datetime
+
+    now = datetime.datetime.now(datetime.UTC)
+
+    def day_of_this_month(day, hour):
+        return int(datetime.datetime(now.year, now.month, day, hour, 0,
+                                     tzinfo=datetime.UTC).timestamp())
+
+    pid = db.one("SELECT id FROM passes WHERE kind = 'team'")["id"]
+    # Invented call signs, same rule as the rest of the demo guide: Q is the
+    # second letter, so nothing here is a real station.
+    rows = [
+        ("demo-exp-1", "Chiefs at Chargers", "KQAADT",
+         day_of_this_month(22, 20), "day"),
+        ("demo-exp-2", "Chiefs at Bills", "WQBBDT",
+         day_of_this_month(26, 12), "month"),
+    ]
+    with db.tx() as c:
+        for sid, title, network, when, precision in rows:
+            c.execute(
+                "INSERT INTO expectations (pass_id, source, source_id, title, "
+                "network, expected_at, precision, updated_at) "
+                "VALUES (?, 'demo', ?, ?, ?, ?, ?, ?)",
+                (pid, sid, title, network, when, precision, int(time.time())))
 
 
 def shot(page, name):
@@ -151,7 +190,18 @@ def main():
         shot(page, "schedule-agenda")
         page.click('[data-view="calendar"]')
         page.wait_for_selector("#calgrid .calday", timeout=20000)
+        # Put the legend at the top of the frame. At the default scroll the grid
+        # is cut off around the third week, which is above every date an
+        # expectation can plausibly carry: the demo guide reaches about twelve
+        # days, and a thing you are WAITING for is by definition further out
+        # than that. So the shot used to crop out the feature it is here to
+        # show. Anchored to the element rather than a pixel count, so a taller
+        # plan card does not silently push the grid back out of frame.
+        page.evaluate(
+            "document.querySelector('.legend').scrollIntoView({block: 'start'})")
+        page.wait_for_timeout(300)
         shot(page, "schedule-calendar")
+        page.evaluate("window.scrollTo(0, 0)")
 
         # ---- passes, with one open ----
         page.click('.subtab[data-sub="passes"]')
