@@ -193,8 +193,12 @@ Click to sync the guide now." aria-label="Sync the guide now">
 <nav class="pt-nav" id="ptnav" data-tab="{{ nav or '' }}">
   <span class="pt-line" id="ptline" aria-hidden="true"></span>
   <a class="pt-tab {{ 'active' if nav=='guide' }}" data-t="guide" href="/">Guide</a>
+  {# The tab is Schedule and the sub-tab inside it is Recordings: this section is
+     where you decide what gets recorded, and the list of bookings lives one level
+     down. The route, the nav key and the data-t stay 'recordings' so existing links
+     and bookmarks keep working. #}
   <a class="pt-tab {{ 'active' if nav=='recordings' }}" data-t="recordings"
-     href="/recordings">Recordings</a>
+     href="/recordings">Schedule</a>
 </nav>
 </div>
 

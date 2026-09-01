@@ -35,7 +35,7 @@ def test_there_are_two_sub_tabs_and_no_next_games_section(recordings):
     labels = [recordings.locator(".subtab").nth(i).inner_text().strip()
               for i in range(recordings.locator(".subtab").count())]
     assert len(labels) == 2
-    assert labels[0] == "Schedule"
+    assert labels[0] == "Recordings"
     assert labels[1].startswith("Passes")
     assert "Next games" not in recordings.content()
 

@@ -1,10 +1,10 @@
 {% extends "base.html" %}{% set nav='recordings' %}
-{% block title %}Recordings - CouchElephant{% endblock %}
+{% block title %}Schedule - CouchElephant{% endblock %}
 
 {% block body %}
 <div class="pagehead">
   <div>
-    <h1>Recordings</h1>
+    <h1>Schedule</h1>
     <div class="sub" style="margin:0">What your Plex server will actually record.</div>
   </div>
   <button type="button" class="addbtn" id="addrule"
@@ -15,7 +15,7 @@
 </div>
 
 <div class="subtabs">
-  <button type="button" class="subtab on" data-sub="schedule">Schedule</button>
+  <button type="button" class="subtab on" data-sub="schedule">Recordings</button>
   <button type="button" class="subtab" data-sub="passes">Passes<span class="n" id="pcount"></span></button>
 </div>
 
@@ -25,12 +25,12 @@
   <h2 style="margin:0 0 4px;font-size:15px">Waiting for the guide</h2>
   <div class="sub" style="margin-bottom:10px">
     Announced, but not in the guide yet. Nothing here is booked. Each one
-    becomes a real recording the moment Plex carries an airing for it.
+    becomes a real recording the moment Plex Guide data carries an airing for it.
   </div>
   <div id="planlist"></div>
 </div>
 
-{# ---------------- Schedule ---------------- #}
+{# ---------------- Recordings (data-sub stays 'schedule') ---------------- #}
 <div data-pane="schedule">
   <div class="row" style="justify-content:space-between;margin-bottom:14px">
     <div class="legend" style="margin:0">

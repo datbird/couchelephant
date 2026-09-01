@@ -21,7 +21,7 @@ def test_the_tabs_navigate(page):
     page.goto("/")
     page.click('.pt-tab[data-t="recordings"]')
     page.wait_for_url("**/recordings")
-    assert page.locator(".pt-tab.active").inner_text().strip() == "Recordings"
+    assert page.locator(".pt-tab.active").inner_text().strip() == "Schedule"
 
 
 def test_a_divider_separates_the_header_from_the_tabs(page):

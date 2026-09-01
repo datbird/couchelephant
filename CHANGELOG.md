@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.3 - 2026-08-31
+
+### Changed
+
+- **The two tab names swapped, because they were the wrong way round.** The
+  top-level tab is now **Schedule** and the sub-tab inside it is **Recordings**.
+  That section is where you decide what gets recorded, so Schedule is what it
+  does; the list of actual bookings is one level down, so Recordings is what it
+  holds. Nothing moved, and the `/recordings` address is unchanged, so existing
+  links and bookmarks still work.
+
+- The "Waiting for the guide" note now says an entry becomes a real recording
+  when **Plex Guide data** carries an airing for it, rather than when "Plex"
+  does. Plex is the server; the guide data is the thing that has to arrive.
+
 ## 1.0.2 - 2026-08-31
 
 ### Added
