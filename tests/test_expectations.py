@@ -58,7 +58,9 @@ def _ann(**kw):
 
 
 def test_storing_twice_updates_rather_than_duplicating():
+    _ensure_pass(50)
     expectations.store(50, [_ann(source_id="s1")], now=10)
+    _ensure_pass(50)
     expectations.store(50, [_ann(source_id="s1", title="X renamed")], now=20)
     rows = db.query("SELECT * FROM expectations WHERE pass_id = 50")
     assert len(rows) == 1
@@ -67,6 +69,7 @@ def test_storing_twice_updates_rather_than_duplicating():
 
 
 def test_waiting_is_only_what_the_guide_has_not_confirmed():
+    _ensure_pass(51)
     expectations.store(51, [_ann(source_id="w1"), _ann(source_id="w2")], now=1)
     with db.tx() as c:
         c.execute("UPDATE expectations SET matched_guid = 'plex://x' "
@@ -75,7 +78,9 @@ def test_waiting_is_only_what_the_guide_has_not_confirmed():
 
 
 def test_waiting_covers_every_pass_when_none_is_named():
+    _ensure_pass(52)
     expectations.store(52, [_ann(source_id="a1")], now=1)
+    _ensure_pass(53)
     expectations.store(53, [_ann(source_id="a2")], now=1)
     assert len(expectations.waiting()) == 2
 
@@ -119,7 +124,17 @@ def _guide_row(guid, title, airing_id, begins_at):
                   (airing_id, guid, begins_at))
 
 
+def _ensure_pass(pass_id):
+    """An expectation is only live while its pass is. Tests that pick a
+    pass_id have to make the pass, the way the app does."""
+    with db.tx() as c:
+        c.execute("INSERT OR IGNORE INTO passes (id, kind, series_title, uid, "
+                  "enabled, created_at) VALUES (?, 'series', ?, ?, 1, 1)",
+                  (pass_id, f"pass-{pass_id}", f"uid-{pass_id}"))
+
+
 def _expect(pass_id, source_id, title, expected_at, precision="day"):
+    _ensure_pass(pass_id)
     with db.tx() as c:
         c.execute("INSERT INTO expectations (pass_id, source, source_id, title, "
                   "expected_at, precision, updated_at) VALUES (?,?,?,?,?,?,1)",
@@ -376,3 +391,94 @@ def test_removing_a_key_also_counts_as_a_change(sportsdb):
     without = db.one("SELECT sportsdb_asked_with FROM passes "
                      "WHERE id = ?", (pass_id,))["sportsdb_asked_with"]
     assert with_key != without
+
+
+def _sports_row(guid, title, teams, airing_id, begins_at):
+    """A guide row shaped the way the real guide shapes sport: the programme
+    title is the matchup, the grandparent is the league, and the teams live in
+    a JSON array."""
+    with db.tx() as c:
+        c.execute("INSERT OR REPLACE INTO programs (guid, title, "
+                  "grandparent_title, section, teams) VALUES (?,?,?,'sports',?)",
+                  (guid, title, "NFL Football", db.js(teams)))
+        c.execute("INSERT OR REPLACE INTO airings (id, program_guid, begins_at, "
+                  "channel_vcn) VALUES (?,?,?,'9.1')", (airing_id, guid, begins_at))
+
+
+def _team_expect(pass_id, source_id, team_name, expected_at):
+    _ensure_pass(pass_id)
+    with db.tx() as c:
+        c.execute("INSERT INTO expectations (pass_id, source, source_id, title, "
+                  "subtitle, expected_at, precision, updated_at) "
+                  "VALUES (?, 'thesportsdb', ?, ?, ?, ?, 'time', 1)",
+                  (pass_id, source_id, team_name,
+                   f"{team_name} vs Someone", expected_at))
+
+
+def test_a_team_expectation_matches_the_game_in_the_guide():
+    """The guide titles the programme "Chiefs at Broncos" and puts the league
+    in grandparent_title. Comparing the team name against either would never
+    match, so a whole season would sit as a plan and then be called missing.
+    The teams live in a JSON array, which is what to match on."""
+    _sports_row("plex://x/g1", "Kansas City Chiefs at Denver Broncos",
+                [{"id": 245, "name": "Kansas City Chiefs"},
+                 {"id": 99, "name": "Denver Broncos"}],
+                "a-g1", WHEN + 1800)
+    _team_expect(80, "g1", "Kansas City Chiefs", WHEN)
+    assert expectations.promote(now=WHEN) == 1
+    assert db.one("SELECT matched_guid FROM expectations WHERE source_id = 'g1'"
+                  )["matched_guid"] == "plex://x/g1"
+
+
+def test_a_team_expectation_does_not_match_somebody_elses_game():
+    _sports_row("plex://x/g2", "Chicago Bears at Green Bay Packers",
+                [{"id": 1, "name": "Chicago Bears"},
+                 {"id": 2, "name": "Green Bay Packers"}],
+                "a-g2", WHEN + 1800)
+    _team_expect(81, "g2", "Kansas City Chiefs", WHEN)
+    assert expectations.promote(now=WHEN) == 0
+
+
+def test_a_team_expectation_matches_however_the_guide_spells_it():
+    """`tident` folds case, accents and punctuation and nothing else. It is the
+    same fold the pass engine already uses to decide what to record."""
+    _sports_row("plex://x/g3", "Atletico Madrid at Someone",
+                [{"id": 7, "name": "Atlético Madrid"}], "a-g3", WHEN + 1800)
+    _team_expect(82, "g3", "Atletico Madrid", WHEN)
+    assert expectations.promote(now=WHEN) == 1
+
+
+def test_a_series_expectation_still_matches_on_its_title():
+    """The team rule must not break the series rule."""
+    _guide_row("plex://x/g4", "Gobiligook", "a-g4", WHEN + 1800)
+    _expect(83, "g4", "Gobiligook", WHEN)
+    assert expectations.promote(now=WHEN) == 1
+
+
+def test_deleting_a_pass_does_not_leave_its_plans_on_the_screen():
+    """Otherwise a season you stopped following shows as waiting for ever, and
+    then gets reported missing, for a pass that no longer exists."""
+    pass_id = _team_pass()
+    expectations.store(pass_id, [_ann(source_id="orphan-1")], now=1)
+    assert expectations.waiting()
+    with db.tx() as c:
+        c.execute("DELETE FROM passes WHERE id = ?", (pass_id,))
+    assert expectations.waiting() == []
+
+
+def test_disabling_a_pass_takes_its_plans_off_the_screen_too():
+    """A pass you turned off should stop showing you what it was going to do."""
+    pass_id = _team_pass()
+    expectations.store(pass_id, [_ann(source_id="off-1")], now=1)
+    with db.tx() as c:
+        c.execute("UPDATE passes SET enabled = 0 WHERE id = ?", (pass_id,))
+    assert expectations.waiting() == []
+
+
+def test_a_deleted_pass_is_never_reported_as_missing():
+    pass_id = _team_pass()
+    expectations.store(pass_id, [_ann(source_id="orphan-2")], now=1)
+    with db.tx() as c:
+        c.execute("DELETE FROM passes WHERE id = ?", (pass_id,))
+    assert expectations.sweep_misses(guide_ends_at=WHEN + 99 * 86400,
+                                     now=WHEN + 99 * 86400) == []

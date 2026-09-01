@@ -9,7 +9,7 @@ import datetime
 import time
 import zoneinfo
 
-from . import db
+from . import db, teamcat
 
 WHEN_UNKNOWN = "date not announced"
 
@@ -52,14 +52,21 @@ def store(pass_id: int, items, now: int | None = None) -> int:
 def waiting(pass_id: int | None = None) -> list[dict]:
     """Expectations the guide has not confirmed yet, soonest first.
 
-    A row with no date sorts last rather than first, which is where a `NULL`
-    would otherwise land it.
+    Only for a pass that still exists and is still enabled. A row with no date
+    sorts last rather than first, which is where a `NULL` would land it.
     """
-    sql = ("SELECT * FROM expectations WHERE matched_guid IS NULL{extra} "
-           "ORDER BY COALESCE(expected_at, 1 << 40), title")
+    # Joined to the pass, not just filtered by id. A pass that was deleted
+    # would otherwise leave its games waiting on the screen for ever, and
+    # `sweep_misses` would go on reporting them missing for something nobody
+    # follows any more. A pass you turned off should stop showing you what it
+    # was going to do, for the same reason.
+    sql = ("SELECT e.* FROM expectations e "
+           "  JOIN passes p ON p.id = e.pass_id AND p.enabled = 1 "
+           " WHERE e.matched_guid IS NULL{extra} "
+           " ORDER BY COALESCE(e.expected_at, 1 << 40), e.title")
     if pass_id is None:
         return [dict(r) for r in db.query(sql.format(extra=""))]
-    return [dict(r) for r in db.query(sql.format(extra=" AND pass_id = ?"),
+    return [dict(r) for r in db.query(sql.format(extra=" AND e.pass_id = ?"),
                                       (pass_id,))]
 
 
@@ -99,6 +106,45 @@ _WINDOW = {
 }
 
 
+def _match_in_guide(item: dict, span: int):
+    """Find the guide airing this expectation was waiting for, or nothing.
+
+    Sport and everything else are matched differently, because the guide
+    describes them differently.
+
+    A game is titled by its matchup, "Kansas City Chiefs at Denver Broncos",
+    with the league in `grandparent_title`. A team expectation carries the team
+    name, so comparing it against either of those never matches, and a whole
+    season would sit as a plan and then be reported missing. The teams are in a
+    JSON array on the programme, and that is what to match on.
+
+    The fold is `tident`, the same one `passes.candidate_airings` uses to
+    decide what to record. Deliberately not `teamcat.norm`: norm also drops
+    club words, which folds Real Madrid and Atletico Madrid both to "madrid".
+    Right for finding a team in a catalogue, wrong for picking a broadcast.
+    """
+    lo, hi = item["expected_at"] - span, item["expected_at"] + span
+    if item["source"] == "thesportsdb":
+        key = teamcat.ident(item["title"] or "")
+        if not key:
+            return None
+        return db.one(
+            """SELECT p.guid AS guid FROM airings a
+                 JOIN programs p ON p.guid = a.program_guid
+               WHERE p.teams IS NOT NULL AND p.teams != '[]'
+                 AND EXISTS (SELECT 1 FROM json_each(p.teams) t
+                             WHERE tident(json_extract(t.value, '$.name')) = ?)
+                 AND a.begins_at BETWEEN ? AND ?
+               ORDER BY a.begins_at LIMIT 1""", (key, lo, hi))
+    return db.one(
+        """SELECT p.guid AS guid FROM airings a
+             JOIN programs p ON p.guid = a.program_guid
+           WHERE ulower(COALESCE(NULLIF(p.grandparent_title, ''), p.title))
+                 = ulower(?)
+             AND a.begins_at BETWEEN ? AND ?
+           ORDER BY a.begins_at LIMIT 1""", (item["title"], lo, hi))
+
+
 def promote(now: int | None = None) -> int:
     """Bind an expectation to a real guide airing, once one exists.
 
@@ -115,14 +161,7 @@ def promote(now: int | None = None) -> int:
         if not item["expected_at"]:
             continue
         span = _WINDOW.get(item["precision"], _WINDOW["year"])
-        row = db.one(
-            """SELECT p.guid AS guid FROM airings a
-                 JOIN programs p ON p.guid = a.program_guid
-               WHERE ulower(COALESCE(NULLIF(p.grandparent_title, ''), p.title))
-                     = ulower(?)
-                 AND a.begins_at BETWEEN ? AND ?
-               ORDER BY a.begins_at LIMIT 1""",
-            (item["title"], item["expected_at"] - span, item["expected_at"] + span))
+        row = _match_in_guide(item, span)
         if not row:
             continue
         with db.tx() as c:

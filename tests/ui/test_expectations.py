@@ -14,10 +14,15 @@ WHEN = 1804204800
 @pytest.fixture
 def waiting(page):
     with db.tx() as c:
+        # An expectation only counts while its pass exists and is enabled, so
+        # the pass has to be here too.
+        cur = c.execute("INSERT INTO passes (kind, series_title, uid, enabled, "
+                        "created_at) VALUES ('series', 'Gobiligook', 'uid-ui', "
+                        "1, 1)")
         c.execute("INSERT INTO expectations (pass_id, source, source_id, title, "
                   "expected_at, precision, updated_at) "
-                  "VALUES (1, 'tvmaze', 'ui-1', 'Gobiligook', ?, 'month', 1)",
-                  (WHEN,))
+                  "VALUES (?, 'tvmaze', 'ui-1', 'Gobiligook', ?, 'month', 1)",
+                  (cur.lastrowid, WHEN))
     page.goto("/recordings")
     page.wait_for_selector("header")
     return page
