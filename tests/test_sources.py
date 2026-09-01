@@ -65,7 +65,7 @@ def test_tvmaze_does_not_call_out_for_an_empty_query(base):
 
 
 def test_a_scheduled_game_with_a_kickoff_keeps_the_time(base):
-    games = thesportsdb.season("Ravens", "4391", base=base)
+    games = thesportsdb.season("Ravens", "4391", key="sub-key", base=base)
     first = [g for g in games if g.source_id == "2000001"][0]
     assert first.precision == "time"
     assert first.subtitle == "Ravens vs Falcons"
@@ -75,24 +75,24 @@ def test_a_scheduled_game_with_a_kickoff_keeps_the_time(base):
 def test_a_scheduled_game_with_no_kickoff_is_only_a_day(base):
     """The league has announced the date but not the kickoff. Showing 12:00 AM
     would be a time nobody published."""
-    games = thesportsdb.season("Ravens", "4391", base=base)
+    games = thesportsdb.season("Ravens", "4391", key="sub-key", base=base)
     second = [g for g in games if g.source_id == "2000002"][0]
     assert second.precision == "day"
 
 
 def test_only_this_team_is_returned(base):
     """The season endpoint answers the whole league. A pass follows one team."""
-    ids = {g.source_id for g in thesportsdb.season("Ravens", "4391", base=base)}
+    ids = {g.source_id for g in thesportsdb.season("Ravens", "4391", key="sub-key", base=base)}
     assert ids == {"2000001", "2000002"}
 
 
 def test_the_away_side_counts_as_the_team_playing(base):
-    ids = {g.source_id for g in thesportsdb.season("Pilots", "4391", base=base)}
+    ids = {g.source_id for g in thesportsdb.season("Pilots", "4391", key="sub-key", base=base)}
     assert ids == {"2000002", "2000003"}
 
 
 def test_no_league_means_no_call(base):
-    assert thesportsdb.season("Ravens", "", base=base) == []
+    assert thesportsdb.season("Ravens", "", key="sub-key", base=base) == []
 
 
 def test_tmdb_is_silent_without_a_key(base):
@@ -108,3 +108,31 @@ def test_tmdb_finds_an_unreleased_film(base):
     assert hits[0].source == "tmdb"
     assert hits[0].title == "Quorbis Rising"
     assert hits[0].precision == "day"
+
+
+def test_the_free_tier_gives_no_season_at_all(base):
+    """Measured against the live API on 2026-08-31. `eventsseason` on the
+    public test key answered five events for the whole league and none for the
+    team asked about. A subscriber key is what buys a season, and the docs and
+    the settings copy now say so."""
+    assert thesportsdb.season("Ravens", "4391", base=base) == []
+
+
+def test_the_free_tier_still_gives_the_next_game(base):
+    """Thin, but not nothing. This is what a user with no key actually gets."""
+    games = thesportsdb.upcoming("134931", base=base)
+    assert len(games) == 1
+    assert games[0].subtitle == "Ravens vs Falcons"
+    assert games[0].precision == "time"
+
+
+def test_a_team_can_be_resolved_to_its_league(base):
+    """A pass knows a team name. The season endpoint wants a league id."""
+    found = thesportsdb.team("Ravens", base=base)
+    assert found["team_id"] == "134931"
+    assert found["league_id"] == "4391"
+
+
+def test_an_unknown_team_resolves_to_nothing_rather_than_guessing(base):
+    assert thesportsdb.team("Not A Real Team", base=base) is None
+    assert thesportsdb.team("", base=base) is None

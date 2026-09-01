@@ -239,3 +239,67 @@ def test_many_misses_are_one_notice_and_not_a_pile():
                                        now=WHEN + 5 * 86400)
     assert len(raised) == 1
     assert "and others" in raised[0]["detail"]
+
+
+@pytest.fixture
+def sportsdb(monkeypatch):
+    from app.sources import thesportsdb
+    from tests import fake_sources
+    url = fake_sources.start()
+    monkeypatch.setattr(thesportsdb, "BASE", url)
+    yield url
+    fake_sources.stop()
+
+
+def _team_pass(name="Ravens"):
+    with db.tx() as c:
+        cur = c.execute("INSERT INTO passes (kind, team_name, uid, enabled, "
+                        "created_at) VALUES ('team', ?, 'uid-1', 1, 1)", (name,))
+        return cur.lastrowid
+
+
+def test_a_team_pass_that_predates_this_feature_fills_itself(sportsdb):
+    """The whole reason this exists. An existing Chiefs pass had no
+    expectations and nothing back-filled it."""
+    pass_id = _team_pass()
+    assert expectations.fill_team_passes(now=1) >= 1
+    waiting = expectations.waiting(pass_id)
+    assert [e["subtitle"] for e in waiting] == ["Ravens vs Falcons"]
+
+
+def test_the_team_ids_are_resolved_once_and_remembered(sportsdb):
+    pass_id = _team_pass()
+    expectations.fill_team_passes(now=1)
+    row = db.one("SELECT sportsdb_team_id, sportsdb_league_id FROM passes "
+                 "WHERE id = ?", (pass_id,))
+    assert row["sportsdb_team_id"] == "134931"
+    assert row["sportsdb_league_id"] == "4391"
+
+
+def test_a_team_nobody_recognises_is_left_alone(sportsdb):
+    """Resolving to the closest match would fill the pass with somebody
+    else's games."""
+    pass_id = _team_pass("Not A Real Team")
+    expectations.fill_team_passes(now=1)
+    assert expectations.waiting(pass_id) == []
+
+
+def test_it_does_not_ask_again_the_same_day(sportsdb):
+    """A season does not change hourly, and the free tier is rate limited."""
+    _team_pass()
+    assert expectations.fill_team_passes(now=1) >= 1
+    assert expectations.fill_team_passes(now=2) == 0
+
+
+def test_it_asks_again_the_next_day(sportsdb):
+    _team_pass()
+    expectations.fill_team_passes(now=1)
+    assert expectations.fill_team_passes(now=1 + 2 * 86400) >= 1
+
+
+def test_a_disabled_pass_is_not_filled(sportsdb):
+    pass_id = _team_pass()
+    with db.tx() as c:
+        c.execute("UPDATE passes SET enabled = 0 WHERE id = ?", (pass_id,))
+    expectations.fill_team_passes(now=1)
+    assert expectations.waiting(pass_id) == []

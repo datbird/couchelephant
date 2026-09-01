@@ -207,8 +207,9 @@ def keys_tip(has_tmdb: bool, has_sportsdb: bool,
     """
     wants = []
     if team_passes and not has_sportsdb:
-        wants.append("TheSportsDB, for the rest of a team's published season, "
-                     "free at thesportsdb.com")
+        wants.append("TheSportsDB, for a team's published season. Without a "
+                     "key it answers one upcoming game per team; a subscriber "
+                     "key at thesportsdb.com is what gives the full season")
     if film_passes and not has_tmdb:
         wants.append("TMDB, for films and their release dates, free at "
                      "themoviedb.org/settings/api")

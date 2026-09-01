@@ -141,6 +141,10 @@ CREATE TABLE IF NOT EXISTS passes (
     -- store or a restore uses to say "the same pass".
     uid          TEXT,
     enabled      INTEGER DEFAULT 1,
+    -- Resolved once from the team name and kept, because the ids do not
+    -- change and the free tier is rate limited.
+    sportsdb_team_id   TEXT,
+    sportsdb_league_id TEXT,
     created_at   INTEGER
 );
 
@@ -342,6 +346,9 @@ MIGRATIONS = [
     # A suggestion the user has waved off. Health problems can never set it;
     # `health.dismiss` refuses any severity but `tip`.
     ("notices", "dismissed_at", "INTEGER"),
+    # Where this team sits at TheSportsDB. Resolved once from the name.
+    ("passes", "sportsdb_team_id", "TEXT"),
+    ("passes", "sportsdb_league_id", "TEXT"),
     ("teams", "in_guide", "INTEGER DEFAULT 0"),
     ("teams", "last_seen", "INTEGER"),
     # A pass's `id` is an autoincrement, which means a different number on

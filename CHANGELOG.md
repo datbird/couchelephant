@@ -41,8 +41,9 @@
 
 - **Three sources, and only one of them is required to do nothing.** TVmaze
   covers announced series and needs no key and no account, so this works the
-  moment the container starts. TheSportsDB fills in a team's published season
-  and works on its free tier; a key of your own only raises the rate limits.
+  moment the container starts. TheSportsDB covers a team's published season, but
+  **only with a subscriber key**: on the free tier it answers one upcoming game
+  per team. Measured, not assumed.
   TMDB adds films and needs a free key you register. Both keys live in Settings,
   under Sources.
 

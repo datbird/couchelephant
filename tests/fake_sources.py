@@ -43,6 +43,20 @@ SPORTSDB_EVENTS = [
      "dateEvent": "2027-01-24", "strTime": "13:00:00", "strTVStation": None},
 ]
 
+SPORTSDB_TEAMS = {
+    "ravens": [{"idTeam": "134931", "strTeam": "Ravens",
+                "idLeague": "4391", "strLeague": "NFL"}],
+}
+
+# What the FREE tier really answers: one upcoming game, not a season. Measured
+# against the live API on 2026-08-31. The fake has to be as thin as the real
+# thing or the tests would prove a season nobody gets.
+SPORTSDB_NEXT = [
+    {"idEvent": "2000001", "strEvent": "Ravens vs Falcons",
+     "strHomeTeam": "Ravens", "strAwayTeam": "Falcons",
+     "dateEvent": "2027-01-10", "strTime": "20:15:00", "strTVStation": None},
+]
+
 TMDB_HITS = [{"id": 55555, "title": "Quorbis Rising",
               "release_date": "2027-05-21", "overview": ""}]
 
@@ -68,8 +82,15 @@ class _Handler(BaseHTTPRequestHandler):
         term = (params.get("q") or params.get("query") or [""])[0].strip().lower()
         if parts.path == "/search/shows":
             self._send(TVMAZE_HITS.get(term, []))
+        elif parts.path.endswith("/searchteams.php"):
+            name = (params.get("t") or [""])[0].strip().lower()
+            self._send({"teams": SPORTSDB_TEAMS.get(name)})
+        elif parts.path.endswith("/eventsnext.php"):
+            self._send({"events": SPORTSDB_NEXT})
         elif parts.path.endswith("/eventsseason.php"):
-            self._send({"events": SPORTSDB_EVENTS})
+            # Only a subscriber key gets a season. The public test key is "3".
+            key = parts.path.split("/")[-2]
+            self._send({"events": SPORTSDB_EVENTS if key != "3" else []})
         elif parts.path == "/3/search/movie":
             self._send({"results": TMDB_HITS if term else []})
         else:

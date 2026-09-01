@@ -175,3 +175,82 @@ def sweep_misses(guide_ends_at: int | None, now: int | None = None) -> list[dict
         "hint": ("CouchElephant keeps looking. Check the title against the "
                  "guide, or remove the pass if it is not coming."),
     }]
+
+
+# A published season does not change hourly, and the free tier is rate limited.
+# Asking once a day per pass is plenty.
+_REFILL_AFTER = 86400
+
+
+def fill_team_passes(now: int | None = None) -> int:
+    """Give every enabled team pass the games its league has scheduled.
+
+    This is the step that was missing. A team pass is made from the team
+    picker, not from the announced search, so nothing ever reached the sports
+    source. An existing pass had no expectations and nothing back-filled it.
+
+    Doing it here rather than at pass creation covers both: a pass made today
+    and one made months ago fill on the next sync, with no action from anyone.
+
+    What arrives depends on the key. Without one TheSportsDB answers one
+    upcoming game per team. A subscriber key is what gives the full season.
+    Both are asked for and merged, so a key raises the answer without changing
+    any of this.
+    """
+    from .sources import thesportsdb
+
+    now = int(now if now is not None else time.time())
+    key = db.get_setting("sportsdb_key") or ""
+    filled = 0
+    rows = db.query(
+        """SELECT p.id, p.team_name, p.sportsdb_team_id, p.sportsdb_league_id,
+                  (SELECT MAX(updated_at) FROM expectations e
+                    WHERE e.pass_id = p.id AND e.source = 'thesportsdb') AS asked_at
+           FROM passes p
+           WHERE p.kind = 'team' AND p.enabled = 1
+             AND COALESCE(p.team_name, '') <> ''""")
+    for row in rows:
+        if row["asked_at"] and now - row["asked_at"] < _REFILL_AFTER:
+            continue
+        team_id = row["sportsdb_team_id"]
+        league_id = row["sportsdb_league_id"]
+        if not team_id:
+            try:
+                found = thesportsdb.team(row["team_name"], key=key)
+            except Exception:
+                # A source being unreachable is not something the user can act
+                # on. The pass is untouched and the next sync tries again.
+                continue
+            if not found:
+                # An unknown name resolves to nothing rather than the closest
+                # match, which would fill the pass with somebody else's games.
+                continue
+            team_id, league_id = found["team_id"], found["league_id"]
+            with db.tx() as c:
+                c.execute("UPDATE passes SET sportsdb_team_id = ?, "
+                          "sportsdb_league_id = ? WHERE id = ?",
+                          (team_id, league_id, row["id"]))
+        # Both endpoints, because what each gives depends on the key. Written
+        # out rather than looped over: a lambda closing over a loop variable
+        # is a trap even when it is called at once.
+        games = []
+        try:
+            games.extend(thesportsdb.upcoming(team_id, key=key))
+        except Exception:
+            pass
+        try:
+            games.extend(thesportsdb.season(row["team_name"], league_id, key=key))
+        except Exception:
+            pass
+        # The two endpoints overlap. The pass keys on source_id anyway, but
+        # deduping here keeps the count honest.
+        seen, unique = set(), []
+        for game in games:
+            if game.source_id in seen:
+                continue
+            seen.add(game.source_id)
+            unique.append(game)
+        if unique:
+            store(row["id"], unique, now=now)
+            filled += 1
+    return filled

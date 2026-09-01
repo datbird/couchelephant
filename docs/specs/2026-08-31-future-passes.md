@@ -40,11 +40,25 @@ a feature nobody has.
 | Source | Covers | Setup | Key |
 |---|---|---|---|
 | TVmaze | series, premiere dates, networks | none | none, ever |
-| TheSportsDB | league schedules months ahead | none for the free tier | optional, raises limits |
+| TheSportsDB | league schedules months ahead | none, but thin | see below |
 | TMDB | films | register | free, optional |
 
 TVmaze needs no key and no account, so it is always on. That matters more than
 raw coverage: it means the feature works the moment the container starts.
+
+**Correction, measured 2026-08-31.** An earlier draft of this spec said the
+TheSportsDB free tier fills in a season. It does not. On the public test key
+`eventsseason.php` answered five events for the whole NFL and none for the team
+asked about, while `eventsnext.php` answered exactly one game. **A subscriber
+key is what gives a season.** Without one this source contributes a single
+upcoming game per team.
+
+ESPN's public JSON was re-measured at the same time and does return a full
+17 game season, free and keyless. It was still rejected, for the reason below:
+it answers a plain client and refuses a browser user agent, so using it means
+deliberately not looking like a browser. That is someone's bot protection, and
+working around it is not a foundation to ship on. The thin honest source wins
+over the rich fragile one.
 
 ### Rejected, and why
 

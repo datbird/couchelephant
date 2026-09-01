@@ -819,6 +819,10 @@ def _sync_everything(plex):
     # The guide may have just reached something a pass has been waiting months
     # for. Bind it before the booking check runs, so it records on this sync
     # rather than the next one.
+    # A team pass is made from the team picker, never from the announced
+    # search, so nothing else would ever reach the sports source. Filling here
+    # covers a pass made today and one made months ago alike.
+    expectations.fill_team_passes(now=_now())
     promoted = expectations.promote(now=_now())
     # Judged against how far the guide actually reaches, not against today.
     # Before the guide gets there, silence means a short guide and not a

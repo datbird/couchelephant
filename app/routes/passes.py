@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from .. import db, expectations, passes, smartfilter, sync, teamcat
 from ..plex import PlexError
-from ..sources import thesportsdb, tmdb, tvmaze
+from ..sources import tmdb, tvmaze
 from ._shared import _int, _logo_map, _plex, page
 from .guide import _PASS_ICON, _why_for  # noqa: F401
 from .record import _PASS_HIDDEN, SPORTS_PADDING, _make_pass, _pass_prefs, _template_payload
@@ -240,17 +240,14 @@ def api_announced_follow(source: str = Form(...), source_id: str = Form(...),
                 "VALUES ('series', ?, ?, 1, ?)",
                 (title, uuid.uuid4().hex, int(time.time())))
             pass_id = cur.lastrowid
-    if source == "thesportsdb":
-        # `source_id` is the league, not one game: following a team means the
-        # whole published season, not the next fixture.
-        items = thesportsdb.season(
-            title, source_id, key=db.get_setting("sportsdb_key") or "")
-    else:
-        items = [a for a in tvmaze.search(title) if a.source_id == source_id]
-        if not items:
-            items = [a for a in tmdb.search(
-                title, key=db.get_setting("tmdb_key") or "")
-                if a.source_id == source_id]
+    # Series and films only. A team is never followed through here: the team
+    # picker makes that pass, and `expectations.fill_team_passes` gives it its
+    # games on the next sync. A branch for teams here was unreachable.
+    items = [a for a in tvmaze.search(title) if a.source_id == source_id]
+    if not items:
+        items = [a for a in tmdb.search(
+            title, key=db.get_setting("tmdb_key") or "")
+            if a.source_id == source_id]
     expectations.store(pass_id, items)
     return JSONResponse({"ok": True, "pass_id": pass_id,
                          "waiting": len(expectations.waiting(pass_id))})

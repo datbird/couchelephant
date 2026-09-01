@@ -5,7 +5,7 @@ Every source is pointed at the local fake. No test may reach a third party.
 import pytest
 
 from app import db, expectations
-from app.sources import thesportsdb, tmdb, tvmaze
+from app.sources import tmdb, tvmaze
 from tests import fake_sources
 
 
@@ -19,7 +19,6 @@ def sources_base():
 @pytest.fixture(autouse=True)
 def _point_at_the_fake(sources_base, monkeypatch):
     monkeypatch.setattr(tvmaze, "BASE", sources_base)
-    monkeypatch.setattr(thesportsdb, "BASE", sources_base)
     monkeypatch.setattr(tmdb, "BASE", sources_base)
 
 
@@ -88,13 +87,15 @@ def test_following_the_same_thing_twice_does_not_pile_up(client):
     assert len(expectations.waiting(first)) == 1
 
 
-def test_following_a_team_brings_in_its_whole_season(client):
+def test_a_team_is_not_followed_through_here(client):
+    """Teams come from the team picker, and `fill_team_passes` gives them
+    their games. This route only ever sees a series or a film, and the branch
+    that pretended otherwise was unreachable."""
     body = client.post("/api/announced/follow",
                        data={"source": "thesportsdb", "source_id": "4391",
                              "title": "Ravens"}).json()
     assert body["ok"] is True
-    waiting = expectations.waiting(body["pass_id"])
-    assert {e["source_id"] for e in waiting} == {"2000001", "2000002"}
+    assert expectations.waiting(body["pass_id"]) == []
 
 
 def test_a_blank_title_is_refused(client):
