@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.7 - 2026-09-02
+
+### Fixed
+
+- **A followed team now shows its published season, not one game.** The card and
+  the calendar were right; the source call was not. `season()` asked
+  `eventsseason.php`, which is capped, so a team pass held a single fixture while
+  months of announced season sat invisible.
+
+  `eventsround.php` is not capped the same way. Measured live on 2026-09-02 for
+  the 2026 NFL season:
+
+  | call | key `3` | key `123` |
+  |---|---:|---:|
+  | `eventsnext.php` (team) | 1 | 1 |
+  | `eventsseason.php` (league) | 5 | 15 |
+  | `eventsround.php` (league, per round) | 5 | **16** |
+
+  Sixteen is a full NFL week. Walking the 18 rounds returns 272 events holding
+  all 17 Kansas City Chiefs games, 2026-09-15 to 2027-01-10, on a free key. So
+  the season is walked round by round, and `FREE_KEY` moves from `3` to `123`,
+  which is equally documented and less capped.
+
+  The walk stops after three consecutive empty rounds rather than at a fixed
+  count, because a round count is per sport: 18 for the NFL, 38 for a football
+  league. A 45-round backstop keeps a league that answers for ever from spinning.
+
+- **The app was telling you to pay for something you already had.** "The free
+  tier gives no season" was written into four places, including the Settings
+  page and a health tip shown to everyone following a team. All four now state
+  the measured numbers. The test that asserted it records why it was wrong.
+
+  The reasoning error is the part worth keeping: an endpoint answering thinly is
+  not the database lacking the data, and one endpoint is not an API.
+
 ## 1.0.6 - 2026-09-01
 
 ### Fixed

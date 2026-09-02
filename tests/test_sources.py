@@ -110,12 +110,24 @@ def test_tmdb_finds_an_unreleased_film(base):
     assert hits[0].precision == "day"
 
 
-def test_the_free_tier_gives_no_season_at_all(base):
-    """Measured against the live API on 2026-08-31. `eventsseason` on the
-    public test key answered five events for the whole league and none for the
-    team asked about. A subscriber key is what buys a season, and the docs and
-    the settings copy now say so."""
-    assert thesportsdb.season("Ravens", "4391", base=base) == []
+def test_the_free_tier_does_give_a_season(base):
+    """THIS TEST USED TO ASSERT THE OPPOSITE, and it was wrong.
+
+    It read: "the free tier gives no season at all", from measuring
+    `eventsseason.php` on 2026-08-31 and finding five league-wide rows holding
+    none of the team asked about. The measurement was right. The conclusion
+    drawn from it was not, because only one endpoint had been tried.
+
+    `eventsround.php` is not capped the same way. Measured live 2026-09-02:
+    walking the 18 NFL rounds returned 272 events containing all 17 Kansas City
+    Chiefs games, 2026-09-15 to 2027-01-10, on a free key. A subscriber key
+    buys rate limit and depth, not the feature.
+
+    The cost of the wrong conclusion was a second provider that had to be
+    written and then deleted. An endpoint answering thinly is not the database
+    lacking the data."""
+    got = thesportsdb.season("Ravens", "4391", base=base)
+    assert [a.subtitle for a in got] == ["Ravens vs Falcons", "Ravens vs Pilots"]
 
 
 def test_the_free_tier_still_gives_the_next_game(base):

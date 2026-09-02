@@ -275,11 +275,17 @@ def _team_pass(name="Ravens"):
 
 def test_a_team_pass_that_predates_this_feature_fills_itself(sportsdb):
     """The whole reason this exists. An existing Chiefs pass had no
-    expectations and nothing back-filled it."""
+    expectations and nothing back-filled it.
+
+    It gets the SEASON, not one game. `season()` walks `eventsround.php`, which
+    is not capped the way `eventsseason.php` is, so a followed team shows the
+    months of fixtures its league has published rather than the single next
+    kickoff the old call could reach."""
     pass_id = _team_pass()
     assert expectations.fill_team_passes(now=1) >= 1
     waiting = expectations.waiting(pass_id)
-    assert [e["subtitle"] for e in waiting] == ["Ravens vs Falcons"]
+    assert [e["subtitle"] for e in waiting] == ["Ravens vs Falcons",
+                                                "Ravens vs Pilots"]
 
 
 def test_the_team_ids_are_resolved_once_and_remembered(sportsdb):
@@ -371,13 +377,21 @@ def test_renaming_the_team_resolves_it_again(sportsdb):
 
 
 def test_adding_a_key_refills_at_once_rather_than_tomorrow(sportsdb):
-    """Somebody who pays for a season should see it now, not in a day."""
+    """Somebody who pays should see the difference now, not in a day.
+
+    The refill is what this pins, not the size of the answer. Since the season
+    is walked round by round the free tier already returns a season, so a key
+    buys rate limit and depth rather than the feature itself."""
     pass_id = _team_pass()
     expectations.fill_team_passes(now=1)
-    assert len(expectations.waiting(pass_id)) == 1
+    before = db.one("SELECT sportsdb_asked_with a FROM passes WHERE id = ?",
+                    (pass_id,))["a"]
     db.set_setting("sportsdb_key", "sub-key")
     expectations.fill_team_passes(now=2)
-    assert len(expectations.waiting(pass_id)) > 1
+    after = db.one("SELECT sportsdb_asked_with a FROM passes WHERE id = ?",
+                   (pass_id,))["a"]
+    assert (before, after) == ("free", "key")
+    assert len(expectations.waiting(pass_id)) >= 1
 
 
 def test_removing_a_key_also_counts_as_a_change(sportsdb):

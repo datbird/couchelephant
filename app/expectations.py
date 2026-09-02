@@ -432,7 +432,23 @@ def fill_team_passes(now: int | None = None) -> int:
                 continue
             seen.add(game.source_id)
             unique.append(game)
+        # ONLY WHAT IS STILL AHEAD. A published season is mostly behind you by
+        # December, and a game that already kicked off is not something anyone
+        # is waiting for. Same rule the series fill follows.
+        unique = [g for g in unique if g.expected_at and g.expected_at > now]
         if unique:
             store(row["id"], unique, now=now)
+            # Drop what the source we did NOT use left here on an earlier run.
+            # Switching from TheSportsDB's single game to ESPN's whole season
+            # would otherwise leave that one game beside its own duplicate,
+            # dated the same day, for ever. Never one already bound to an
+            # airing: that is a real booking's link to its plan.
+            kept = sorted({g.source for g in unique})
+            holes = ",".join("?" * len(kept))
+            with db.tx() as c:
+                c.execute(
+                    f"DELETE FROM expectations WHERE pass_id = ? "
+                    f"AND source NOT IN ({holes}) AND matched_guid IS NULL",
+                    (row["id"], *kept))
             filled += 1
     return filled

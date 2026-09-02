@@ -60,9 +60,11 @@ SPORTSDB_TEAMS = {
                 "idLeague": "4391", "strLeague": "NFL"}],
 }
 
-# What the FREE tier really answers: one upcoming game, not a season. Measured
-# against the live API on 2026-08-31. The fake has to be as thin as the real
-# thing or the tests would prove a season nobody gets.
+# `eventsnext.php` really does answer ONE upcoming game on a free key, measured
+# 2026-08-31 and again 2026-09-02. That is this endpoint's limit and not the
+# tier's: `eventsround.php` walked over the rounds returns the whole season for
+# the same key. The fake has to be as thin as the real thing per endpoint, or
+# the tests prove an answer nobody gets.
 SPORTSDB_NEXT = [
     {"idEvent": "2000001", "strEvent": "Ravens vs Falcons",
      "strHomeTeam": "Ravens", "strAwayTeam": "Falcons",
@@ -124,11 +126,15 @@ class _Handler(BaseHTTPRequestHandler):
         elif parts.path.endswith("/lookupleague.php"):
             lid = (params.get("id") or [""])[0].strip()
             self._send({"leagues": SPORTSDB_LEAGUES.get(lid)})
-        elif parts.path.endswith("/eventsseason.php"):
-            # Only a subscriber key gets a season. The public test key is "3".
-            key = parts.path.split("/")[-2]
-            ASKED.append(("eventsseason", (params.get("s") or [""])[0]))
-            self._send({"events": SPORTSDB_EVENTS if key != "3" else []})
+        elif parts.path.endswith("/eventsround.php"):
+            # A season is walked round by round, because eventsseason.php is
+            # capped and eventsround.php is not. One event per round here, and
+            # nothing past round 3, so the walk's stop rule gets exercised.
+            rnd = (params.get("r") or ["0"])[0]
+            ASKED.append(("eventsround", rnd, (params.get("s") or [""])[0]))
+            idx = int(rnd) - 1 if rnd.isdigit() else -1
+            got = [SPORTSDB_EVENTS[idx]] if 0 <= idx < len(SPORTSDB_EVENTS) else []
+            self._send({"events": got})
         elif parts.path == "/3/search/movie":
             self._send({"results": TMDB_HITS if term else []})
         else:

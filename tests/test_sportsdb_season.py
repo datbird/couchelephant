@@ -46,19 +46,43 @@ def test_no_league_asks_nobody_anything(api):
 def test_the_season_call_actually_sends_one(api):
     """The whole bug in one assertion. It used to send nothing here."""
     thesportsdb.season("Ravens", NFL, key="paid")
-    assert ("eventsseason", "2027") in fake_sources.ASKED
+    assert ("eventsround", "1", "2027") in fake_sources.ASKED
 
 
 def test_it_still_asks_when_the_league_will_not_say(api):
     """An unknown season is not a reason to fetch nothing at all. Asking
     without one is exactly what it did before, which is no worse."""
     thesportsdb.season("Ravens", "999999", key="paid")
-    assert ("eventsseason", "") in fake_sources.ASKED
+    assert ("eventsround", "1", "") in fake_sources.ASKED
 
 
 def test_a_season_answer_is_still_filtered_to_the_team(api):
     got = thesportsdb.season("Ravens", NFL, key="paid")
     assert {a.source_id for a in got} == {"2000001", "2000002"}
+
+
+def test_it_walks_past_the_first_round(api):
+    """`eventsseason.php` is capped and `eventsround.php` is not, so the season
+    is the walk. Stopping at round one would put the cap back by hand."""
+    thesportsdb.season("Ravens", NFL, key="paid")
+    rounds = [r for r in fake_sources.ASKED if r[0] == "eventsround"]
+    assert [r[1] for r in rounds[:3]] == ["1", "2", "3"]
+
+
+def test_the_walk_stops_after_consecutive_empty_rounds(api):
+    """A round count is per sport, so the stop rule is silence, not a number.
+    Without it every league would cost the full backstop in requests."""
+    thesportsdb.season("Ravens", NFL, key="paid")
+    rounds = [int(r[1]) for r in fake_sources.ASKED if r[0] == "eventsround"]
+    # Three events in the fixture, then _QUIET_ROUNDS empties, and stop.
+    assert max(rounds) == len(fake_sources.SPORTSDB_EVENTS) + thesportsdb._QUIET_ROUNDS
+    assert max(rounds) < thesportsdb._MAX_ROUNDS
+
+
+def test_the_free_key_is_the_one_that_answers(api):
+    """"3" is documented too and returns 5 rows where "123" returns a full
+    16-game NFL week. Measured live; do not "tidy" this back to 3."""
+    assert thesportsdb.FREE_KEY == "123"
 
 
 def test_a_league_lookup_that_fails_does_not_take_the_season_with_it(api,

@@ -137,9 +137,10 @@
           <input id="sdbkey" name="sportsdb_key"
                  value="{{ settings.sportsdb_key or "" }}" placeholder="optional">
           <p class="dim tiny">
-            Fills in a team season the guide has not reached. Without a key
-            it answers one upcoming game per team. A subscriber key at
-            thesportsdb.com is what gives the full season.
+            Fills in a team season the guide has not reached. This works
+            without a key: a followed team gets its published season either
+            way. A subscriber key at thesportsdb.com raises the rate limit and
+            the depth of what comes back.
           </p>
           <label for="tmdbkey">TMDB key</label>
           <input id="tmdbkey" name="tmdb_key" type="password"
