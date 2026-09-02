@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.9 - 2026-09-02
+
+### Changed
+
+- **"Waiting for the Plex guide data" opens folded to the next three.** A
+  followed team hands this card its whole published season, seventeen games for
+  an NFL side, and a few passes would fill the top of the page. A "Show all"
+  control expands and collapses it.
+
+  Every row is still rendered and hidden, so expanding needs no second request.
+  It is a fold, not a limit: nothing is dropped, and the calendar still draws
+  all of it month by month.
+
+- **The schedule now reads outward from now.** What is still to come comes
+  first, soonest at the top, because that is what a schedule is for. What
+  already aired follows, most recent first, because that is what history is for.
+
+  Plain ascending put the oldest finished recording at the top, so a server
+  whose season had not started opened on a month of "complete" rows. Plain
+  descending would have been just as wrong the other way: book a season and it
+  leads with next January while tonight's game sits at the bottom.
+
+### Fixed
+
+- **`hidden` was losing to a stylesheet.** It is a browser rule, and any author
+  `display` beats it, so `.plan{display:flex}` kept every folded row on screen
+  while the code believed it had hidden them. The fold shipped inert without
+  this. Caught by a browser test, which is the only kind that could.
+
 ## 1.0.8 - 2026-09-02
 
 ### Fixed

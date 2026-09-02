@@ -1051,17 +1051,22 @@ window.wireSettings = function (root) {
     .then(function (body) {
       var rows = (body && body.rows) || [];
       if (!rows.length) return;
-      // A season at a time now, not one premiere. Before series passes were
-      // filled with real episodes this card held a row or two; a followed show
-      // can hand it twenty-odd, and several shows turn the top of the page
-      // into a wall. So the card shows the soonest few and counts the rest.
-      // The DATA is not capped anywhere: everything is stored, everything is
-      // promoted, and the calendar draws the lot month by month.
-      var SHOWN = 8;
+      // A season at a time now, not one premiere. A followed team hands this
+      // card its whole published season, seventeen games for an NFL side, and
+      // several passes would turn the top of the page into a wall. So it opens
+      // showing the next few and expands on request.
+      // The DATA is not capped anywhere: every row is rendered, everything is
+      // stored, everything is promoted, and the calendar draws the lot month
+      // by month. This is a fold, not a limit.
+      var SHOWN = 3;
       var extra = rows.length - SHOWN;
-      rows.slice(0, SHOWN).forEach(function (e) {
+      rows.forEach(function (e, i) {
         var el = document.createElement('div');
-        el.className = 'plan';
+        el.className = 'plan' + (i >= SHOWN ? ' plan-extra' : '');
+        // Hidden rather than never rendered, so expanding is instant and needs
+        // no second request. `hidden` and not a class, so a screen reader and
+        // find-in-page agree with what is on screen.
+        if (i >= SHOWN) el.hidden = true;
         el.setAttribute('data-expectation', e.source_id);
         var parts = ['<span class="plan-title"></span>'];
         if (e.subtitle) parts.push('<span class="plan-sub"></span>');
@@ -1079,12 +1084,23 @@ window.wireSettings = function (root) {
         list.appendChild(el);
       });
       if (extra > 0) {
-        var more = document.createElement('div');
+        var more = document.createElement('button');
+        more.type = 'button';
         more.className = 'plan-more';
         more.id = 'planmore';
-        more.textContent = extra + (extra === 1 ? ' more is' : ' more are') +
-          ' waiting. The calendar shows them by month.';
+        var open = false;
+        function paint() {
+          more.textContent = open
+            ? 'Show fewer'
+            : 'Show all ' + rows.length + ' (' + extra + ' more)';
+          more.setAttribute('aria-expanded', open ? 'true' : 'false');
+          list.querySelectorAll('.plan-extra').forEach(function (row) {
+            row.hidden = !open;
+          });
+        }
+        more.addEventListener('click', function () { open = !open; paint(); });
         list.appendChild(more);
+        paint();
       }
       card.hidden = false;
     })

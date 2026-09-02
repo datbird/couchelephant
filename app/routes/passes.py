@@ -82,7 +82,27 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
     sql = "SELECT g.* FROM plex_grabs g"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY COALESCE(g.begins_at, 0), g.id"
+    # NEAREST TO NOW, OUTWARD. Plain ascending put August at the top of a page
+    # whose newest entry was the thing you actually wanted to see, and you had
+    # to scroll past a month of finished recordings to reach it.
+    #
+    # Not plain descending either: that reads correctly only while everything
+    # is in the past. The moment a season is booked it would lead with next
+    # January and bury tonight's game at the bottom.
+    #
+    # So the two halves are ordered separately. What is still to come comes
+    # first, soonest at the top, because that is what a schedule is for. What
+    # already aired follows, most recent first, because that is what history is
+    # for.
+    # Positional, like the WHERE clause above. SQLite refuses a statement that
+    # mixes named and numbered parameters, so `now` is appended twice rather
+    # than bound by name.
+    now = int(time.time())
+    sql += (" ORDER BY (COALESCE(g.begins_at, 0) < ?) ASC,"
+            " CASE WHEN COALESCE(g.begins_at, 0) >= ?"
+            "      THEN COALESCE(g.begins_at, 0)"
+            "      ELSE -COALESCE(g.begins_at, 0) END ASC, g.id")
+    args += [now, now]
     if limit is not None:
         sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
 

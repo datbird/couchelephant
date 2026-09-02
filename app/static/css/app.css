@@ -1044,12 +1044,19 @@ footer .divider{height:5px;width:auto;display:block;margin:0 auto 12px}
 .plan{display:flex;align-items:center;gap:10px;padding:8px 10px;margin:6px 0;
   border:1px dashed var(--line);border-radius:8px;color:var(--dim);font-size:13px}
 .plan-title{color:var(--text);font-weight:600}
+/* `hidden` is a UA rule (`display:none`) and ANY author `display` beats it, so
+   `.plan{display:flex}` above kept every folded row on screen. Specificity of
+   class+attribute puts it back. */
+.plan[hidden]{display:none}
 .plan-when{margin-left:auto}
 .plan-src{font-size:11px;text-transform:uppercase;letter-spacing:.04em}
-/* The tail line when a season is longer than the card. Not a row: it names a
-   count, and styling it like one would read as another thing you are waiting
-   for. */
-.plan-more{font-size:12px;color:var(--dim);padding:6px 10px 0}
+/* The fold control when a season is longer than the card opens. Deliberately
+   not styled like a `.plan` row: it names a count and an action, and looking
+   like a row would read as another thing you are waiting for. */
+.plan-more{font-size:12px;color:var(--dim);padding:6px 10px 2px;background:none;
+  border:0;cursor:pointer;font-family:inherit;text-align:left;display:block}
+.plan-more:hover{color:var(--text);text-decoration:underline}
+.plan-more:focus-visible{outline:2px solid var(--accent-ring);outline-offset:2px}
 /* The sync the icon used to do, moved into the panel and named. It has to
    read as an action rather than as one more line of the report, so it gets a
    border and the full width. */

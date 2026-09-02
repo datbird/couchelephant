@@ -48,10 +48,8 @@ def test_a_month_is_drawn_as_a_month(waiting):
     assert "00:00" not in text
 
 
-def test_a_whole_season_does_not_become_a_wall_of_rows(page):
-    """Series passes now fill with real episodes, so this card went from one
-    row to twenty-odd. It shows the soonest few and counts the rest. The DATA
-    is not capped: the calendar still draws every one of them."""
+def _seed_a_season(page):
+    """Twenty waiting rows on one pass, the shape a followed NFL team makes."""
     with db.tx() as c:
         cur = c.execute("INSERT INTO passes (kind, series_title, uid, enabled, "
                         "created_at) VALUES ('series', 'Longrun', 'uid-long', "
@@ -64,12 +62,48 @@ def test_a_whole_season_does_not_become_a_wall_of_rows(page):
                        WHEN + n * 86400))
     page.goto("/recordings")
     page.wait_for_selector("#planmore", timeout=10000)
-    assert page.locator("#planlist .plan").count() == 8
-    assert "12 more are waiting" in page.locator("#planmore").inner_text()
+    return page
 
 
-def test_the_count_line_stays_away_when_everything_fits(waiting):
+def test_the_card_opens_folded_to_the_next_three(page):
+    """A followed team hands this card its whole season. Seventeen games, and
+    several passes, would turn the top of the page into a wall."""
+    page = _seed_a_season(page)
+    assert page.locator("#planlist .plan:visible").count() == 3
+
+
+def test_the_rest_are_rendered_and_not_thrown_away(page):
+    """A fold, not a limit. Expanding must not need a second request, and the
+    DATA is never capped: the calendar draws every one of them."""
+    page = _seed_a_season(page)
+    assert page.locator("#planlist .plan").count() == 20
+
+
+def test_the_control_says_how_many_are_hidden(page):
+    page = _seed_a_season(page)
+    assert "Show all 20" in page.locator("#planmore").inner_text()
+    assert page.locator("#planmore").get_attribute("aria-expanded") == "false"
+
+
+def test_expanding_shows_the_whole_season(page):
+    page = _seed_a_season(page)
+    page.click("#planmore")
+    assert page.locator("#planlist .plan:visible").count() == 20
+    assert "Show fewer" in page.locator("#planmore").inner_text()
+    assert page.locator("#planmore").get_attribute("aria-expanded") == "true"
+
+
+def test_it_folds_back_up_again(page):
+    page = _seed_a_season(page)
+    page.click("#planmore")
+    page.click("#planmore")
+    assert page.locator("#planlist .plan:visible").count() == 3
+
+
+def test_no_fold_control_when_everything_already_fits(waiting):
+    """One waiting row needs no "show all"."""
     assert waiting.locator("#planmore").count() == 0
+    assert waiting.locator("#planlist .plan:visible").count() == 1
 
 
 def test_the_card_stays_hidden_when_nothing_is_waiting(page):
