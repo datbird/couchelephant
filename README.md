@@ -87,6 +87,9 @@ being recorded if it already is.
 What your Plex server will actually record, read from Plex's own grab list. Two
 views over the same data, and every entry says who booked it and why.
 
+It reads outward from now. What is still to come comes first, soonest at the
+top. What already aired follows, most recent first.
+
 | Agenda | Calendar |
 | --- | --- |
 | ![Agenda](docs/images/schedule-agenda.png) | ![Calendar](docs/images/schedule-calendar.png) |
@@ -105,8 +108,15 @@ A pass can follow something the guide has not reached. Those show as plans
 rather than bookings, with the date at exactly the precision the source gave
 it: a kickoff if the league published one, only a month if that is all anyone
 has announced. None of them are booked. Each becomes a real recording the
-moment Plex carries an airing for it, and if the guide runs past the date with
-no match, you are told which one.
+moment Plex's guide data carries an airing for it, and if the guide runs past
+the date with no match, you are told which one.
+
+Follow a team and this fills with its whole published season, seventeen games
+for an NFL side, months before any broadcaster is named. No key is needed. The
+card opens showing the next three and expands on request, and the calendar
+draws all of them: a dated fixture in its own day, and anything known only to a
+month in a band under the grid, because a calendar cell is a day and a month is
+not.
 
 ### Adding a schedule
 

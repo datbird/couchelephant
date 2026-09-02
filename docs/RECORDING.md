@@ -241,17 +241,26 @@ carries a channel, so only a guide airing can be recorded.
 | Source | Covers | Key |
 | --- | --- | --- |
 | TVmaze | announced series, premiere dates, networks | none, ever |
-| TheSportsDB | a team's published season | **needed for a season.** Without one it answers a single upcoming game per team |
+| TheSportsDB | a team's published season | none. A key raises the rate limit and the depth |
 | TMDB | films and release dates | a free key you register |
 
 TVmaze needs no key and no account, so following a series works the moment the
 container starts. The other two are optional and you are only told about one if
 it would add something to what you already follow.
 
-The ESPN public JSON was tested and rejected. It returns a full season, free
-and keyless, but it answers a plain client and refuses a browser user agent.
-Using it would mean deliberately not looking like a browser, which is someone
-else's bot protection, and it would break one day without warning.
+A team's season needs no key either. The endpoint matters more than the tier:
+`eventsseason.php` is capped, and `eventsround.php` is not. Walked over the
+rounds it returns the whole thing, measured at 272 events across 18 NFL rounds
+holding all 17 games of the team followed. This was got wrong once, in the other
+direction: the capped endpoint was read as "the free tier has no seasons", which
+is why the paragraph below exists at all.
+
+The ESPN public JSON was tested and rejected, twice. It returns a full season
+free and keyless, but it answers a plain client and refuses a browser user
+agent. Using it would mean deliberately not looking like a browser, which is
+someone else's bot protection, and it would break one day without warning. It is
+also unnecessary, since TheSportsDB answers the same question with a documented
+endpoint.
 
 ### Precision, and why it matters
 

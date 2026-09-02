@@ -94,16 +94,21 @@ def start_app(plex_url):
 
 
 def _seed_expectations():
-    """Two announced games the demo guide has not reached yet.
+    """A season the demo guide has not reached yet.
 
-    Both halves of the feature, because they are drawn in different places on
-    purpose. A dated one goes in its calendar cell; a month-only one goes in the
-    band under the grid, since a cell IS a day and putting a month in one states
-    a broadcast date nobody published.
+    Enough rows that the plan card actually folds, because it does in the
+    product: a followed team fills it with a whole published schedule. Seeding
+    two would photograph a card that never folds and document a behaviour the
+    app does not have.
+
+    Every part of the feature is represented, because they are drawn in
+    different places on purpose. A dated fixture goes in its own calendar cell;
+    the month-only one goes in the band under the grid, since a cell IS a day
+    and putting a month in one states a broadcast date nobody published.
 
     Fixed days rather than offsets from today, so the docs image is the same
-    picture every time it is remade. Both sit ~3 weeks out, which is past where
-    any guide reaches, which is exactly why an expectation exists at all.
+    picture every time it is remade. All of them sit past where any guide
+    reaches, which is exactly why an expectation exists at all.
     """
     import datetime
 
@@ -113,13 +118,36 @@ def _seed_expectations():
         return int(datetime.datetime(now.year, now.month, day, hour, 0,
                                      tzinfo=datetime.UTC).timestamp())
 
+    def next_month(day, hour):
+        year, month = (now.year + 1, 1) if now.month == 12 else (now.year,
+                                                                 now.month + 1)
+        return int(datetime.datetime(year, month, day, hour, 0,
+                                     tzinfo=datetime.UTC).timestamp())
+
     pid = db.one("SELECT id FROM passes WHERE kind = 'team'")["id"]
+    # A SEASON, not two rows. Following a team fills this with its whole
+    # published schedule, and the card folds to the next three because of it.
+    # Two rows would photograph a card that never folds, so the docs would show
+    # a behaviour the product does not have.
+    #
     # Invented call signs, same rule as the rest of the demo guide: Q is the
     # second letter, so nothing here is a real station.
     rows = [
         ("demo-exp-1", "Chiefs at Chargers", "KQAADT",
+         day_of_this_month(8, 19), "day"),
+        ("demo-exp-2", "Chiefs at Broncos", "WQBBDT",
+         day_of_this_month(15, 12), "day"),
+        ("demo-exp-3", "Chiefs at Raiders", "KQCCDT",
          day_of_this_month(22, 20), "day"),
-        ("demo-exp-2", "Chiefs at Bills", "WQBBDT",
+        ("demo-exp-4", "Chiefs at Chargers", "WQDDDT",
+         day_of_this_month(29, 12), "day"),
+        ("demo-exp-5", "Chiefs at Broncos", "KQEEDT",
+         next_month(6, 19), "day"),
+        ("demo-exp-6", "Chiefs at Raiders", "WQFFDT",
+         next_month(13, 12), "day"),
+        # The one nobody has dated to a day. It cannot go in a calendar cell
+        # without inventing a broadcast date, so it proves the band instead.
+        ("demo-exp-7", "Chiefs at Bills", "KQGGDT",
          day_of_this_month(26, 12), "month"),
     ]
     with db.tx() as c:
