@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.8 - 2026-09-02
+
+### Fixed
+
+- **An upgrade that changes what we ask for now refills at once.** Each team pass
+  records when it was last asked and skips for a day. That gate already knew an
+  API key changes the answer. It did not know that changing WHICH CALLS we make
+  changes it just as much, and 1.0.7 changed exactly that: from one capped
+  endpoint to a walk over the rounds.
+
+  So every existing install would have kept showing the old single fixture for up
+  to 24 hours after upgrading, and 1.0.7 would have looked like it did nothing.
+  The refill fingerprint now carries the fetch shape alongside the key.
+
+  Same failure as a cache keyed only on age: the record of "already asked"
+  outlived the meaning of the question.
+
 ## 1.0.7 - 2026-09-02
 
 ### Fixed

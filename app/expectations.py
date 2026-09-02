@@ -337,6 +337,12 @@ def fill_series_passes(now: int | None = None) -> int:
     return filled
 
 
+# What the sports fetch asks for. Part of the refill fingerprint, so changing
+# the calls forces one refill per pass rather than leaving a stale answer on
+# screen until tomorrow.
+_FETCH_SHAPE = "rounds"
+
+
 def fill_team_passes(now: int | None = None) -> int:
     """Give every enabled team pass the games its league has scheduled.
 
@@ -366,7 +372,15 @@ def fill_team_passes(now: int | None = None) -> int:
     key = db.get_setting("sportsdb_key") or ""
     # Not the key itself. Whether there is one is all that changes the answer,
     # and a key does not belong in a column that ends up in logs and exports.
-    fingerprint = "key" if key.strip() else "free"
+    #
+    # AND WHICH CALLS WE MAKE, because that changes the answer just as much as a
+    # key does. 1.0.7 moved the season from `eventsseason.php` to a walk over
+    # `eventsround.php`, which is the difference between one fixture and a whole
+    # season. Without the shape in here, every existing install would have gone
+    # on showing the old thin answer for up to a day after upgrading, and the
+    # release would have looked like it had not worked. Bump `_FETCH_SHAPE`
+    # whenever a change alters what comes back.
+    fingerprint = ("key" if key.strip() else "free") + "/" + _FETCH_SHAPE
     filled = 0
     rows = db.query(
         """SELECT id, team_name, sportsdb_team_id, sportsdb_league_id,

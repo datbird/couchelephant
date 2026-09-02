@@ -390,8 +390,30 @@ def test_adding_a_key_refills_at_once_rather_than_tomorrow(sportsdb):
     expectations.fill_team_passes(now=2)
     after = db.one("SELECT sportsdb_asked_with a FROM passes WHERE id = ?",
                    (pass_id,))["a"]
-    assert (before, after) == ("free", "key")
+    assert (before.split("/")[0], after.split("/")[0]) == ("free", "key")
     assert len(expectations.waiting(pass_id)) >= 1
+
+
+def test_changing_what_we_ASK_FOR_also_forces_a_refill(sportsdb):
+    """A key is not the only thing that changes the answer.
+
+    1.0.7 moved the season from one capped endpoint to a walk over the rounds,
+    which is the difference between one fixture and a season. Without the fetch
+    shape in the fingerprint every existing install would have kept showing the
+    old thin answer for up to a day after upgrading, and the release would have
+    looked like it did nothing."""
+    pass_id = _team_pass()
+    expectations.fill_team_passes(now=1)
+    stamped = db.one("SELECT sportsdb_asked_with a FROM passes WHERE id = ?",
+                     (pass_id,))["a"]
+    assert stamped.endswith("/" + expectations._FETCH_SHAPE)
+    # An hour later, nothing changed, so nothing is asked again.
+    assert expectations.fill_team_passes(now=3600) == 0
+    # Now the calls change shape, exactly as an upgrade does.
+    with db.tx() as c:
+        c.execute("UPDATE passes SET sportsdb_asked_with = 'free/older' "
+                  "WHERE id = ?", (pass_id,))
+    assert expectations.fill_team_passes(now=3600) == 1
 
 
 def test_removing_a_key_also_counts_as_a_change(sportsdb):
