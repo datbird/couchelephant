@@ -219,9 +219,9 @@ def keys_tip(has_tmdb: bool, has_sportsdb: bool,
         "code": KEYS_AVAILABLE,
         "severity": TIP,
         "title": "Two optional keys would fill in more of what you follow",
-        "detail": ("CouchElephant already looks past the end of the guide using "
-                   "TVmaze, which needs no key and is always on. Also useful "
-                   "here: " + "; ".join(wants) + "."),
+        "detail": ("CouchElephant already looks past the end of the Plex guide "
+                   "using TVmaze, which needs no key and is always on. Also "
+                   "useful here: " + "; ".join(wants) + "."),
         "hint": "Settings, then Sources. Both are free, and neither is required.",
     }]
 
