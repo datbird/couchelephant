@@ -109,3 +109,20 @@ def test_the_asset_version_moves_when_an_asset_does():
     assert stamp != "0", f"{version}: the walk found no assets to date"
     newest = max(int(p.stat().st_mtime) for p in STATIC.rglob("*") if p.is_file())
     assert int(stamp) >= newest, f"{version} predates the newest asset"
+
+
+def test_no_template_prints_a_literal_backslash_n():
+    """A `\\n` in the markup renders as those two characters on the page.
+
+    It happened: a script that patched this file in used "\\n\\n" where it
+    meant a newline, and the Notifications section ended with a visible \\n\\n
+    for anyone looking at Settings. Outside a <script> block there is no honest
+    reason for the sequence to appear in a template.
+    """
+    bad = []
+    for f in sorted(TEMPLATES.glob("*.html")):
+        markup = re.sub(r"<script.*?</script>", "", f.read_text(), flags=re.S)
+        for n, line in enumerate(markup.splitlines(), 1):
+            if "\\n" in line:
+                bad.append(f"{f.name}:{n}: {line.strip()[:60]}")
+    assert not bad, "literal \\n in markup:\n" + "\n".join(bad)
