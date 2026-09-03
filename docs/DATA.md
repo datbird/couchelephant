@@ -13,6 +13,7 @@ What cannot be rebuilt is what you decided:
 | Channel artwork | the images you supplied, and the files themselves |
 | Settings | server address, timezone, sync interval, preview mode |
 | Accounts | local users, their preferences, and Cloudflare identities |
+| Alert destinations | where alerts go, and which events each one carries |
 
 Three ways to protect it, under **Settings, Backup and restore**. They guard
 against different accidents, so having more than one is not redundant.
@@ -41,11 +42,17 @@ logos/41.1.png          the channel artwork you supplied
 A backup only its own program can read is not much of a backup, and being able
 to look at what you are about to restore is worth more than a clever format.
 
-**Secrets are left out unless you ask.** The Plex token, the Cloudflare AUD
-and the backing-store passwords are credentials, and an export is a file that
-ends up in an email. Tick the box if you are moving to a new machine and want
-them to come too. Channel artwork travels by file name; the other install puts
-it in its own logo folder.
+**Secrets are left out unless you ask.** The Plex token, the Cloudflare AUD, the
+backing-store passwords, and the Discord webhook and Telegram or Notifiarr key on
+each alert destination are all credentials, and an export is a file that ends up
+in an email. A Discord webhook URL in particular is a bearer credential: whoever
+holds it can post into your channel. Tick the box if you are moving to a new
+machine and want them to come too.
+
+A destination without its secret still travels, carrying its name, its kind and
+its event list, so a restore shows you what to paste back in rather than losing
+the fact that you wanted alerts at all. Channel artwork travels by file name; the
+other install puts it in its own logo folder.
 
 Importing offers two ways in:
 
@@ -130,7 +137,7 @@ are restoring from. So a restore writes locally only, then rewrites the shadow
 to match what it pulled. The next ordinary reconcile is then a clean no-op,
 which is what proves the shadow was rewritten.
 
-### Four rules, each of them a bug somewhere else first
+### Five rules, each of them a bug somewhere else first
 
 1. **A failed read raises. It never returns a short set.** A merge that reads an
    empty remote against a populated shadow concludes the remote deleted
@@ -143,6 +150,10 @@ which is what proves the shadow was rewritten.
    for ever.
 4. **The guide is never copied.** It is an output. A restore that resurrected a
    stale programme would be worse than one that left it empty.
+5. **What a destination has already been told is not copied either.** A
+   destination travels; `notify_state` does not. It describes one install's
+   conversation with one channel, and carrying it would either replay every old
+   alert on the new machine or silence the next real one.
 
 ## Things a pass is still waiting for
 

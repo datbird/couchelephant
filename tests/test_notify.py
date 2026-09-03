@@ -479,3 +479,52 @@ def test_all_three_kinds_route_side_by_side(chat):
 def test_an_unknown_kind_is_refused(chat):
     with pytest.raises(ValueError):
         notify.save_destination(name="x", kind="carrier-pigeon", events=[])
+
+
+def test_an_empty_field_renders_empty_not_the_word_none(chat, client):
+    """`X if d else ''` yields Python's None for a NULL column, and Jinja prints
+    that as the word "None" inside the input box. A Discord destination has no
+    chat id, so that field showed it."""
+    _discord(chat, [health.EPG_STALE], name="DVR alerts")
+    body = client.get("/settings").text
+    assert 'value="None"' not in body
+
+
+# ---------- carried with the rest of your decisions ----------
+
+def test_a_destination_travels_with_an_export(chat):
+    """A destination is a decision, like a pass, so a restore has to bring it
+    back. It was silently dropped when the feature first shipped."""
+    from app import dbstore
+    _discord(chat, [health.EPG_STALE], name="DVR alerts")
+    rows = dbstore.read("destinations", include_secrets=True)
+    assert len(rows) == 1
+    rec = next(iter(rows.values()))
+    assert rec["name"] == "DVR alerts"
+    assert rec["events"] == health.EPG_STALE
+    assert rec["webhook"]
+
+
+def test_a_destination_is_keyed_by_uid_not_by_name_or_id(chat):
+    """Two channels may share a name, and `id` differs between installs."""
+    from app import dbstore
+    _discord(chat, [health.EPG_STALE], name="Discord")
+    _discord(chat, [health.GUIDE_SHORT], name="Discord")
+    rows = dbstore.read("destinations", include_secrets=True)
+    assert len(rows) == 2, "a shared name must not collapse two rows into one"
+    assert all(len(k) == 32 for k in rows)
+
+
+def test_the_secrets_stay_behind_unless_the_export_asked_for_them(chat):
+    """Same rule as plex_token. An export shared with somebody must not hand
+    them a webhook that posts into your channel."""
+    from app import dbstore
+    _discord(chat, [health.EPG_STALE])
+    _telegram(chat, [health.EPG_STALE])
+    _notifiarr(chat, [health.EPG_STALE])
+    for rec in dbstore.read("destinations").values():
+        assert "webhook" not in rec
+        assert "token" not in rec
+        # What it is and what it carries still travel, so a restore knows what
+        # to ask you to paste back in.
+        assert rec["kind"] and rec["events"]

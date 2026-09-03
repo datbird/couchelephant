@@ -72,6 +72,18 @@ STORES = {
         "where": "custom_logo IS NOT NULL AND custom_logo != ''",
         "label": "Channel artwork",
     },
+    "destinations": {
+        # `uid`, not `id` and not `name`. See rule 2. A person may well have two
+        # destinations both called "Discord".
+        "table": "destinations", "key": ("uid",), "pk": ("uid",), "db": "main",
+        "cols": ("uid", "name", "kind", "webhook", "token", "chat_id", "events",
+                 "remind_hours", "enabled", "created_at"),
+        # A Discord webhook URL is a bearer credential and the Telegram token
+        # and Notifiarr key are secrets, so they travel only when the export
+        # was asked for with secrets, exactly like `plex_token`.
+        "secret_cols": ("webhook", "token"),
+        "label": "Alert destinations",
+    },
     "users": {
         "table": "users", "key": ("username",), "pk": ("username",), "db": "auth",
         "cols": ("username", "pw_hash", "pw_salt", "role", "created_at"),
@@ -156,6 +168,9 @@ def read(name: str, include_secrets: bool = False) -> dict[str, dict]:
                 continue
             if not include_secrets and rec["key"] in SECRET_SETTINGS:
                 continue
+        for col in (spec.get("secret_cols") or ()):
+            if not include_secrets:
+                rec.pop(col, None)
         if name == "channel_art":
             # The row holds an absolute path. Only its name travels: the other
             # install keeps its logos wherever it keeps them.

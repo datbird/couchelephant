@@ -37,6 +37,7 @@ a fault sends no recovery message either. You cannot be told a problem ended if
 you were never told it started.
 """
 import time
+import uuid
 from urllib.parse import urlparse
 
 import httpx
@@ -214,11 +215,11 @@ def save_destination(*, name, kind, events, remind_hours=24, webhook=None,
                       (*params, dest_id))
             return dest_id
         cur = c.execute(
-            "INSERT INTO destinations (name, kind, webhook, token, chat_id, "
+            "INSERT INTO destinations (uid, name, kind, webhook, token, chat_id, "
             "events, remind_hours, enabled, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,1,?,?)",
-            (name, kind, webhook, token, chat_id, ",".join(codes),
-             int(remind_hours or 0), now, now))
+            "VALUES (?,?,?,?,?,?,?,?,1,?,?)",
+            (uuid.uuid4().hex, name, kind, webhook, token, chat_id,
+             ",".join(codes), int(remind_hours or 0), now, now))
         dest_id = cur.lastrowid
     _seed(dest_id, now)
     return dest_id

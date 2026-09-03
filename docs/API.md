@@ -99,6 +99,11 @@ sync fills in its games.
 | `POST /settings/channels/{vcn}/logo` | Upload your own logo for a channel. Multipart, field `logo` |
 | `POST /settings/channels/{vcn}/logo/reset` | Go back to the guide's logo |
 | `POST /settings/users/{id}/delete` | Remove an account |
+| `POST /settings/notify/save` | Create or update an alert destination. `events` repeats, once per ticked event. A masked secret posted back is dropped rather than saved over the real one |
+| `POST /settings/notify/{id}/test` | Send a real test message. Redirects with the verdict in `?notified=` |
+| `POST /settings/notify/{id}/enabled` | Turn one destination on or off. `on` is `1` or `0` |
+| `POST /settings/notify/{id}/delete` | Remove a destination, and everything it had been told |
+| `POST /settings/notify/chatid` | Ask Telegram for the chat id of whoever messaged the bot |
 | `POST /api/theme` | Remember the theme against the account. `theme` is `light` or `dark` |
 | `POST /sync` | Run a guide sync now |
 

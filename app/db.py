@@ -265,6 +265,10 @@ CREATE TABLE IF NOT EXISTS notices (
 -- never changes what an existing one receives.
 CREATE TABLE IF NOT EXISTS destinations (
     id           INTEGER PRIMARY KEY,
+    -- Stable across machines, unlike `id`, and unlike `name` which the user may
+    -- reuse. Rule 2 in docs/DATA.md: a key must mean the same row on any
+    -- machine, which is why passes carry one too.
+    uid          TEXT,
     name         TEXT NOT NULL,
     -- 'discord', 'telegram' or 'notifiarr'. The transport is chosen from this
     -- and nowhere else, so a fourth platform is one new function in notify.py.
@@ -448,6 +452,9 @@ MIGRATIONS = [
     # until a recording you expected never happens.
     ("sync_log", "epg_refreshed_at", "INTEGER"),
     ("sync_log", "guide_ends_at", "INTEGER"),
+    # Destinations gained a uid for the same reason passes have one: an export
+    # taken here has to name the same row when it is restored somewhere else.
+    ("destinations", "uid", "TEXT"),
 ]
 
 
@@ -484,6 +491,10 @@ def _backfill_uids(conn):
     conn.execute(
         "UPDATE our_grabs SET pass_uid = (SELECT uid FROM passes WHERE passes.id = "
         "our_grabs.pass_id) WHERE pass_uid IS NULL AND pass_id IS NOT NULL")
+    for r in conn.execute(
+            "SELECT id FROM destinations WHERE uid IS NULL OR uid = ''").fetchall():
+        conn.execute("UPDATE destinations SET uid = ? WHERE id = ?",
+                     (uuid.uuid4().hex, r["id"]))
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:

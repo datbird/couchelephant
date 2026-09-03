@@ -17,6 +17,7 @@ readable by whoever inherits it.
 | `app/passes.py` | **Choosing which airing to record.** The heart of the app |
 | `app/smartfilter.py` | The smart filter: a nested condition tree, compiled to SQL |
 | `app/health.py` | **Watching Plex do its own job**, and the notices that come of it |
+| `app/notify.py` | **Sending those notices somewhere you will see them.** Discord, Telegram and Notifiarr, behind one call |
 | `app/verify.py` | **Comparing a booking against the pass that made it**, without inventing a difference |
 | `app/teamcat.py` | The shipped team catalogue, and matching a Plex team to it |
 | `app/filters.py` | The guide's filter tokens |
@@ -33,7 +34,7 @@ readable by whoever inherits it.
 | `app/routes/passes.py` | The schedule, passes, rules, smart filters |
 | `app/routes/account.py` | First run, sign in, sign out, theme |
 | `app/routes/data.py` | Export, import, backups, the backing store |
-| `app/routes/settings.py` | The Plex connection, accounts, artwork, sync |
+| `app/routes/settings.py` | The Plex connection, accounts, artwork, sync, alert destinations |
 
 `dbstore.py`, `portable.py`, `backups.py` and `backingstore.py` are explained
 in [Your data](DATA.md), including why the guide is never copied.
@@ -62,6 +63,8 @@ take the other with it.
 | `plex_grabs` | Mirror of Plex's own scheduled recordings |
 | `sync_log` | One row per sync, with what Plex's guide looked like at the time |
 | `notices` | Something wrong that you need to know about. One row per condition |
+| `destinations` | Where alerts go. One row per channel, each with its own list of events. `uid` names one on any machine; `id` does not |
+| `notify_state` | What each destination has already been told. **A row existing is the whole repeat-suppression mechanism** |
 | `sync_shadow` | What the backing store and this database agreed on last time |
 | `backup_jobs` | Snapshot jobs, and how each one last went |
 

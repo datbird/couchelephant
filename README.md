@@ -15,7 +15,7 @@ It sits beside Plex. It does not replace it, proxy it, or ask you to watch
 anything anywhere else. Recordings land in your Plex library exactly as they
 always did.
 
-Version 1.0.1.
+Version 1.2.1.
 
 ---
 
@@ -56,6 +56,9 @@ It also does several things Plex cannot say at all:
   guide gets a day shorter every day until what you wanted is past the end of
   it. You find out the evening the recording does not happen. CouchElephant
   checks every sync and badges the sync button instead.
+- **Say it somewhere you will actually see it.** A badge only exists on a page
+  you have open. Alerts go out to Discord, Telegram or Notifiarr, and you
+  choose which events reach which channel.
 
 ## What it looks like
 
@@ -147,6 +150,29 @@ A problem badges the sync button, because a guide that has stopped moving is a
 sync problem. A notice says what is wrong and what to do, clears itself when
 the condition clears, and cannot be dismissed.
 
+### Telling you about it
+
+A notice on a page nobody has open is a notice nobody reads. So the same checks
+send.
+
+Add as many destinations as you like. Each one is named, and each carries its
+own list of events, so faults can go to one channel and recordings to another.
+
+- **Discord needs no bot.** A webhook URL from your own channel settings is the
+  whole integration.
+- **Telegram needs a token but no running bot.** One outgoing message at a time.
+  It finds your chat id for you rather than making you hunt for a number.
+- **Notifiarr**, if you already run it. One bot in one channel, and everything
+  you own arrives through it instead of through a webhook set up per
+  application.
+
+A fault reports its whole life: once when it opens, a reminder on the interval
+you pick while it stays open, and once when it clears. A one-off event, like a
+pass booking something, is said exactly once. A channel added today is not sent
+a backlog of what is already open.
+
+![Notifications](docs/images/settings-notifications.png)
+
 ### Settings
 
 Sections down the left, sub-tabs inside each, and a search that reads all of
@@ -226,12 +252,14 @@ Full instructions are in [docs/INSTALL.md](docs/INSTALL.md).
 ./scripts/test.sh
 ```
 
-410 checks: the airing choice, the pin, the smart filter compiler, the
-three-way merge behind the backing store, the Plex client against a fake server
-that reproduces the real one's quirks, every endpoint, and a browser suite that
-drives the guide, the record panel, the recordings page, the smart filter
-builder, backup and restore, settings, the phone layout and first run. It refuses to start unless every path it would write to
-is scratch. See [docs/DEVELOPING.md](docs/DEVELOPING.md).
+712 checks: the airing choice, the pin, the smart filter compiler, the
+three-way merge behind the backing store, the Plex client and the three alert
+services against fake servers that reproduce the real ones' quirks, every
+endpoint, and a browser suite that drives the guide, the record panel, the
+recordings page, the smart filter builder, backup and restore, settings, the
+phone layout and first run. It refuses to start unless every path it would
+write to is scratch, and no test may reach Plex, Discord, Telegram or
+Notifiarr. See [docs/DEVELOPING.md](docs/DEVELOPING.md).
 
 Every picture above is made by `scripts/test.sh --shots`, from an invented
 guide in `tests/demo_guide.py`. None of them shows anybody's real television,

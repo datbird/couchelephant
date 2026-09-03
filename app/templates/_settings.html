@@ -6,7 +6,7 @@
   <input type="hidden" name="dest_id" value="{{ d.id if d else '' }}">
   <div class="field">
     <label>Name</label>
-    <input name="name" value="{{ d.name if d else '' }}" placeholder="DVR alerts">
+    <input name="name" value="{{ (d.name or '') if d else '' }}" placeholder="DVR alerts">
     <span class="help">Yours, so you can tell two channels apart.</span>
   </div>
   <div class="field">
@@ -38,7 +38,7 @@
   </div>
   <div class="field">
     <label>Telegram chat, or Discord channel id</label>
-    <input name="chat_id" value="{{ d.chat_id if d else '' }}" placeholder="found for you">
+    <input name="chat_id" value="{{ (d.chat_id or '') if d else '' }}" placeholder="found for you">
     <span class="help">Telegram: message the bot once, save, then press Find chat
       below. Notifiarr: the numeric Discord channel it should post into. Turn on
       Developer Mode in Discord, right-click the channel, Copy Channel ID.</span>

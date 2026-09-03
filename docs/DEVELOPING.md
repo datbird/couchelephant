@@ -119,7 +119,9 @@ behaves the same either way.
 `tests/schemas/v1.0.1.sql` is the database schema exactly as the published
 version shipped it, taken from the tag. `tests/test_upgrade.py` builds a
 database from it, puts rows in, runs `db.init()`, and checks the result has
-every column a fresh install would.
+every table and every column a fresh install would. A whole table added later,
+such as `destinations`, is covered by the same check: a table nobody created
+reads as one missing all of its columns.
 
 That baseline has to be a real historical schema. Deriving it from
 `db.MIGRATIONS` makes the check circular: a migration nobody wrote is also a

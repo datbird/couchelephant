@@ -104,6 +104,39 @@ but nothing is written to your DVR. It exists so you can watch CouchElephant
 make its choices before you trust it with your server. Turn it off when the
 choices look right.
 
+## Alerts
+
+Off for a new install. **Settings, Notifications.**
+
+Nothing is sent until you add a destination. Add as many as you like, name each
+one, and tick which events it carries, so faults can go to one channel and
+recordings to another.
+
+| Where | What you need | How to get it |
+| --- | --- | --- |
+| **Discord** | a webhook URL | Channel settings, Integrations, Webhooks, New Webhook, Copy URL. No bot, no application, no OAuth |
+| **Telegram** | a bot token, and a chat | Ask `@BotFather` for a token. Paste it, save, message your bot once, then press **Find chat** and it reads the id for you |
+| **Notifiarr** | your **global** API key, and a Discord channel id | The key is on your Notifiarr account. Integration-specific keys are rejected by the passthrough. For the channel: turn on Developer Mode in Discord, right-click the channel, Copy Channel ID |
+
+All three are outbound only. Nothing listens, nothing polls, and nothing here
+ever needs a port forwarded, which matters on a home server with no public
+address.
+
+**Press Send a test on each one before you trust it.** The verdict says what
+happened rather than only that it failed.
+
+Both the Discord webhook URL and the Telegram or Notifiarr key are kept like
+passwords: masked in the page and never written to a log. A Discord webhook URL
+is a bearer credential, so anyone holding it can post into your channel.
+
+A fault is announced when it opens, mentioned again on the interval you choose
+while it stays open, and announced once more when it clears. A one-off event,
+like a pass booking a recording, is said exactly once however many syncs run.
+A destination added today is not sent a backlog of what is already open.
+
+Suggestions are never sent. Only a fault, or something that actually happened,
+is worth interrupting you for.
+
 ## Sign-in
 
 Off for a new install. See [AUTH.md](AUTH.md).

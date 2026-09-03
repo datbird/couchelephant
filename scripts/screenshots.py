@@ -159,6 +159,26 @@ def _seed_expectations():
                 (pid, sid, title, network, when, precision, int(time.time())))
 
 
+def seed_destinations():
+    """Two alert destinations, so the Notifications shot is not an empty page.
+
+    The credentials are invented and nothing is ever sent: the screenshot run
+    only renders the page. The webhook still has to be a real Discord host,
+    because `notify.save_destination` refuses anything else.
+    """
+    from app import health, notify
+    notify.save_destination(
+        name="DVR alerts", kind="discord", remind_hours=24,
+        webhook="https://discord.com/api/webhooks/000000000000000000/example",
+        events=[health.EPG_STALE, health.GUIDE_SHORT, health.PLEX_UNREACHABLE,
+                health.BOOKING_REPAIR_FAILED, health.EXPECTATION_MISSED,
+                notify.SYNC_FAILED])
+    notify.save_destination(
+        name="Phone", kind="telegram", remind_hours=72,
+        token="0000000:example", chat_id="000000000",
+        events=[health.EPG_STALE, notify.PASS_BOOKED])
+
+
 def shot(page, name):
     path = os.path.join(OUT, f"{name}.png")
     page.screenshot(path=path)
@@ -297,6 +317,12 @@ def main():
                                timeout=20000)
         page.wait_for_timeout(400)
         shot(page, "settings-backingstore")
+        seed_destinations()
+        page.goto("/settings")
+        page.wait_for_selector("#setnav .nav-item", timeout=20000)
+        page.click('.nav-item[data-sec="notify"]')
+        page.wait_for_timeout(400)
+        shot(page, "settings-notifications")
 
         # ---- first run ----
         db.set_setting("plex_url", "")
