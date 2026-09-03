@@ -12,6 +12,10 @@ forwarded or a socket held open.
   - **Discord needs no bot.** A webhook URL is the entire integration.
   - **Telegram needs a token but no running bot.** One HTTPS POST. "Bot" is
     only what Telegram calls the token.
+  - **Notifiarr** is a relay somebody may already run. It costs one more hop,
+    and it buys one bot in one channel instead of a webhook per application.
+    Whoever already routes Radarr, Sonarr and Plex through it wants this here
+    too, rather than a fifteenth integration to set up and remember.
 
 Two kinds of thing are worth sending, and they behave differently.
 
@@ -44,6 +48,11 @@ TIMEOUT = 10.0
 # Telegram has no user-supplied host: the URL is built from this and the token,
 # so there is no server-side request forgery surface on that side at all.
 TELEGRAM_BASE = "https://api.telegram.org"
+
+# Notifiarr's passthrough. Also no user-supplied host: the key goes in the path
+# and the Discord channel goes in the body, so there is no forgery surface here
+# either.
+NOTIFIARR_BASE = "https://notifiarr.com"
 
 # Discord's webhook URL *is* user-supplied, and the server will POST to it. Left
 # unchecked that is an SSRF hole pointed at the LAN this container sits on. The
@@ -108,6 +117,8 @@ ACTIVITY_WINDOW = 7 * 86400
 # And state for a moment is kept four times longer than the window that could
 # re-announce it, so the two can never meet.
 STATE_TTL = 30 * 86400
+
+KINDS = ("discord", "telegram", "notifiarr")
 
 SEVERITY_COLOUR = {"bad": 0xD1453B, "warn": 0xD9822B, "ok": 0x3BA55D}
 
@@ -179,7 +190,7 @@ def save_destination(*, name, kind, events, remind_hours=24, webhook=None,
     it starts from now rather than being handed a backlog. See `_seed`.
     """
     kind = (kind or "").strip().lower()
-    if kind not in ("discord", "telegram"):
+    if kind not in KINDS:
         raise ValueError(f"unknown destination kind: {kind!r}")
     name = (name or "").strip() or kind.title()
     codes = [e for e in events if e in CATALOG_CODES]
@@ -287,6 +298,33 @@ def _send_telegram(dest, title, detail, severity) -> None:
         raise SendError(f"Telegram refused it: {body.get('description') or 'no reason given'}")
 
 
+def _send_notifiarr(dest, title, detail, severity) -> None:
+    """Passthrough to notifiarr.com, which posts it into the Discord channel.
+
+    The reply is text rather than JSON on some paths, so success is judged on
+    the status code and on the body not announcing an error, rather than on a
+    field that is not always there.
+    """
+    payload = {
+        "notification": {"update": False, "name": "CouchElephant"},
+        "discord": {
+            "ids": {"channel": int(dest["chat_id"])},
+            "color": f"{SEVERITY_COLOUR.get(severity, SEVERITY_COLOUR['warn']):06X}",
+            "text": {"title": title[:256], "description": (detail or "")[:4000]},
+        },
+    }
+    url = f"{NOTIFIARR_BASE.rstrip('/')}/api/v1/notification/passthrough/{dest['token']}"
+    with httpx.Client(timeout=TIMEOUT) as http:
+        r = http.post(url, json=payload,
+                      headers={"Content-Type": "application/json",
+                               "Accept": "text/plain"})
+    if r.status_code >= 400:
+        raise SendError(f"Notifiarr answered {r.status_code}")
+    body = (r.text or "").strip()
+    if body.lower().startswith("error") or '"result":"error"' in body.replace(" ", ""):
+        raise SendError(f"Notifiarr refused it: {body[:200]}")
+
+
 def _deliver(dest, title, detail, severity) -> bool:
     """One message, one destination. Never raises.
 
@@ -303,6 +341,12 @@ def _deliver(dest, title, detail, severity) -> bool:
             if not (dest.get("token") and dest.get("chat_id")):
                 raise SendError("The token or the chat is missing.")
             _send_telegram(dest, title, detail, severity)
+        elif dest["kind"] == "notifiarr":
+            if not (dest.get("token") and dest.get("chat_id")):
+                raise SendError("The API key or the channel is missing.")
+            if not str(dest["chat_id"]).strip().isdigit():
+                raise SendError("The channel must be a numeric Discord channel id.")
+            _send_notifiarr(dest, title, detail, severity)
         else:
             raise SendError(f"Unknown kind {dest['kind']!r}")
     except Exception as e:
@@ -334,6 +378,14 @@ def test(dest_id: int) -> str:
                 return "No webhook URL is set."
             _send_discord(dest, "CouchElephant test",
                           "If you can read this, alerts will reach here.", "ok")
+        elif dest["kind"] == "notifiarr":
+            if not dest.get("token"):
+                return "No Notifiarr API key is set."
+            if not str(dest.get("chat_id") or "").strip().isdigit():
+                return ("No Discord channel id is set. Turn on Developer Mode in "
+                        "Discord, right-click the channel, Copy Channel ID.")
+            _send_notifiarr(dest, "CouchElephant test",
+                            "If you can read this, alerts will reach here.", "ok")
         else:
             if not dest.get("token"):
                 return "No bot token is set."

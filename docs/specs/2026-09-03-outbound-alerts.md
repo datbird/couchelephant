@@ -20,8 +20,8 @@ delivery does not exist.
 
 ## What is being built
 
-Outbound alerts only. The app says something happened, into Discord or Telegram.
-Nothing listens, nothing polls, nothing holds a socket open.
+Outbound alerts only. The app says something happened, into Discord, Telegram
+or Notifiarr. Nothing listens, nothing polls, nothing holds a socket open.
 
 **Discord needs no bot.** A webhook URL is the entire integration. The user makes
 one in their own channel settings and pastes it in.
@@ -30,17 +30,45 @@ one in their own channel settings and pastes it in.
 `api.telegram.org/bot<token>/sendMessage`. "Bot" is only what Telegram calls the
 token.
 
-Both are outbound. That matters because a self-hosted install sits behind a
+**Notifiarr is for somebody who already runs it.** POST to
+`notifiarr.com/api/v1/notification/passthrough/<global api key>` and its bot
+posts into the Discord channel named in the body. It is one more hop than a
+webhook, and that hop is the point: a person routing Radarr, Sonarr and Plex
+through Notifiarr wants one bot in one channel, not a fifteenth integration to
+set up and remember. Reducing hops is not worth more than reducing the number of
+places you have to configure, and the choice is the user's either way.
+
+The payload it needs, from the Notifiarr wiki:
+
+```json
+{
+  "notification": {"update": false, "name": "CouchElephant"},
+  "discord": {
+    "ids": {"channel": 735481457153277994},
+    "color": "D1453B",
+    "text": {"title": "...", "description": "..."}
+  }
+}
+```
+
+`discord.ids.channel` is an **integer**, not a string, and a quoted id goes
+nowhere silently. The colour is six hex digits with no leading hash. Headers are
+`Content-Type: application/json` and `Accept: text/plain`. It answers 200 with a
+text body and says `"result":"error"` in that body rather than in the status
+code, so a 200 alone never proves delivery.
+
+All three are outbound. That matters because a self-hosted install sits behind a
 router with no public address, and nothing here may ever need a port forwarded.
 
-## The four decisions
+## The decisions
 
 1. **Destinations are a list.** Any number, each named, each with its own event
    selection. Failures to one channel, recordings to another, and a phone
    separately, is a thing people want and a flat pair of settings keys cannot
    express.
-2. **Both platforms, one module.** `app/notify.py` holds both transports behind
-   one call. Route and sync code never learn which platform is configured.
+2. **Every platform behind one module.** `app/notify.py` holds the transports
+   behind one call. Route and sync code never learn which platform is
+   configured. Three shipped: Discord, Telegram and Notifiarr.
 3. **The catalog is faults plus activity.** All eight health notices, plus four
    derived events. Activity needs new change detection, and doing it later would
    mean touching the same code twice.
@@ -106,10 +134,10 @@ a new install and an existing database alike. `MIGRATIONS` is only for columns.
 CREATE TABLE IF NOT EXISTS destinations (
     id           INTEGER PRIMARY KEY,
     name         TEXT NOT NULL,
-    kind         TEXT NOT NULL,              -- 'discord' | 'telegram'
+    kind         TEXT NOT NULL,              -- 'discord'|'telegram'|'notifiarr'
     webhook      TEXT,                       -- discord. a secret.
-    token        TEXT,                       -- telegram. a secret.
-    chat_id      TEXT,                       -- telegram. not a secret.
+    token        TEXT,                       -- telegram token / notifiarr key. secret.
+    chat_id      TEXT,                       -- telegram chat / discord channel id.
     events       TEXT NOT NULL DEFAULT '',   -- comma-separated event codes
     remind_hours INTEGER NOT NULL DEFAULT 24,-- 0 disables reminders
     enabled      INTEGER NOT NULL DEFAULT 1,
@@ -176,9 +204,10 @@ same as `plex_token` in `_settings.html`, and neither may reach a log line.
 **The webhook is a user-supplied URL the server will POST to**, which is a
 server-side request forgery hole if left open. It is validated against the
 Discord host: the scheme must be `https` and the host must be `discord.com`,
-`discordapp.com`, `ptb.discord.com` or `canary.discord.com`. Telegram has no
-user-supplied host at all, since the URL is built from `api.telegram.org` and the
-token.
+`discordapp.com`, `ptb.discord.com` or `canary.discord.com`. The host is compared
+whole and never with `endswith`, so `discord.com.evil.example.com` is refused.
+Telegram and Notifiarr have no user-supplied host at all, since both URLs are
+built from a fixed base plus the key.
 
 **A send that fails is logged and swallowed.** A notification that cannot be
 delivered must never break a sync. `dispatch` is wrapped at its call site as
@@ -240,3 +269,9 @@ Pinned:
 - a send that fails does not break the sync
 - neither the webhook nor the token appears in a rendered page or a log line
 - a webhook URL pointing anywhere but Discord is refused
+- Notifiarr sends the channel as an integer, the colour as six hex digits, and
+  the app name Notifiarr keys its rate limits on
+- Notifiarr answering 200 with an error in the body is not counted as delivered
+- a Notifiarr channel that is not numeric never leaves the app, and the verdict
+  says how to find the right one rather than only that this one is wrong
+- all three kinds run side by side, each keeping its own state

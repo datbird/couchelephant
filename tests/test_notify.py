@@ -30,6 +30,7 @@ def chat(monkeypatch):
     monkeypatch.setattr(notify, "TELEGRAM_BASE", url)
     monkeypatch.setattr(notify, "DISCORD_HOSTS", frozenset({"127.0.0.1", "localhost"}))
     monkeypatch.setattr(notify, "DISCORD_SCHEMES", frozenset({"http"}))
+    monkeypatch.setattr(notify, "NOTIFIARR_BASE", url)
     yield url
     fake_chat.stop()
 
@@ -44,6 +45,12 @@ def _telegram(chat, events, name="Phone", remind_hours=24):
     return notify.save_destination(
         name=name, kind="telegram", events=events, remind_hours=remind_hours,
         token="111:aaa", chat_id="4242")
+
+
+def _notifiarr(chat, events, name="Notifiarr", remind_hours=24, channel="735481457153277994"):
+    return notify.save_destination(
+        name=name, kind="notifiarr", events=events, remind_hours=remind_hours,
+        token="nkey-abc", chat_id=channel)
 
 
 def _raise(code, severity="bad", title="Guide has gone stale", now=None):
@@ -403,3 +410,72 @@ def test_an_existing_destination_renders_its_editor(chat, client):
     assert "Edit DVR alerts" in body
     # The event it carries is ticked, one it does not is not.
     assert body.count('name="events"') >= len(notify.CATALOG)
+
+
+# ---------- notifiarr ----------
+
+def test_notifiarr_carries_the_channel_the_title_and_the_colour(chat):
+    _notifiarr(chat, [health.EPG_STALE])
+    _raise(health.EPG_STALE)
+    assert notify.dispatch() == 1
+
+    body = fake_chat.notifiarr_sent()[0]
+    assert body["notification"]["name"] == "CouchElephant"
+    # An integer, not a string. Notifiarr's schema says integer, and a quoted
+    # id is the mistake that makes it silently go nowhere.
+    assert body["discord"]["ids"]["channel"] == 735481457153277994
+    assert isinstance(body["discord"]["ids"]["channel"], int)
+    assert body["discord"]["text"]["title"] == "Guide has gone stale"
+    assert "Plex last refreshed 5 days ago." in body["discord"]["text"]["description"]
+    # Six hex digits, no leading hash, which is what the API asks for.
+    assert body["discord"]["color"] == "D1453B"
+
+
+def test_notifiarr_reports_failure_in_its_body_not_its_status(chat):
+    _notifiarr(chat, [health.EPG_STALE])
+    fake_chat.NOTIFIARR_OK = False
+    _raise(health.EPG_STALE)
+
+    # 200 with an error in the body. Trusting the status alone would record a
+    # delivery that never happened, and the alert would be lost for good.
+    assert notify.dispatch() == 0
+    # So the next sync tries again.
+    fake_chat.NOTIFIARR_OK = True
+    assert notify.dispatch() == 1
+
+
+def test_notifiarr_refuses_a_channel_that_is_not_an_id(chat):
+    dest = _notifiarr(chat, [health.EPG_STALE], channel="general")
+    _raise(health.EPG_STALE)
+    assert notify.dispatch() == 0
+    assert fake_chat.notifiarr_sent() == []
+    # And the verdict says how to get the right value, not just that this one
+    # is wrong. "Invalid channel" would leave somebody stuck.
+    verdict = notify.test(dest).lower()
+    assert "channel id" in verdict and "developer mode" in verdict
+
+
+def test_notifiarr_masks_its_api_key(chat, client):
+    _notifiarr(chat, [health.EPG_STALE])
+    assert "nkey-abc" not in client.get("/partial/settings").text
+    for d in notify.destinations():
+        assert d.get("token") != "nkey-abc"
+
+
+def test_all_three_kinds_route_side_by_side(chat):
+    _discord(chat, [health.EPG_STALE], name="Discord")
+    _telegram(chat, [health.EPG_STALE], name="Phone")
+    _notifiarr(chat, [health.EPG_STALE], name="Relay")
+    _raise(health.EPG_STALE)
+
+    assert notify.dispatch() == 3
+    assert len(fake_chat.discord_sent()) == 1
+    assert len(fake_chat.telegram_sent()) == 1
+    assert len(fake_chat.notifiarr_sent()) == 1
+    # And each keeps its own state, so none of them repeats.
+    assert notify.dispatch() == 0
+
+
+def test_an_unknown_kind_is_refused(chat):
+    with pytest.raises(ValueError):
+        notify.save_destination(name="x", kind="carrier-pigeon", events=[])

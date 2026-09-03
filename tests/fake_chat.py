@@ -10,6 +10,8 @@ parts that matter:
   - Telegram answers 200 with `{"ok": false, ...}` for a bad token, so an HTTP
     status alone never proves a message was delivered
   - Telegram's getUpdates returns an empty list until somebody messages the bot
+  - Notifiarr answers 200 with a text body, and says "error" in that body rather
+    than in the status code, so a 200 alone never proves delivery
 
 **No test may reach Discord or Telegram.** Every send is pointed here.
 
@@ -29,6 +31,7 @@ SENT: list[tuple[str, str, dict]] = []
 # Flip these from a test to make the far side misbehave.
 DISCORD_STATUS = 204
 TELEGRAM_OK = True
+NOTIFIARR_OK = True
 # What getUpdates hands back. Empty is the honest default: a bot nobody has
 # messaged has no chat id to find.
 TELEGRAM_UPDATES: list[dict] = []
@@ -38,10 +41,11 @@ BAD_TOKEN = "000:revoked"
 
 
 def reset() -> None:
-    global DISCORD_STATUS, TELEGRAM_OK, TELEGRAM_UPDATES
+    global DISCORD_STATUS, TELEGRAM_OK, TELEGRAM_UPDATES, NOTIFIARR_OK
     SENT.clear()
     DISCORD_STATUS = 204
     TELEGRAM_OK = True
+    NOTIFIARR_OK = True
     TELEGRAM_UPDATES = []
 
 
@@ -51,6 +55,10 @@ def discord_sent() -> list[dict]:
 
 def telegram_sent() -> list[dict]:
     return [b for p, path, b in SENT if p == "telegram" and path.endswith("/sendMessage")]
+
+
+def notifiarr_sent() -> list[dict]:
+    return [b for p, _, b in SENT if p == "notifiarr"]
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -64,6 +72,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _text(self, status, body):
+        raw = body.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     def _empty(self, status):
         self.send_response(status)
@@ -88,6 +104,17 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(DISCORD_STATUS, {"message": "Unknown Webhook", "code": 10015})
             else:
                 self._empty(DISCORD_STATUS)
+            return
+        # Notifiarr: /api/v1/notification/passthrough/<apikey>
+        if path.startswith("/api/v1/notification/passthrough/"):
+            SENT.append(("notifiarr", path, body))
+            if not NOTIFIARR_OK:
+                # A refusal arrives as 200 with the word error in a text body.
+                self._text(200, '{"result":"error","details":{"response":'
+                                '"invalid channel"}}')
+            else:
+                self._text(200, '{"result":"success","details":'
+                                '{"response":"notification sent"}}')
             return
         # Telegram: /bot<token>/<method>
         if path.startswith("/bot"):

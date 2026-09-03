@@ -266,16 +266,18 @@ CREATE TABLE IF NOT EXISTS notices (
 CREATE TABLE IF NOT EXISTS destinations (
     id           INTEGER PRIMARY KEY,
     name         TEXT NOT NULL,
-    -- 'discord' or 'telegram'. The transport is chosen from this and nowhere
-    -- else, so a third platform is one new function in notify.py.
+    -- 'discord', 'telegram' or 'notifiarr'. The transport is chosen from this
+    -- and nowhere else, so a fourth platform is one new function in notify.py.
     kind         TEXT NOT NULL,
     -- Discord's whole integration is this URL, and it is a bearer credential:
     -- anyone holding it can post to the channel. Masked in the UI, never logged.
     webhook      TEXT,
-    -- Telegram's bot token. Also a secret, also masked.
+    -- The secret for the kinds that use one: Telegram's bot token, or the
+    -- Notifiarr global API key. Masked, never logged.
     token        TEXT,
-    -- Telegram's chat. Not a secret, and found for the user by getUpdates
-    -- rather than made them hunt for a numeric id.
+    -- Where the message lands, for the kinds that need it named: Telegram's
+    -- chat, or the Discord channel id Notifiarr posts into. Not a secret.
+    -- Telegram's is found by getUpdates rather than hunted for by hand.
     chat_id      TEXT,
     -- Comma-separated event codes. Empty means this destination is configured
     -- but has been asked to send nothing, which is not the same as disabled.

@@ -14,7 +14,10 @@
     <select name="kind">
       <option value="discord" {{ 'selected' if d and d.kind == 'discord' }}>Discord</option>
       <option value="telegram" {{ 'selected' if d and d.kind == 'telegram' }}>Telegram</option>
+      <option value="notifiarr" {{ 'selected' if d and d.kind == 'notifiarr' }}>Notifiarr</option>
     </select>
+    <span class="help">Fill in only the fields for the one you picked. The rest
+      are ignored.</span>
   </div>
   <div class="field">
     <label>Discord webhook URL</label>
@@ -25,16 +28,20 @@
       Discord address is accepted.</span>
   </div>
   <div class="field">
-    <label>Telegram bot token</label>
+    <label>Telegram bot token, or Notifiarr API key</label>
     <input name="token" type="password" value="{{ d.token if d else '' }}"
            placeholder="123456:ABC-DEF...">
-    <span class="help">From BotFather. Nothing runs or listens; this is one
-      outgoing message at a time.</span>
+    <span class="help">Telegram: from BotFather. Nothing runs or listens; this is
+      one outgoing message at a time. Notifiarr: your <b>global</b> API key, not
+      an integration-specific one, which the passthrough will not accept. Kept
+      like a password and never logged.</span>
   </div>
   <div class="field">
-    <label>Telegram chat</label>
+    <label>Telegram chat, or Discord channel id</label>
     <input name="chat_id" value="{{ d.chat_id if d else '' }}" placeholder="found for you">
-    <span class="help">Message the bot once, save, then press Find chat below.</span>
+    <span class="help">Telegram: message the bot once, save, then press Find chat
+      below. Notifiarr: the numeric Discord channel it should post into. Turn on
+      Developer Mode in Discord, right-click the channel, Copy Channel ID.</span>
   </div>
   <div class="field">
     <label>Remind me while it is still wrong</label>
@@ -120,7 +127,8 @@
             <td><b>{{ d.name }}</b>
               {% if not d.enabled %}<span class="pill">off</span>{% endif %}
               {% if d.last_error %}<span class="pill bad">failing</span>{% endif %}</td>
-            <td class="tiny dim">{{ 'Discord' if d.kind == 'discord' else 'Telegram' }}</td>
+            <td class="tiny dim">{{ {'discord': 'Discord', 'telegram': 'Telegram',
+                                     'notifiarr': 'Notifiarr'}.get(d.kind, d.kind) }}</td>
             <td class="tiny dim">{{ d.event_count }}</td>
             <td style="text-align:right;white-space:nowrap">
               <form method="post" action="/settings/notify/{{ d.id }}/test"
@@ -155,7 +163,10 @@
           <p class="dim"><b>Discord needs no bot.</b> Open your channel's settings,
             Integrations, Webhooks, make one, and paste the URL here.
             <b>Telegram needs a token but no running bot.</b> Ask BotFather for one,
-            paste it, save, then message the bot once and press Find chat.</p>
+            paste it, save, then message the bot once and press Find chat.
+            <b>Notifiarr</b> suits you if you already run it: one bot in one
+            channel, and everything you own arrives through it rather than
+            through a webhook set up per application.</p>
           {{ dest_form(none) }}
         </div>
       </section>
