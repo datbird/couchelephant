@@ -3,7 +3,7 @@ import os
 import time
 import traceback
 
-from . import db, expectations, health, passes, teamcat, verify
+from . import db, expectations, health, notify, passes, teamcat, verify
 from .plex import Plex, PlexError, discover
 
 LOGO_DIR = os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
@@ -793,6 +793,13 @@ def full_sync() -> tuple[int, str]:
                    _int_or_none(db.get_setting("guide_ends_at"))))
         c.execute("DELETE FROM sync_log WHERE id NOT IN "
                   "(SELECT id FROM sync_log ORDER BY id DESC LIMIT 50)")
+    # After the sync_log row, so a failed sync can see its own row and say so.
+    # Wrapped here as well as inside `_deliver`, because a notification that
+    # cannot be sent must never be the reason a sync is reported as failed.
+    try:
+        notify.dispatch()
+    except Exception:
+        pass
     return ok, detail
 
 

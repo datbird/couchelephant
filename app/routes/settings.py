@@ -7,7 +7,7 @@ import urllib.parse
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from .. import auth, cf_access, db, health, passes, sync
+from .. import auth, cf_access, db, health, notify, passes, sync
 from ..plex import Plex, PlexError
 from ._shared import ZONES, current_user, page
 
@@ -32,19 +32,27 @@ def _channel_rows():
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings_page(request: Request, tested: str = "", autherror: str = ""):
+def settings_page(request: Request, tested: str = "", autherror: str = "",
+                  notified: str = ""):
     return page(request, "settings.html", zones=ZONES, tested=tested,
-                autherror=autherror, logos=sync.logo_coverage(),
+                autherror=autherror, notified=notified,
+                logos=sync.logo_coverage(),
                 channels=_channel_rows(), users=auth.list_users(),
+                dests=notify.destinations(), catalog=notify.CATALOG,
+                faults=notify.FAULTS, activity=notify.ACTIVITY,
                 cf_ready=cf_access.available())
 
 
 @router.get("/partial/settings", response_class=HTMLResponse)
-def settings_partial(request: Request, tested: str = "", autherror: str = ""):
+def settings_partial(request: Request, tested: str = "", autherror: str = "",
+                     notified: str = ""):
     """The settings window on its own, for the overlay the gear opens."""
     return page(request, "_settings.html", zones=ZONES, tested=tested,
-                autherror=autherror, logos=sync.logo_coverage(),
+                autherror=autherror, notified=notified,
+                logos=sync.logo_coverage(),
                 channels=_channel_rows(), users=auth.list_users(),
+                dests=notify.destinations(), catalog=notify.CATALOG,
+                faults=notify.FAULTS, activity=notify.ACTIVITY,
                 cf_ready=cf_access.available())
 
 
@@ -306,3 +314,83 @@ async def sync_now():
     return RedirectResponse("/", status_code=303)
 
 
+
+
+# ---------- notifications ----------
+
+@router.post("/settings/notify/save")
+def notify_save(dest_id: str = Form(""), name: str = Form(""),
+                kind: str = Form("discord"), webhook: str = Form(""),
+                token: str = Form(""), chat_id: str = Form(""),
+                remind_hours: str = Form("24"),
+                events: list[str] = Form([])):
+    """Create or update one destination.
+
+    A masked secret is a form echoing back what it was shown, not a new value,
+    so it is dropped rather than saved. Same rule as `plex_token`.
+    """
+    def real(v):
+        v = (v or "").strip()
+        return "" if v.startswith("*") else v
+    try:
+        notify.save_destination(
+            dest_id=int(dest_id) if dest_id.strip() else None,
+            name=name, kind=kind, events=events,
+            remind_hours=int(remind_hours or 0),
+            webhook=real(webhook), token=real(token),
+            chat_id=(chat_id or "").strip())
+    except ValueError as e:
+        return RedirectResponse(
+            "/settings?notified=" + urllib.parse.quote(str(e)), status_code=303)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/notify/{dest_id}/delete")
+def notify_delete(dest_id: int):
+    notify.delete_destination(dest_id)
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/notify/{dest_id}/enabled")
+def notify_enabled(dest_id: int, on: str = Form("1")):
+    notify.set_enabled(dest_id, on == "1")
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/notify/{dest_id}/test")
+def notify_test(dest_id: int):
+    """Send a real message. Every integration like this needs one, and nobody
+    trusts it without."""
+    return RedirectResponse(
+        "/settings?notified=" + urllib.parse.quote(notify.test(dest_id)),
+        status_code=303)
+
+
+@router.post("/settings/notify/chatid")
+def notify_chatid(dest_id: str = Form(""), token: str = Form("")):
+    """Find the Telegram chat id, so nobody hunts for a numeric one by hand.
+
+    The token on the form may be masked, in which case the stored one is used.
+    """
+    tok = (token or "").strip()
+    dest = notify.get_destination(int(dest_id)) if dest_id.strip() else None
+    if not tok or tok.startswith("*"):
+        tok = (dest or {}).get("token") or ""
+    if not tok:
+        return RedirectResponse(
+            "/settings?notified=" + urllib.parse.quote(
+                "Save the bot token first, then press this."), status_code=303)
+    found = notify.find_chat_id(tok)
+    if not found:
+        return RedirectResponse(
+            "/settings?notified=" + urllib.parse.quote(
+                "Nothing yet. Send the bot a message, then press this again."),
+            status_code=303)
+    if dest:
+        notify.save_destination(
+            dest_id=dest["id"], name=dest["name"], kind=dest["kind"],
+            events=notify.split_events(dest["events"]),
+            remind_hours=dest["remind_hours"], chat_id=found)
+    return RedirectResponse(
+        "/settings?notified=" + urllib.parse.quote(f"Found chat {found}."),
+        status_code=303)

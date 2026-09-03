@@ -1,3 +1,83 @@
+{# One destination's editor, used for adding and for editing. Both halves of
+   every secret are masked on the way out, and a masked value posted back is
+   dropped rather than saved over the real one. #}
+{% macro dest_form(d) %}
+<form method="post" action="/settings/notify/save" class="setform">
+  <input type="hidden" name="dest_id" value="{{ d.id if d else '' }}">
+  <div class="field">
+    <label>Name</label>
+    <input name="name" value="{{ d.name if d else '' }}" placeholder="DVR alerts">
+    <span class="help">Yours, so you can tell two channels apart.</span>
+  </div>
+  <div class="field">
+    <label>Where</label>
+    <select name="kind">
+      <option value="discord" {{ 'selected' if d and d.kind == 'discord' }}>Discord</option>
+      <option value="telegram" {{ 'selected' if d and d.kind == 'telegram' }}>Telegram</option>
+    </select>
+  </div>
+  <div class="field">
+    <label>Discord webhook URL</label>
+    <input name="webhook" type="password" value="{{ d.webhook if d else '' }}"
+           placeholder="https://discord.com/api/webhooks/...">
+    <span class="help">Anyone holding this can post to your channel, so it is kept
+      like a password and never logged. Leave the dots alone to keep it. Only a
+      Discord address is accepted.</span>
+  </div>
+  <div class="field">
+    <label>Telegram bot token</label>
+    <input name="token" type="password" value="{{ d.token if d else '' }}"
+           placeholder="123456:ABC-DEF...">
+    <span class="help">From BotFather. Nothing runs or listens; this is one
+      outgoing message at a time.</span>
+  </div>
+  <div class="field">
+    <label>Telegram chat</label>
+    <input name="chat_id" value="{{ d.chat_id if d else '' }}" placeholder="found for you">
+    <span class="help">Message the bot once, save, then press Find chat below.</span>
+  </div>
+  <div class="field">
+    <label>Remind me while it is still wrong</label>
+    <select name="remind_hours">
+      {% for h, lab in [(0, 'Never, tell me once'), (6, 'Every 6 hours'),
+                        (12, 'Every 12 hours'), (24, 'Once a day'),
+                        (72, 'Every 3 days')] %}
+        <option value="{{ h }}" {{ 'selected' if (d.remind_hours if d else 24) == h }}>{{ lab }}</option>
+      {% endfor %}
+    </select>
+    <span class="help">A fault is always announced when it opens and when it clears.
+      This is only how often it is mentioned again in between.</span>
+  </div>
+  <div class="field">
+    <label>Send these faults</label>
+    {% for code, label in faults %}
+      <label class="tiny" style="display:block;font-weight:400">
+        <input type="checkbox" name="events" value="{{ code }}"
+               {{ 'checked' if d and code in d.event_list }}> {{ label }}</label>
+    {% endfor %}
+  </div>
+  <div class="field">
+    <label>And this activity</label>
+    {% for code, label in activity %}
+      <label class="tiny" style="display:block;font-weight:400">
+        <input type="checkbox" name="events" value="{{ code }}"
+               {{ 'checked' if d and code in d.event_list }}> {{ label }}</label>
+    {% endfor %}
+    <span class="help">Suggestions are never sent. Only a fault or a thing that
+      actually happened is worth interrupting you for.</span>
+  </div>
+  <div class="row">
+    <button class="primary">Save</button><span class="saved"></span>
+  </div>
+</form>
+{% if d and d.kind == 'telegram' %}
+<form method="post" action="/settings/notify/chatid" class="setform" style="margin-top:6px">
+  <input type="hidden" name="dest_id" value="{{ d.id }}">
+  <button class="tiny">Find chat</button>
+</form>
+{% endif %}
+{% endmacro %}
+
 {# The settings window: sections down the left, sub-tabs inside each, content
    scrolling on the right. Shape taken from the same author's ludodex. Rendered
    both inside the overlay and as a whole page, from this one file. #}
@@ -9,6 +89,7 @@
     <div id="setnav">
       <button type="button" class="nav-item sel" data-sec="plex">Plex</button>
       <button type="button" class="nav-item" data-sec="recording">Recording</button>
+      <button type="button" class="nav-item" data-sec="notify">Notifications</button>
       <button type="button" class="nav-item" data-sec="accounts">Accounts</button>
       <button type="button" class="nav-item" data-sec="channels">Channels</button>
       <button type="button" class="nav-item" data-sec="data">Backup &amp; restore</button>
@@ -21,7 +102,64 @@
     <div class="settings-tabs" id="settabs"></div>
     <div class="settings-content" id="setcontent">
 
-      {# ---------------- Plex ---------------- #}
+
+      {# ---------------- Notifications ---------------- #}
+      <section data-sec="notify" data-tab="dests" data-tab-label="Destinations" hidden>
+        <h2>Notifications</h2>
+        <p class="dim">Where CouchElephant tells you something happened. A notice on a
+          page nobody has open is a notice nobody reads.</p>
+        {% if notified %}
+          <div class="banner {{ 'ok' if notified.startswith('OK') or notified.startswith('Found') else 'bad' }}">{{ notified }}</div>
+        {% endif %}
+
+        {% if dests %}
+        <table class="stack" data-find="notification destinations discord telegram webhook list">
+          <tr><th>Name</th><th>Where</th><th>Events</th><th></th></tr>
+          {% for d in dests %}
+          <tr>
+            <td><b>{{ d.name }}</b>
+              {% if not d.enabled %}<span class="pill">off</span>{% endif %}
+              {% if d.last_error %}<span class="pill bad">failing</span>{% endif %}</td>
+            <td class="tiny dim">{{ 'Discord' if d.kind == 'discord' else 'Telegram' }}</td>
+            <td class="tiny dim">{{ d.event_count }}</td>
+            <td style="text-align:right;white-space:nowrap">
+              <form method="post" action="/settings/notify/{{ d.id }}/test"
+                    class="setform" style="display:inline;margin:0">
+                <button class="tiny">Send a test</button></form>
+              <form method="post" action="/settings/notify/{{ d.id }}/enabled"
+                    class="setform" style="display:inline;margin:0">
+                <input type="hidden" name="on" value="{{ '0' if d.enabled else '1' }}">
+                <button class="tiny">{{ 'Disable' if d.enabled else 'Enable' }}</button></form>
+              <form method="post" action="/settings/notify/{{ d.id }}/delete"
+                    class="setform" style="display:inline;margin:0">
+                <button class="tiny danger">Remove</button></form>
+            </td>
+          </tr>
+          {% if d.last_error %}
+          <tr><td colspan="4" class="tiny dim">Last send failed: {{ d.last_error }}</td></tr>
+          {% endif %}
+          <tr><td colspan="4">
+            <details>
+              <summary class="tiny dim">Edit {{ d.name }}</summary>
+              {{ dest_form(d) }}
+            </details>
+          </td></tr>
+          {% endfor %}
+        </table>
+        {% else %}
+          <div class="empty tiny">Nothing is set up, so nothing is sent.</div>
+        {% endif %}
+
+        <div class="setblock" data-find="add notification destination discord webhook telegram bot token">
+          <h3>Add a destination</h3>
+          <p class="dim"><b>Discord needs no bot.</b> Open your channel's settings,
+            Integrations, Webhooks, make one, and paste the URL here.
+            <b>Telegram needs a token but no running bot.</b> Ask BotFather for one,
+            paste it, save, then message the bot once and press Find chat.</p>
+          {{ dest_form(none) }}
+        </div>
+      </section>
+\n\n      {# ---------------- Plex ---------------- #}
       <section data-sec="plex" data-tab="server" data-tab-label="Server">
         <h2>Plex server</h2>
         <p class="dim">The server CouchElephant rides on.</p>

@@ -258,6 +258,62 @@ CREATE TABLE IF NOT EXISTS notices (
     -- away is one you forget about. `health.dismiss` is where that is kept.
     dismissed_at INTEGER
 );
+
+-- Where alerts go. A list rather than a fixed pair of settings keys, because
+-- routing is the point: faults to one channel, recordings to another, a phone
+-- separately. Each row carries its own event selection, so adding a channel
+-- never changes what an existing one receives.
+CREATE TABLE IF NOT EXISTS destinations (
+    id           INTEGER PRIMARY KEY,
+    name         TEXT NOT NULL,
+    -- 'discord' or 'telegram'. The transport is chosen from this and nowhere
+    -- else, so a third platform is one new function in notify.py.
+    kind         TEXT NOT NULL,
+    -- Discord's whole integration is this URL, and it is a bearer credential:
+    -- anyone holding it can post to the channel. Masked in the UI, never logged.
+    webhook      TEXT,
+    -- Telegram's bot token. Also a secret, also masked.
+    token        TEXT,
+    -- Telegram's chat. Not a secret, and found for the user by getUpdates
+    -- rather than made them hunt for a numeric id.
+    chat_id      TEXT,
+    -- Comma-separated event codes. Empty means this destination is configured
+    -- but has been asked to send nothing, which is not the same as disabled.
+    events       TEXT NOT NULL DEFAULT '',
+    -- How long a fault may stay open before it is mentioned again. 0 silences
+    -- reminders without silencing the open and clear messages.
+    remind_hours INTEGER NOT NULL DEFAULT 24,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    -- What happened last time. This app has no logger, and a webhook that has
+    -- been revoked fails silently forever otherwise. The UI shows it, which is
+    -- the only place a person would look.
+    last_ok_at   INTEGER,
+    last_error   TEXT,
+    created_at   INTEGER,
+    updated_at   INTEGER
+);
+
+-- What each destination has already been told. This one table is the whole
+-- repeat-suppression mechanism, and it holds one rule: a row exists means this
+-- destination has heard about this thing.
+--
+-- A fault keeps its row for as long as it is open, and the row's last_sent_at
+-- is what a reminder is measured from. A one-shot activity event writes its row
+-- once and never reminds, and the row existing is what stops the next hourly
+-- sync announcing the same booking all over again.
+--
+-- It is per destination and not global on purpose. Two destinations may hold
+-- different reminder intervals, and one added tomorrow must not be handed a
+-- backlog of everything that opened last week.
+CREATE TABLE IF NOT EXISTS notify_state (
+    destination_id INTEGER NOT NULL,
+    event          TEXT NOT NULL,
+    -- The thing this is about: a notice code, a grab id, an airing id.
+    key            TEXT NOT NULL,
+    opened_at      INTEGER,
+    last_sent_at   INTEGER,
+    PRIMARY KEY (destination_id, event, key)
+);
 """
 
 DEFAULTS = {
