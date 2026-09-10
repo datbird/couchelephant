@@ -203,7 +203,7 @@ def test_preview_mode_writes_nothing_to_plex(plex, synced):
     db.set_setting("dry_run", "1")
     with db.tx() as c:
         c.execute("INSERT INTO passes (kind, team_id, team_name, enabled, created_at) "
-                  "VALUES ('team', 236, 'Chiefs', 1, 0)")
+                  "VALUES ('team', 236, 'Kansas City Chiefs', 1, 0)")
     out = passes.run_passes()
     assert [d["action"] for d in out] == ["would schedule"]
     assert fake_plex.STATE.created == []
@@ -214,7 +214,7 @@ def test_a_pass_limited_to_a_network_with_no_airing_says_which(plex, synced):
     with db.tx() as c:
         c.execute("""INSERT INTO passes (kind, team_id, team_name, networks, channels,
                                          enabled, created_at)
-                     VALUES ('team', 236, 'Chiefs', '["ABC","CBS"]', '[]', 1, 0)""")
+                     VALUES ('team', 236, 'Kansas City Chiefs', '["ABC","CBS"]', '[]', 1, 0)""")
     out = passes.run_passes()
     assert out[0]["action"] == "skipped"
     assert out[0]["reason"] == "no airing is on ABC or CBS"
@@ -257,3 +257,66 @@ def test_the_pin_survives_a_template_that_declares_nothing(plex, synced):
     assert made["oneShot"] == "1"
     assert made["startTimeslot"] == str(pick["begins_at"])
     assert made["startOffsetMinutes"] == "1"
+
+
+def _airing_with_teams(aid, guid, vcn, begins, teams, title, league):
+    with db.tx() as c:
+        c.execute("INSERT OR REPLACE INTO programs (guid, title, rating_key, teams, "
+                  "grandparent_title, section) VALUES (?,?,?,?,?,?)",
+                  (guid, title, "rk", json.dumps(teams), league, "sports"))
+        c.execute("INSERT OR IGNORE INTO channels (vcn, network, call_sign) VALUES (?,?,?)",
+                  (vcn, "NBC", vcn))
+        c.execute("""INSERT OR REPLACE INTO airings
+                     (id, program_guid, channel_vcn, channel_identifier, begins_at,
+                      ends_at, premiere, drm) VALUES (?,?,?,?,?,?,1,0)""",
+                  (aid, guid, vcn, f"id-{vcn}", begins, begins + 3600))
+
+
+def test_a_team_id_is_only_meaningful_inside_its_own_programme():
+    """The live fault, 2026-09-10: a Kansas City Chiefs pass matched Borussia
+    Dortmund, Arizona State, Washburn and a Chicago Bears game.
+
+    A pass holds an id from Plex's section-level team list. A programme holds
+    its own array, numbered per programme. Of the 89 ids that appeared in both
+    on the live guide, 71 named a different team in each. Inside the programme
+    arrays alone, id 343 was Kansas City Chiefs, Borussia Dortmund, Los Angeles
+    Rams AND San Diego State. Matching on the number books whatever sport
+    happens to share it.
+    """
+    soon = int(time.time()) + 3600
+    _airing_with_teams("chiefs", "plex://episode/chiefs", "41.1", soon,
+                       [{"id": 343, "name": "Kansas City Chiefs"},
+                        {"id": 349, "name": "Denver Broncos"}],
+                       "Denver Broncos at Kansas City Chiefs", "NFL Football")
+    _airing_with_teams("bvb", "plex://episode/bvb", "38.1", soon + 60,
+                       [{"id": 343, "name": "Borussia Dortmund"},
+                        {"id": 344, "name": "SC Paderborn"}],
+                       "Borussia Dortmund vs. Paderborn 07", "Bundesliga")
+
+    got = passes.candidate_airings(343, team_name="Kansas City Chiefs")
+    titles = {r["title"] for r in got}
+    assert "Denver Broncos at Kansas City Chiefs" in titles
+    assert "Borussia Dortmund vs. Paderborn 07" not in titles, \
+        "a shared id is not a shared team"
+
+
+def test_a_team_pass_still_matches_after_the_guide_renumbers_it():
+    """The reason the id was in the match at all. The name has to carry it,
+    because the id moves: one refresh took the Chiefs from 236 to 245 on the
+    same game with the same guid."""
+    soon = int(time.time()) + 3600
+    _airing_with_teams("renum", "plex://episode/renum", "41.1", soon,
+                       [{"id": 999, "name": "Kansas City Chiefs"},
+                        {"id": 998, "name": "Denver Broncos"}],
+                       "Denver Broncos at Kansas City Chiefs", "NFL Football")
+    got = passes.candidate_airings(236, team_name="Kansas City Chiefs")
+    assert [r["id"] for r in got] == ["renum"], "found by name, whatever the id"
+
+
+def test_a_pass_with_no_name_at_all_still_falls_back_to_the_id():
+    """An old pass made before the name was stored has nothing else to go on."""
+    soon = int(time.time()) + 3600
+    _airing_with_teams("byid", "plex://episode/byid", "41.1", soon,
+                       [{"id": 4242, "name": "Kansas City Chiefs"}],
+                       "Chiefs at Somebody", "NFL Football")
+    assert [r["id"] for r in passes.candidate_airings(4242)] == ["byid"]

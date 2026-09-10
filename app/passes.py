@@ -54,15 +54,29 @@ def candidate_airings(team_id: int | None, horizon_days: int = 30,
                       team_name: str | None = None) -> list:
     """Future airings of games featuring this team.
 
-    Matched on Plex's id OR on the team's name, because the id is not stable.
-    Measured on a live server: one guide refresh moved the Kansas City Chiefs
-    from 236 to 245 on the same game, with the same programme guid. Following
-    the id alone meant a pass silently stopped matching, and "nothing matched"
-    looks exactly like a team with no games this week.
+    Matched on the team's NAME. The id is a fallback and nothing more.
 
-    Both halves are needed, not one. A pass corrected to the new id still has
-    to find programmes cached under the old one, and a programme carrying the
-    new id still has to be found by a pass that has not been corrected yet.
+    A pass holds an id from the `teams` table, which is Plex's section-level
+    team list. A programme holds its own `teams` array, numbered per programme.
+    THEY ARE DIFFERENT NUMBERINGS, and comparing one to the other is a category
+    error rather than a stale lookup.
+
+    Measured on the live guide on 2026-09-10: of the 89 ids that appear in both,
+    71 name a different team in each. The section list calls 253 "Nevada" while
+    a programme calls it "Sporting Kansas City". Inside the programme arrays
+    alone, id 343 was Kansas City Chiefs, Borussia Dortmund, Los Angeles Rams
+    and San Diego State.
+
+    This used to match on the id OR the name, and the id half is what turned a
+    Kansas City Chiefs pass into one that also tried to record Bundesliga
+    football, two college games and a Bears game: 142 refused bookings. The old
+    reasoning was that a pass and a programme might sit either side of a
+    renumbering, so both halves were needed. That is only sound if the two ids
+    name the same thing, and they never did.
+
+    The id moves as well: one refresh took the Chiefs from 236 to 245 on the
+    same game with the same programme guid. The name is what survives that,
+    which is why it is the only thing consulted when a pass has one.
 
     The name is compared through `teamcat.ident`, which folds case, accents and
     punctuation and nothing else. Deliberately not `teamcat.norm`: that also
@@ -71,17 +85,23 @@ def candidate_airings(team_id: int | None, horizon_days: int = 30,
     Madrid" both to "madrid", and does the same to Cincinnati and FC
     Cincinnati, and to four more pairs in the shipped catalogue.
 
-    Spelling is kept in step at the other end instead: `sync.resolve_team_passes`
-    adopts Plex's own spelling for the team when it repoints a pass, so a pass
-    made from the catalogue stops carrying a name the guide has never used.
+    Spelling is kept in step at the other end: `sync.resolve_team_passes` adopts
+    Plex's own spelling for the team when it repoints a pass, so a pass made
+    from the catalogue stops carrying a name the guide has never used.
     """
     if not team_id and not team_name:
         return []
     key = teamcat.ident(team_name or "")
+    if key:
+        return _future("EXISTS (SELECT 1 FROM json_each(p.teams) t "
+                       "WHERE tident(json_extract(t.value, '$.name')) = ?)",
+                       (key,), horizon_days)
+    # No name to go on. An old pass made before the name was stored has only
+    # the id, and a wrong match is still better than a pass that matches
+    # nothing at all and looks like a quiet week.
     return _future("EXISTS (SELECT 1 FROM json_each(p.teams) t "
-                   "WHERE json_extract(t.value, '$.id') = ? "
-                   "   OR (? != '' AND tident(json_extract(t.value, '$.name')) = ?))",
-                   (int(team_id or 0), key, key), horizon_days)
+                   "WHERE json_extract(t.value, '$.id') = ?)",
+                   (int(team_id or 0),), horizon_days)
 
 
 def series_airings(series_guid: str, horizon_days: int = 30) -> list:

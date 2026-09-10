@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.4 - 2026-09-10
+
+### Fixed
+
+- **A team pass matched teams that were not its own.** A Kansas City Chiefs pass
+  was trying to record a Bundesliga match, two college games and a Bears game.
+
+  A pass holds an id from Plex's section-level team list. A programme holds its
+  own team array, numbered per programme. They are different numberings, so
+  comparing them is a category error rather than a stale lookup. Measured on a
+  live guide: of the 89 ids that appear in both, 71 name a different team in
+  each. The section list calls 253 "Nevada" while a programme calls it
+  "Sporting Kansas City".
+
+  A pass now matches on the team's name, which is what survives a renumbering.
+  The id is used only when a pass has no name at all, which is an old pass made
+  before the name was stored.
+
+  Nothing was ever recorded wrongly, because the settings fault fixed in 1.2.3
+  meant no booking went through at all. Both faults together are why a Chiefs
+  pass recorded nothing for three weeks.
+
 ## 1.2.3 - 2026-09-10
 
 ### Fixed
