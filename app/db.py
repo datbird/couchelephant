@@ -472,10 +472,41 @@ def init() -> None:
     for k, v in DEFAULTS.items():
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     _backfill_uids(conn)
+    _strip_recurring_only_prefs(conn)
     # After the migration and the backfill, not inside SCHEMA: on an existing
     # install the column does not exist until _migrate has run.
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS passes_uid ON passes(uid)")
     conn.commit()
+
+
+# Settings only a recurring Plex rule can honour. A pass always books the
+# one-shot template, which does not offer them, and Plex refuses the whole
+# booking rather than ignoring one it does not know.
+RECURRING_ONLY_PREFS = ("onlyNewAirings",
+                        "autoDeletionItemPolicyUnwatchedLibrary",
+                        "autoDeletionItemPolicyWatchedLibrary")
+
+
+def _strip_recurring_only_prefs(conn):
+    """Clean settings a pass should never have kept.
+
+    A pass made before the settings panel hid these stored them, and every
+    booking it then made was refused by Plex with a bare 400. Bookings survive
+    that now, because `passes.offered_prefs` filters at the point of sending,
+    but the stored value is still a lie about what the pass does, so it goes.
+    """
+    for r in conn.execute(
+            "SELECT id, prefs FROM passes WHERE prefs IS NOT NULL").fetchall():
+        try:
+            cfg = json.loads(r["prefs"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        kept = {k: v for k, v in cfg.items() if k not in RECURRING_ONLY_PREFS}
+        if len(kept) != len(cfg):
+            conn.execute("UPDATE passes SET prefs = ? WHERE id = ?",
+                         (json.dumps(kept), r["id"]))
 
 
 def _backfill_uids(conn):

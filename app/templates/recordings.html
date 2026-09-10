@@ -106,6 +106,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   var offset = 0, PAGE = 40, busy = false, ended = false, lastDay = '';
 
   function row(r) {
+    // A booking Plex refused sits where the recording should have been, rather
+    // than leaving a gap that reads as "nothing was on".
+    if (r.status === 'failed') return failRow(r);
     var h = '<div class="agrow" data-aid="' + esc(r.airing_id || '') + '">';
     // The legend above promises a colour per side. It has to appear on the
     // rows too, or it is a key to nothing.
@@ -122,6 +125,28 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
          '<span class="pill ' + (r.status === 'complete' ? 'ok'
            : r.status === 'inprogress' ? 'live' : '') + '">' +
          esc(r.status === 'inprogress' ? 'recording' : r.status) + '</span></div>';
+    return h + '</div>';
+  }
+
+  function failRow(r) {
+    var n = r.attempts || 1;
+    var h = '<div class="agrow fail" data-aid="' + esc(r.airing_id || '') +
+            '" data-fail="1">';
+    h += '<i class="own ce" title="CouchElephant tried to book this"></i>';
+    h += '<div class="agwhen">' + (r.b ? fmtTime(r.b) : '') + '</div>';
+    h += r.logo ? '<img src="/logo/' + esc(r.vcn) + '" alt="">'
+                : '<span style="width:44px;flex:0 0 44px"></span>';
+    h += '<div class="agtitle">';
+    if (r.parent) h += '<span class="dim tiny">' + esc(r.parent) + '</span>';
+    h += '<b>' + esc(r.title) + '</b>';
+    // The error itself, not a summary of it. Plex's own words are usually the
+    // only thing that says what to change.
+    h += '<span class="agerr">' + esc(r.error || 'Plex refused the recording') +
+         '</span></div>';
+    h += '<div class="agwhy">' + (KIND_ICON[r.kind] || '') +
+         '<span>' + esc(r.reason) + '</span>' +
+         '<span class="pill bad">NOT RECORDING' +
+         (n > 1 ? ' &middot; ' + n + ' tries' : '') + '</span></div>';
     return h + '</div>';
   }
 
@@ -163,7 +188,11 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   // is where the reason and the airings live.
   list.addEventListener('click', function (e) {
     var r = e.target.closest('.agrow');
-    if (r && r.dataset.aid && window.openProgram) window.openProgram(r.dataset.aid);
+    if (!r || !r.dataset.aid) return;
+    // A failed booking opens its own panel. The programme panel cannot answer
+    // the only question worth asking here, which is why it did not record.
+    if (r.dataset.fail && window.openFailure) return window.openFailure(r.dataset.aid);
+    if (window.openProgram) window.openProgram(r.dataset.aid);
   });
 
   // ---- calendar over the same schedule ----
@@ -259,6 +288,14 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
                    '<span>' + esc(r.title) + '</span></div>';
               return;
             }
+            if (r.status === 'failed') {
+              h += '<div class="calitem fail" data-aid="' + esc(r.airing_id || '') +
+                   '" data-fail="1" title="' +
+                   esc(fmtTime(r.b) + '  ' + r.title +
+                       '  (NOT RECORDING: ' + (r.error || 'Plex refused it') + ')') +
+                   '">' + '<span>' + esc(r.title) + '</span></div>';
+              return;
+            }
             h += '<div class="calitem' + (r.who === 'ce' ? ' ce' : '') +
                  '" data-aid="' + esc(r.airing_id || '') + '" title="' +
                  esc(fmtTime(r.b) + '  ' + r.title + '  (' + r.reason + ')') + '">' +
@@ -275,7 +312,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
 
   grid.addEventListener('click', function (e) {
     var it = e.target.closest('.calitem');
-    if (it && it.dataset.aid && window.openProgram) window.openProgram(it.dataset.aid);
+    if (!it || !it.dataset.aid) return;
+    if (it.dataset.fail && window.openFailure) return window.openFailure(it.dataset.aid);
+    if (window.openProgram) window.openProgram(it.dataset.aid);
   });
   document.getElementById('calprev').addEventListener('click', function () {
     cur.setMonth(cur.getMonth() - 1); drawMonth();

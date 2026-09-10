@@ -58,9 +58,9 @@ _PASS_PREF_BLOCKED = frozenset(("oneShot", "lineupChannel", "startTimeslot"))
 # settings it should be offered are the one-shot template's. The recurring
 # template carries three more that mean nothing to a one-shot booking: whether
 # to take repeats, and two policies about deleting episodes it has kept.
-_RECURRING_ONLY = frozenset(("onlyNewAirings",
-                             "autoDeletionItemPolicyUnwatchedLibrary",
-                             "autoDeletionItemPolicyWatchedLibrary"))
+# One list, in db, because the same names decide what a pass may store, what
+# the panel offers, and what an existing pass gets cleaned of on startup.
+_RECURRING_ONLY = frozenset(db.RECURRING_ONLY_PREFS)
 
 # CouchElephant sets these itself, per airing. Offering them on a pass would be
 # a control that does nothing: `_pass_prefs` drops them on the way in, because
@@ -166,7 +166,16 @@ async def api_record_options(airing_id: str):
 
 
 def _pass_prefs(prefs):
-    return {k: v for k, v in (prefs or {}).items() if k not in _PASS_PREF_BLOCKED}
+    """What a pass may store. Everything a one-shot booking cannot honour goes.
+
+    `_PASS_HIDDEN`, not `_PASS_PREF_BLOCKED`. This dropped only the three
+    pinning settings for a long time, while the comment above `_PASS_HIDDEN`
+    already claimed it dropped the recurring-only ones too. So a pass could
+    keep `onlyNewAirings`, the panel simply stopped showing it, and Plex then
+    refused every booking that pass made. Storing a setting the booking can
+    never send is how that becomes invisible.
+    """
+    return {k: v for k, v in (prefs or {}).items() if k not in _PASS_HIDDEN}
 
 
 def _make_pass(kind, team=None, series=None, nets=None, chans=None, prefs=None,

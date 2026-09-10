@@ -146,12 +146,18 @@ if os.environ.get("COUCHELEPHANT_DEMO_GUIDE") == "1":
     TEAMS = [{"key": str(i), "title": n} for i, n in _demo.TEAMS]
 
 
-def _settings():
+def _settings(recurring=False):
     """As the real server sends them, summary and all.
 
     Plex writes a `summary` for every setting. They matter here because the
     panel shows them, and one of them ("Detect commercials") is long enough
     that rendering it inline pushed a single row past six hundred pixels.
+
+    `recurring` says which template this is. A real server offers a different
+    list per template, and the one-shot list is the shorter one. Sending it a
+    setting it did not offer is a 400, so the two lists must not be merged
+    here: that is what let a booking fail against Plex for three weeks while
+    every test passed.
     """
     return [
         {"id": "minVideoQuality", "value": "0", "type": "int",
@@ -193,15 +199,20 @@ def _settings():
          "label": "Limit to airing time",
          # URL encoded inside the enum, as Plex really sends it.
          "enumValues": f"-1:Any|{LIVE_AT}:07%3A00 PM"},
-        # A recurring rule can honour these. A one-shot booking cannot, so a
-        # pass must not be offered them.
-        {"id": "onlyNewAirings", "value": "1", "type": "int", "label": "Airings"},
-        {"id": "autoDeletionItemPolicyWatchedLibrary", "value": "0", "type": "int",
-         "label": "Delete episodes after playing"},
         # No label: plumbing, and must stay hidden.
         {"id": "oneShot", "value": "false", "type": "bool", "label": ""},
         {"id": "comskipEnabled", "value": "-1", "type": "int", "label": ""},
-    ]
+    ] + ([
+        # A recurring rule can honour these. A one-shot booking cannot, so the
+        # real server does not offer them on the one-shot template at all.
+        {"id": "onlyNewAirings", "value": "1", "type": "int", "label": "Airings"},
+        {"id": "autoDeletionItemPolicyWatchedLibrary", "value": "0", "type": "int",
+         "label": "Delete episodes after playing"},
+    ] if recurring else [])
+
+
+def _setting_ids(recurring):
+    return {s["id"] for s in _settings(recurring)}
 
 
 class State:
@@ -248,6 +259,16 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_html(self, text, code=200):
+        """Plex's error pages are HTML, not JSON, which is half of why its 400
+        on a bad setting reads as a network fault rather than a bad request."""
+        body = text.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -355,7 +376,7 @@ class Handler(BaseHTTPRequestHandler):
                                    else f"All {league} Events"), "type": 2,
                          "targetLibrarySectionID": 2,
                          "parameters": f"hints%5Bguid%5D={g}&hints%5Bleague%5D=1",
-                         "Setting": _settings()}]
+                         "Setting": _settings(recurring=True)}]
                 for t in tags:
                     # A real server answers 15 for a team, not 2. Only 4 means
                     # one broadcast; every other type recurs.
@@ -363,7 +384,7 @@ class Handler(BaseHTTPRequestHandler):
                                           else f"All {t['tag']} Events"), "type": 15,
                                  "targetLibrarySectionID": 2,
                                  "parameters": f"hints%5Bguid%5D={g}&hints%5Bteam%5D={t['id']}",
-                                 "Setting": _settings()})
+                                 "Setting": _settings(recurring=True)})
                 return self._container(SubscriptionTemplate=[{"MediaSubscription": subs}])
             return self._container(SubscriptionTemplate=[{
                 "MediaSubscription": [
@@ -374,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                     {"title": "Alle Folgen" if de else "All Episodes", "type": 2,
                      "targetLibrarySectionID": 2,
                      "parameters": f"hints%5Bguid%5D={g}",
-                     "Setting": _settings()},
+                     "Setting": _settings(recurring=True)},
                 ]}])
 
         if p == "/media/subscriptions":
@@ -414,6 +435,19 @@ class Handler(BaseHTTPRequestHandler):
                  if k.startswith("prefs[") and k.endswith("]")}
         guid = (q.get("hints[guid]") or [""])[0]
         one_shot = prefs.get("oneShot") in ("1", "true")
+
+        # The real server rejects a setting the chosen template did not offer.
+        # It says nothing useful: an HTML 400 page, in zero milliseconds, with
+        # no line in its own log. A pass sending `onlyNewAirings` at a one-shot
+        # template failed this way against the live DVR every hour for three
+        # weeks, and the suite was green throughout because this fake accepted
+        # anything. So it does not any more.
+        kind = (q.get("type") or ["4"])[0]
+        allowed = _setting_ids(recurring=str(kind) != "4")
+        if not set(prefs) <= allowed:
+            return self._send_html(
+                "<html><head><title>Bad Request</title></head>"
+                "<body><h1>400 Bad Request</h1></body></html>", 400)
 
         STATE.created.append({"guid": guid, "prefs": prefs,
                               "type": (q.get("type") or [""])[0],

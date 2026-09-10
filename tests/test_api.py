@@ -810,3 +810,17 @@ def test_search_finds_an_accented_title_whatever_the_case(client, synced):
     for q in ("m\u00fcller", "M\u00dcLLER", "M\u00fcller", "\u00fcnterwegs"):
         html = client.get("/partial/airings", params={"q": q}).text
         assert "\u00dcLLER" in html, f"{q!r} found nothing"
+
+
+def test_a_pass_cannot_store_a_setting_a_one_shot_booking_cannot_send(client, synced):
+    """Hiding a control is not the same as refusing the value.
+
+    The panel stopped offering `onlyNewAirings` long before `_pass_prefs`
+    stopped storing it, so a pass kept the value and Plex refused every booking
+    it made. Nothing may put it back, whatever the caller sends.
+    """
+    from app.routes.record import _pass_prefs
+    kept = _pass_prefs({"onlyNewAirings": "1", "startOffsetMinutes": "1",
+                        "autoDeletionItemPolicyWatchedLibrary": "0",
+                        "oneShot": "0", "lineupChannel": "id-41-1"})
+    assert kept == {"startOffsetMinutes": "1"}

@@ -148,3 +148,32 @@ def test_upgrading_twice_is_not_an_error(tmp_path, monkeypatch):
     db.init()
     assert db.one("SELECT title FROM programs")["title"] == "Old Game"
     del db._local.conn
+
+
+def test_an_upgrade_strips_a_setting_a_pass_could_never_send(tmp_path, monkeypatch):
+    """The live fault, 2026-09-10.
+
+    A pass stored `onlyNewAirings` because `_pass_prefs` did not drop it. Every
+    booking that pass made was refused by Plex with a bare 400, 364 times over
+    three weeks. Bookings survive it now, but the stored value still says the
+    pass does something it does not, so an upgrade clears it.
+    """
+    path = tmp_path / "old.db"
+    _old_install(path)
+    monkeypatch.setattr(db, "DB_PATH", str(path))
+    if hasattr(db._local, "conn"):
+        del db._local.conn
+
+    # 1.0.1 had no prefs column at all, so the bad value goes in after the
+    # migration that adds it, which is how it got there on the live install.
+    db.init()
+    with db.tx() as c:
+        c.execute("""UPDATE passes SET prefs =
+                     '{"onlyNewAirings":"1","startOffsetMinutes":"1",
+                       "autoDeletionItemPolicyWatchedLibrary":"0"}'""")
+    db.init()
+    cfg = db.unjs(db.one("SELECT prefs FROM passes")["prefs"], {})
+    assert "onlyNewAirings" not in cfg
+    assert "autoDeletionItemPolicyWatchedLibrary" not in cfg
+    assert cfg["startOffsetMinutes"] == "1", "a real setting is kept"
+    del db._local.conn

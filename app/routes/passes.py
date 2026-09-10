@@ -66,20 +66,91 @@ def _why_map():
     return out
 
 
+# A booking a pass tried to make and could not.
+#
+# Until 2026-09-10 a failure was invisible. The programme dropped off "Waiting
+# for the Plex guide data" the moment the guide carried it, and then nothing
+# took its place: no row in the agenda, no block in the calendar, and no way to
+# tell "nothing was on" from "we tried 364 times and Plex said no". A silent
+# failure on a DVR is worse than a loud one, because you find out when you sit
+# down to watch.
+#
+# So a failure is a row in the same schedule feed as a real booking. Both views
+# read that feed, so neither can forget to show it.
+#
+# `last` is the newest action for the airing and it has to be the failure, or a
+# booking that succeeded on the retry would keep showing as broken. `fails`
+# counts every attempt, which is what says whether this is a blip or a wall.
+# A row is dropped once Plex actually holds a grab for that channel and time,
+# whoever made it, and once the broadcast is in the past: neither is something
+# the user can still act on.
+_FAILED_SQL = """
+  SELECT NULL AS id, pa.program_title AS title,
+         COALESCE(p.grandparent_title, '') AS parent_title,
+         pa.channel_vcn AS channel_vcn, pa.begins_at AS begins_at,
+         a.ends_at AS ends_at, 'failed' AS status, NULL AS subscription,
+         pa.airing_id AS fail_airing_id, pa.reason AS error,
+         pa.pass_id AS fail_pass_id, f.n AS attempts,
+         f.first_at AS first_at, pa.created_at AS last_at
+  FROM pass_actions pa
+  JOIN (SELECT airing_id, MAX(id) AS mx FROM pass_actions
+        WHERE airing_id IS NOT NULL AND dry_run = 0
+        GROUP BY airing_id) last ON last.mx = pa.id
+  JOIN (SELECT airing_id, COUNT(*) AS n, MIN(created_at) AS first_at
+        FROM pass_actions WHERE action = 'failed' AND dry_run = 0
+          AND airing_id IS NOT NULL GROUP BY airing_id) f
+    ON f.airing_id = pa.airing_id
+  LEFT JOIN airings a ON a.id = pa.airing_id
+  LEFT JOIN programs p ON p.guid = pa.program_guid
+  WHERE pa.action = 'failed' AND COALESCE(pa.begins_at, 0) > ?
+    AND NOT EXISTS (SELECT 1 FROM plex_grabs g
+                    WHERE g.channel_vcn = pa.channel_vcn
+                      AND g.begins_at = pa.begins_at)
+"""
+
+_GRABS_SQL = """
+  SELECT g.id AS id, g.title AS title, g.parent_title AS parent_title,
+         g.channel_vcn AS channel_vcn, g.begins_at AS begins_at,
+         g.ends_at AS ends_at, g.status AS status, g.subscription AS subscription,
+         NULL AS fail_airing_id, NULL AS error, NULL AS fail_pass_id,
+         0 AS attempts, NULL AS first_at, NULL AS last_at
+  FROM plex_grabs g
+"""
+
+
+def _schedule_source(now):
+    """Real bookings and failed ones, in one set, so paging cannot split them.
+
+    A UNION rather than two queries merged afterwards. Merged afterwards, a
+    failure that sorts past the end of the first page lands on no page at all,
+    which is the same disappearing act this was written to stop.
+    """
+    return f"({_GRABS_SQL} UNION ALL {_FAILED_SQL})", [now]
+
+
+def failed_booking(airing_id):
+    """One failed booking, for the panel that offers to try it again."""
+    rows = db.query(f"SELECT * FROM ({_FAILED_SQL}) WHERE fail_airing_id = ?",
+                    (0, airing_id))
+    return rows[0] if rows else None
+
+
 def _schedule_rows(limit=None, offset=0, start=None, end=None):
-    """The schedule actually in place on the Plex server.
+    """The schedule actually in place on the Plex server, and what failed.
 
     Read from Plex's own grab list, not from our intentions, because that is
     what will really record. How each one got there is added afterwards.
     """
-    where, args = [], []
+    now = int(time.time())
+    src, args = _schedule_source(now)
+    where = []
     if start is not None:
         where.append("COALESCE(g.begins_at, 0) >= ?")
         args.append(start)
     if end is not None:
         where.append("COALESCE(g.begins_at, 0) < ?")
         args.append(end)
-    sql = "SELECT g.* FROM plex_grabs g"
+    sql = f"SELECT g.* FROM {src} g"
     if where:
         sql += " WHERE " + " AND ".join(where)
     # NEAREST TO NOW, OUTWARD. Plain ascending put August at the top of a page
@@ -97,11 +168,11 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
     # Positional, like the WHERE clause above. SQLite refuses a statement that
     # mixes named and numbered parameters, so `now` is appended twice rather
     # than bound by name.
-    now = int(time.time())
     sql += (" ORDER BY (COALESCE(g.begins_at, 0) < ?) ASC,"
             " CASE WHEN COALESCE(g.begins_at, 0) >= ?"
             "      THEN COALESCE(g.begins_at, 0)"
-            "      ELSE -COALESCE(g.begins_at, 0) END ASC, g.id")
+            "      ELSE -COALESCE(g.begins_at, 0) END ASC,"
+            " (g.status = 'failed') DESC, g.id")
     args += [now, now]
     if limit is not None:
         sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
@@ -112,8 +183,29 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
         "SELECT DISTINCT title FROM programs WHERE teams IS NOT NULL AND teams != '[]'")}
     logos = _logo_map()
 
+    pass_names = {r["id"]: (r["team_name"] or r["series_title"] or r["label"])
+                  for r in db.query("SELECT id, team_name, series_title, label "
+                                    "FROM passes")}
+    pass_kinds = {r["id"]: r["kind"] for r in db.query("SELECT id, kind FROM passes")}
+
     out = []
     for g in db.query(sql, tuple(args)):
+        if g["status"] == "failed":
+            name = pass_names.get(g["fail_pass_id"])
+            out.append({
+                "id": f"fail:{g['fail_airing_id']}",
+                "title": g["title"] or "", "parent": g["parent_title"] or "",
+                "vcn": g["channel_vcn"] or "",
+                "logo": bool(logos.get(g["channel_vcn"])),
+                "b": g["begins_at"], "e": g["ends_at"], "status": "failed",
+                "who": "ce",
+                "kind": _PASS_ICON.get(pass_kinds.get(g["fail_pass_id"]), "series"),
+                "reason": f"the {name} pass" if name else "a pass",
+                "pass_id": g["fail_pass_id"], "airing_id": g["fail_airing_id"],
+                "error": g["error"] or "", "attempts": g["attempts"] or 1,
+                "first_at": g["first_at"], "last_at": g["last_at"],
+            })
+            continue
         w = why.get((g["channel_vcn"], g["begins_at"]))
         if w:
             who, kind, reason = w["who"], w["kind"], w["reason"]
@@ -146,19 +238,96 @@ def api_schedule(offset: int = 0, limit: int = 40, start: int = 0, end: int = 0)
                           start=start or None, end=end or None)
     # Counted over the same window as the rows. Counting every grab while the
     # rows were windowed made `more` true forever for a windowed query.
-    where, args = [], []
+    # Over the same set the rows come from, failures included. Counting only
+    # `plex_grabs` here would make `more` false while failures were still
+    # unread, and the agenda would stop scrolling one page short of them.
+    src, args = _schedule_source(int(time.time()))
+    where = []
     if start:
-        where.append("COALESCE(begins_at, 0) >= ?")
+        where.append("COALESCE(g.begins_at, 0) >= ?")
         args.append(start)
     if end:
-        where.append("COALESCE(begins_at, 0) < ?")
+        where.append("COALESCE(g.begins_at, 0) < ?")
         args.append(end)
-    sql = "SELECT COUNT(*) c FROM plex_grabs"
+    sql = f"SELECT COUNT(*) c FROM {src} g"
     if where:
         sql += " WHERE " + " AND ".join(where)
     total = db.one(sql, tuple(args))["c"]
     return JSONResponse({"ok": True, "rows": rows, "total": total,
                          "more": offset + len(rows) < total})
+
+
+@router.get("/api/schedule/failure")
+def api_schedule_failure(airing_id: str = ""):
+    """Everything known about a booking that would not go through.
+
+    The error verbatim. Plex's own message is often the only thing that says
+    what to change, and paraphrasing it here would lose the part that matters.
+    """
+    f = failed_booking(airing_id)
+    if not f:
+        return JSONResponse({"ok": False, "error": "no failure recorded for that airing"},
+                            status_code=404)
+    p = db.one("SELECT * FROM passes WHERE id = ?", (f["fail_pass_id"],)) \
+        if f["fail_pass_id"] else None
+    a = db.one("SELECT * FROM airings WHERE id = ?", (airing_id,))
+    return JSONResponse({"ok": True, "failure": {
+        "airing_id": airing_id,
+        "title": f["title"] or "",
+        "parent": f["parent_title"] or "",
+        "vcn": f["channel_vcn"] or "",
+        "b": f["begins_at"], "e": f["ends_at"],
+        "error": f["error"] or "",
+        "attempts": f["attempts"] or 1,
+        "first_at": f["first_at"], "last_at": f["last_at"],
+        "pass_name": (p["team_name"] or p["series_title"] or p["label"]) if p else None,
+        "pass_id": f["fail_pass_id"],
+        # Whether a retry can even be attempted. Saying so before the button is
+        # pressed beats a button that always fails the same way.
+        "in_guide": bool(a),
+    }})
+
+
+@router.post("/api/schedule/retry")
+async def api_schedule_retry(airing_id: str = Form(...)):
+    """Try the booking again, now, with whatever the pass says today.
+
+    The same path a sync would take, so a retry that works proves the sync will
+    work too. A retry that fails writes another `failed` action, which keeps the
+    count on the row honest rather than resetting it.
+    """
+    if db.get_setting("dry_run") == "1":
+        return JSONResponse({"ok": False, "error":
+                             "Preview mode is on. Turn it off in Settings to record."},
+                            status_code=400)
+    f = failed_booking(airing_id)
+    if not f:
+        return JSONResponse({"ok": False, "error": "no failure recorded for that airing"},
+                            status_code=404)
+    row = sync._airing_for_schedule(airing_id)
+    if not row:
+        return JSONResponse({"ok": False, "error":
+                             "That broadcast is no longer in the Plex guide."},
+                            status_code=409)
+    p = db.one("SELECT * FROM passes WHERE id = ?", (f["fail_pass_id"],)) \
+        if f["fail_pass_id"] else None
+    prefs = dict(db.unjs(p["prefs"], {}) or {}) if p else {}
+    try:
+        with _plex() as plex:
+            await asyncio.to_thread(passes._schedule, plex, row, None, "pass",
+                                    None, prefs, f["fail_pass_id"])
+            await asyncio.to_thread(sync.sync_recordings, plex)
+    except Exception as e:
+        # Written down, like an automatic attempt. A retry that vanished from
+        # the log would make the attempt count on the row a lie, and the count
+        # is what tells a blip from a wall.
+        msg = f"{type(e).__name__}: {e}"
+        await asyncio.to_thread(passes._log, f["fail_pass_id"], row, "failed",
+                                msg, False)
+        return JSONResponse({"ok": False, "error": msg}, status_code=500)
+    await asyncio.to_thread(passes._log, f["fail_pass_id"], row, "scheduled",
+                            "retried by hand", False)
+    return JSONResponse({"ok": True, "message": "Recording scheduled."})
 
 
 @router.get("/api/series")

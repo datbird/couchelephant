@@ -219,3 +219,41 @@ def test_a_pass_limited_to_a_network_with_no_airing_says_which(plex, synced):
     assert out[0]["action"] == "skipped"
     assert out[0]["reason"] == "no airing is on ABC or CBS"
     assert fake_plex.STATE.created == []
+
+
+def test_a_pass_setting_the_one_shot_template_does_not_offer_is_dropped(plex, synced):
+    """The live fault, 2026-09-10: 364 failed bookings and no Chiefs game.
+
+    A pass created before the UI hid them kept `onlyNewAirings` in its stored
+    settings. A pass always books the one-shot template, which does not offer
+    that setting, so Plex answered 400 to every attempt for three weeks. The
+    booking must survive a stored setting this template will not take.
+    """
+    rows = passes.candidate_airings(236)
+    pick, _ = passes.choose_airing(rows)
+    passes._schedule(plex, pick, None, "test",
+                     prefs={"onlyNewAirings": "1", "startOffsetMinutes": "1",
+                            "autoDeletionItemPolicyWatchedLibrary": "0"})
+    made = fake_plex.STATE.created[-1]["prefs"]
+    assert "onlyNewAirings" not in made
+    assert "autoDeletionItemPolicyWatchedLibrary" not in made
+    assert made["startOffsetMinutes"] == "1", "a setting it does offer still applies"
+    assert made["oneShot"] == "1", "the pin survives the filter"
+
+
+def test_the_pin_survives_a_template_that_declares_nothing(plex, synced):
+    """No Setting list means an unknown server, not an empty allowlist.
+
+    Filtering against nothing would drop the three pinning settings, and the
+    pin is the mechanism the whole app exists for.
+    """
+    rows = passes.candidate_airings(236)
+    pick, _ = passes.choose_airing(rows)
+    bare = dict(passes.single_template(passes.templates(plex, pick)))
+    bare.pop("Setting", None)
+    passes._schedule(plex, pick, None, "test", template=bare,
+                     prefs={"startOffsetMinutes": "1"})
+    made = fake_plex.STATE.created[-1]["prefs"]
+    assert made["oneShot"] == "1"
+    assert made["startTimeslot"] == str(pick["begins_at"])
+    assert made["startOffsetMinutes"] == "1"

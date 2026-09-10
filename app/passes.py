@@ -253,6 +253,29 @@ def single_template(options: list[dict]) -> dict | None:
     return None
 
 
+def offered_prefs(template: dict, prefs: dict) -> dict:
+    """Only the settings this template actually offers.
+
+    Plex refuses a whole booking if one setting is not on the template's own
+    list, and it refuses it with a bare HTML 400 page, in no measurable time,
+    with nothing in its log. Read against the client that is a network fault,
+    not a bad request, which is exactly how it went unnoticed.
+
+    That is not hypothetical. A team pass made before the settings panel
+    started hiding them kept `onlyNewAirings` in its stored settings. A pass
+    always books the one-shot template, and the one-shot template does not
+    offer that setting, so every booking failed from 2026-08-22 to 2026-09-10:
+    364 attempts, two per hour, and no Chiefs game recorded.
+
+    A template that declares no settings is an unknown server, not a server
+    that allows none, so nothing is dropped in that case.
+    """
+    ids = {s.get("id") for s in (template.get("Setting") or []) if s.get("id")}
+    if not ids:
+        return dict(prefs)
+    return {k: v for k, v in prefs.items() if k in ids}
+
+
 def _schedule(plex, row, target_section, source="pass", template=None, prefs=None,
               pass_id=None):
     """Create a recording for this broadcast.
@@ -267,12 +290,13 @@ def _schedule(plex, row, target_section, source="pass", template=None, prefs=Non
         if not chosen:
             raise PlexError("Plex offered no single-event recording option")
 
-    if prefs is None:
-        prefs = {}
-    prefs = dict(prefs)
+    # Drop anything this template will not take, before the pins go on. Plex
+    # answers 400 to the whole request otherwise, and says nothing about why.
+    prefs = offered_prefs(chosen, dict(prefs or {}))
     # These three are not the user's to change on a pass booking. The pin is
     # the whole mechanism: without it Plex picks the airing itself, which is
-    # the bug this app exists to fix.
+    # the bug this app exists to fix. They go on AFTER the filter, so a server
+    # that declares no settings at all still gets a pinned booking.
     prefs.update({
         "oneShot": "1",
         "lineupChannel": row["channel_identifier"] or "",

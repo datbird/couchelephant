@@ -413,6 +413,99 @@
       });
   }
 
+  // ---- a booking Plex refused ----
+  //
+  // Its own panel, because the programme panel answers "what is this and when
+  // is it on", and the only question here is why it did not record. Before
+  // this existed a failure showed nowhere at all: the row simply never
+  // appeared, and 364 refused bookings looked exactly like a quiet week.
+  function renderFailure(f) {
+    var h = '';
+    h += '<div class="ovlhead"><div class="ovlmeta">';
+    h += '<div class="parent">' + esc(f.parent || 'Not recording') + '</div>';
+    h += '<h2>' + esc(f.title) + '</h2>';
+    h += '</div><button class="ovlclose" id="ovlx" aria-label="Close">&times;</button></div>';
+
+    h += '<div class="banner bad ovlnote"><b>This will not record.</b> ' +
+         'CouchElephant asked Plex to schedule it and Plex refused' +
+         (f.attempts > 1 ? ', ' + f.attempts + ' times' : '') + '.</div>';
+
+    h += '<div class="ovlsec"><h3>The broadcast</h3><dl class="kv">';
+    h += '<dt>When</dt><dd>' + esc(when(f.b)) + '</dd>';
+    if (f.vcn) h += '<dt>Channel</dt><dd>' + esc(f.vcn) + '</dd>';
+    if (f.pass_name) h += '<dt>Asked by</dt><dd>the ' + esc(f.pass_name) + ' pass</dd>';
+    h += '<dt>Tried</dt><dd>' + (f.attempts || 1) + ' time' +
+         ((f.attempts || 1) === 1 ? '' : 's') +
+         (f.first_at ? ', first ' + esc(when(f.first_at)) : '') +
+         (f.last_at ? ', last ' + esc(when(f.last_at)) : '') + '</dd>';
+    h += '</dl></div>';
+
+    // Verbatim, in a code block. Plex's message is often the only thing that
+    // names what to change, and a paraphrase loses exactly that part.
+    h += '<div class="ovlsec"><h3>What Plex said</h3>';
+    h += '<pre class="errbox">' + esc(f.error || 'No error was recorded.') + '</pre>';
+    if (!f.in_guide) {
+      h += '<div class="note">That broadcast has left the Plex guide, so there ' +
+           'is nothing left to book. It will come back if the guide carries it ' +
+           'again.</div>';
+    }
+    h += '</div>';
+
+    h += '<div class="ovlfoot">';
+    h += '<button class="primary" id="failretry"' + (f.in_guide ? '' : ' disabled') +
+         '>Try again</button>';
+    h += '<button id="failclose">Close</button>';
+    h += '<span class="note" id="ovlmsg"></span></div>';
+    box.innerHTML = h;
+
+    document.getElementById('ovlx').addEventListener('click', close);
+    document.getElementById('failclose').addEventListener('click', close);
+    var go = document.getElementById('failretry');
+    if (f.in_guide) {
+      go.addEventListener('click', function (e) {
+        var btn = e.target;
+        btn.disabled = true; btn.textContent = 'Working...';
+        say('Asking Plex again...', '');
+        fetch('/api/schedule/retry',
+              {method: 'POST', body: new URLSearchParams({airing_id: f.airing_id})})
+          .then(function (r) { return r.text().then(function (t) {
+            var j; try { j = JSON.parse(t); }
+            catch (err) { j = {ok: false, error: 'HTTP ' + r.status + ': ' + t.slice(0, 200)}; }
+            return j;
+          }); })
+          .then(function (j) {
+            if (!j.ok) {
+              say(j.error || 'Plex refused it again.', 'bad');
+              btn.disabled = false; btn.textContent = 'Try again';
+              return;
+            }
+            say('Scheduled.', 'ok');
+            btn.textContent = 'Scheduled';
+            // Both views are redrawn, not just this row. A retry that worked
+            // has to clear the red block in the calendar too, and leaving one
+            // of the two stale is how a fixed thing keeps looking broken.
+            setTimeout(function () { location.reload(); }, 700);
+          })
+          .catch(function (err) {
+            say('Could not reach CouchElephant: ' + err, 'bad');
+            btn.disabled = false; btn.textContent = 'Try again';
+          });
+      });
+    }
+  }
+
+  window.openFailure = function (aid) {
+    box.innerHTML = '<div class="empty">Loading...</div>';
+    ovl.classList.add('show');
+    fetch('/api/schedule/failure?airing_id=' + encodeURIComponent(aid))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { box.innerHTML = '<div class="empty">' + esc(d.error) + '</div>'; return; }
+        renderFailure(d.failure);
+      })
+      .catch(function (e) { box.innerHTML = '<div class="empty">' + esc(e) + '</div>'; });
+  };
+
   window.openProgram = function (aid) {
     box.innerHTML = '<div class="empty">Loading...</div>';
     ovl.classList.add('show');

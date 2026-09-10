@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.2.3 - 2026-09-10
+
+### Fixed
+
+- **A pass could send Plex a setting the booking cannot take, and every booking
+  it made was refused.** A pass always books Plex's one-shot template. That
+  template does not offer `onlyNewAirings`, and Plex answers a bare HTML 400 to
+  the whole request rather than ignoring one setting it does not know. It logs
+  nothing and it answers in no measurable time, so from this side it reads as a
+  network fault rather than a bad request.
+
+  A team pass made before the settings panel started hiding that control kept
+  it in its stored settings. Every booking it tried then failed: 364 attempts
+  over three weeks, two an hour, and no game recorded.
+
+  Three things changed. A booking now drops any setting the chosen template
+  does not declare, before it is sent. A pass can no longer store a
+  recurring-only setting in the first place, which is what `_pass_prefs`
+  already claimed to do. An existing pass is cleaned of one on startup.
+
+  The pinning settings are applied after the filter, so a server that declares
+  no settings at all still gets a pinned booking.
+
+### Added
+
+- **A refused booking is now shown, loudly, in both views.** It used to be
+  shown nowhere. The programme left "Waiting for the Plex guide data" as soon
+  as the guide carried it, and no row took its place, so a wall of failures
+  looked exactly like a quiet week.
+
+  A failure now sits in the schedule where the recording should have been: a
+  red row in the agenda reading NOT RECORDING with the attempt count and the
+  error, and a red block in the calendar. Both views read one feed, so neither
+  can forget to show it.
+
+  Clicking it opens the broadcast, which pass asked for it, how many times it
+  has been tried, Plex's own error verbatim, and a **Try again** button. A
+  retry takes the same path a sync takes, so one that works proves the next
+  automatic attempt will work. A retry that fails is written down like any
+  other attempt, so the count stays honest.
+
 ## 1.0.9 - 2026-09-02
 
 ### Changed

@@ -348,6 +348,17 @@ tr:hover td{background:var(--panel2)}
 .ovlclose{margin-left:auto;align-self:flex-start;background:transparent;border:none;
   color:var(--dim);font-size:22px;line-height:1;cursor:pointer;padding:0 2px}
 .ovlclose:hover{color:var(--text)}
+/* Facts about one thing, in the failure panel. Two columns so the labels line
+   up and the eye can drop straight down the values. */
+dl.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:13px}
+dl.kv dt{color:var(--dim)}
+dl.kv dd{margin:0}
+/* The server's own words. Monospace and wrapped, because an error is read
+   character by character and a truncated one is worse than none. */
+.errbox{margin:0;padding:10px 12px;border-radius:6px;font-size:12px;line-height:1.5;
+  background:var(--bad-soft);border:1px solid var(--bad-bd);color:var(--bad-fg);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
 .ovlsec{padding:16px 22px;border-bottom:1px solid var(--line)}
 .ovlsec:last-child{border-bottom:none}
 .ovlsec h3{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
@@ -537,6 +548,15 @@ tr:hover td{background:var(--panel2)}
 .agrow .agwhy{margin-left:auto;text-align:right;font-size:12px;color:var(--dim);
   display:flex;align-items:center;gap:8px;flex:0 0 auto}
 .agend{padding:20px;text-align:center;color:var(--dim);font-size:13px}
+/* A booking Plex refused. Loud on purpose: this row is the only warning that
+   something you asked for will not record, and it used to be no row at all.
+   The bar and the word both say it, so colour alone never carries it. */
+.agrow.fail{background:var(--bad-soft);border-left:4px solid var(--bad);
+  border-bottom-color:var(--bad-bd)}
+.agrow.fail:hover{background:var(--bad-soft);filter:brightness(1.08)}
+.agrow.fail .agtitle b{color:var(--bad-fg)}
+.agrow.fail .agerr{display:block;font-size:11px;color:var(--bad-fg);opacity:.9;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ---- calendar ---- */
 .calhead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
@@ -561,6 +581,11 @@ tr:hover td{background:var(--panel2)}
 .calitem.wait{border-left:3px dashed var(--wait);background:var(--wait-soft);
   color:var(--wait-fg);cursor:default}
 .calitem.wait:hover{background:var(--wait-soft)}
+/* Same failure, same weight, in the month view. A solid red bar against the
+   dashed amber of "waiting": one is a plan, the other is a fault. */
+.calitem.fail{border-left:3px solid var(--bad);background:var(--bad-soft);
+  color:var(--bad-fg);font-weight:600}
+.calitem.fail:hover{background:var(--bad-soft);filter:brightness(1.08)}
 .calitem:hover{background:var(--hover)}
 .calitem span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .calmore{font-size:11px;color:var(--dim);padding-left:5px}
