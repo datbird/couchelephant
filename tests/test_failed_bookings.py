@@ -156,3 +156,52 @@ def test_preview_mode_refuses_a_retry(client, synced):
     r = client.post("/api/schedule/retry", data={"airing_id": aid})
     assert r.status_code == 400
     assert "Preview mode" in r.json()["error"]
+
+
+def test_one_broadcast_draws_one_row_however_many_airing_ids_it_had(client, synced):
+    """An airing id is not stable. A guide refresh mints new ones, and the live
+    fault had NINE for one game over three weeks. Nine identical red rows for
+    the same broadcast is noise, and noise is how a warning stops being read.
+    """
+    _a_pass()
+    aid = _live_airing()
+    a = db.one("SELECT * FROM airings WHERE id = ?", (aid,))
+    _failed_attempt(aid)
+    # The same broadcast, same channel and start, under ids the guide has since
+    # dropped. Exactly what a refresh leaves behind.
+    with db.tx() as c:
+        for old in ("stale-1", "stale-2"):
+            c.execute(
+                """INSERT INTO pass_actions (pass_id, program_guid, airing_id,
+                                             program_title, channel_vcn, begins_at,
+                                             action, reason, dry_run, created_at)
+                   VALUES (1,?,?,?,?,?,'failed','PlexError: HTTP 400',0,?)""",
+                (a["program_guid"], old, "Chiefs at Buccaneers", a["channel_vcn"],
+                 a["begins_at"], int(time.time()) - 86400))
+    rows = client.get("/api/schedule").json()["rows"]
+    fail = [r for r in rows if r["status"] == "failed"]
+    assert len(fail) == 1, "one broadcast, one row"
+    assert fail[0]["attempts"] == 5, "every attempt counts, whatever id it used"
+    assert fail[0]["airing_id"] == aid, "the id that still exists, so retry can work"
+
+
+def test_a_retry_works_when_only_a_stale_airing_id_was_logged(client, synced):
+    """The oldest failure usually names an id the guide has dropped. Retry has
+    to use the one that exists now, or the button never works."""
+    _a_pass()
+    aid = _live_airing()
+    a = db.one("SELECT * FROM airings WHERE id = ?", (aid,))
+    with db.tx() as c:
+        c.execute(
+            """INSERT INTO pass_actions (pass_id, program_guid, airing_id,
+                                         program_title, channel_vcn, begins_at,
+                                         action, reason, dry_run, created_at)
+               VALUES (1,?, 'stale-only', ?,?,?,'failed','PlexError: HTTP 400',0,?)""",
+            (a["program_guid"], "Chiefs at Buccaneers", a["channel_vcn"],
+             a["begins_at"], int(time.time())))
+    rows = client.get("/api/schedule").json()["rows"]
+    fail = [r for r in rows if r["status"] == "failed"]
+    assert len(fail) == 1
+    assert fail[0]["airing_id"] == aid
+    assert client.post("/api/schedule/retry",
+                       data={"airing_id": fail[0]["airing_id"]}).json()["ok"]

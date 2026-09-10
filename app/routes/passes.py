@@ -78,29 +78,41 @@ def _why_map():
 # So a failure is a row in the same schedule feed as a real booking. Both views
 # read that feed, so neither can forget to show it.
 #
-# `last` is the newest action for the airing and it has to be the failure, or a
-# booking that succeeded on the retry would keep showing as broken. `fails`
+# `last` is the newest action for the broadcast and it has to be the failure, or
+# a booking that succeeded on the retry would keep showing as broken. `fails`
 # counts every attempt, which is what says whether this is a blip or a wall.
 # A row is dropped once Plex actually holds a grab for that channel and time,
 # whoever made it, and once the broadcast is in the past: neither is something
 # the user can still act on.
+#
+# GROUPED BY CHANNEL AND START, NOT BY AIRING. An airing id is not stable: a
+# guide refresh mints new ones, so one broadcast that failed for three weeks had
+# NINE airing ids and would have drawn nine identical red rows for the same
+# game. Channel plus start time names one broadcast for as long as it is on.
+#
+# `fail_airing_id` is resolved against the guide as it stands now rather than
+# taken from the log, because the id in the oldest failure usually no longer
+# exists and the Try again button needs one that does.
 _FAILED_SQL = """
   SELECT NULL AS id, pa.program_title AS title,
          COALESCE(p.grandparent_title, '') AS parent_title,
          pa.channel_vcn AS channel_vcn, pa.begins_at AS begins_at,
-         a.ends_at AS ends_at, 'failed' AS status, NULL AS subscription,
-         pa.airing_id AS fail_airing_id, pa.reason AS error,
+         COALESCE(a.ends_at, live.ends_at) AS ends_at,
+         'failed' AS status, NULL AS subscription,
+         COALESCE(live.id, pa.airing_id) AS fail_airing_id, pa.reason AS error,
          pa.pass_id AS fail_pass_id, f.n AS attempts,
          f.first_at AS first_at, pa.created_at AS last_at
   FROM pass_actions pa
-  JOIN (SELECT airing_id, MAX(id) AS mx FROM pass_actions
+  JOIN (SELECT channel_vcn, begins_at, MAX(id) AS mx FROM pass_actions
         WHERE airing_id IS NOT NULL AND dry_run = 0
-        GROUP BY airing_id) last ON last.mx = pa.id
-  JOIN (SELECT airing_id, COUNT(*) AS n, MIN(created_at) AS first_at
+        GROUP BY channel_vcn, begins_at) last ON last.mx = pa.id
+  JOIN (SELECT channel_vcn, begins_at, COUNT(*) AS n, MIN(created_at) AS first_at
         FROM pass_actions WHERE action = 'failed' AND dry_run = 0
-          AND airing_id IS NOT NULL GROUP BY airing_id) f
-    ON f.airing_id = pa.airing_id
+          AND airing_id IS NOT NULL GROUP BY channel_vcn, begins_at) f
+    ON f.channel_vcn = pa.channel_vcn AND f.begins_at = pa.begins_at
   LEFT JOIN airings a ON a.id = pa.airing_id
+  LEFT JOIN airings live ON live.channel_vcn = pa.channel_vcn
+                        AND live.begins_at = pa.begins_at
   LEFT JOIN programs p ON p.guid = pa.program_guid
   WHERE pa.action = 'failed' AND COALESCE(pa.begins_at, 0) > ?
     AND NOT EXISTS (SELECT 1 FROM plex_grabs g

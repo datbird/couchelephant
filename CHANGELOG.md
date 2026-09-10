@@ -41,6 +41,13 @@
   automatic attempt will work. A retry that fails is written down like any
   other attempt, so the count stays honest.
 
+  One broadcast draws one row, however many airing ids it collected. An airing
+  id is not stable, and a guide refresh mints new ones: the game behind this
+  release had nine of them over three weeks. Failures are grouped by channel
+  and start time, which names one broadcast for as long as it is on, and the
+  Try again button uses the id that exists in the guide today rather than the
+  one in the oldest log line.
+
 ## 1.0.9 - 2026-09-02
 
 ### Changed
