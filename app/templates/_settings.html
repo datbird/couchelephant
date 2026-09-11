@@ -13,6 +13,7 @@
     <label>Where</label>
     <select name="kind">
       <option value="discord" {{ 'selected' if d and d.kind == 'discord' }}>Discord</option>
+      <option value="discord_bot" {{ 'selected' if d and d.kind == 'discord_bot' }}>Discord bot</option>
       <option value="telegram" {{ 'selected' if d and d.kind == 'telegram' }}>Telegram</option>
       <option value="notifiarr" {{ 'selected' if d and d.kind == 'notifiarr' }}>Notifiarr</option>
     </select>
@@ -28,10 +29,11 @@
       Discord address is accepted.</span>
   </div>
   <div class="field">
-    <label>Telegram bot token, or Notifiarr API key</label>
+    <label>Discord bot token, Telegram bot token, or Notifiarr API key</label>
     <input name="token" type="password" value="{{ d.token if d else '' }}"
            placeholder="123456:ABC-DEF...">
-    <span class="help">Telegram: from BotFather. Nothing runs or listens; this is
+    <span class="help">Discord bot: from the Developer Portal, and the bot has to
+      be in the channel already. Telegram: from BotFather. Nothing runs or listens; this is
       one outgoing message at a time. Notifiarr: your <b>global</b> API key, not
       an integration-specific one, which the passthrough will not accept. Kept
       like a password and never logged.</span>
@@ -128,6 +130,7 @@
               {% if not d.enabled %}<span class="pill">off</span>{% endif %}
               {% if d.last_error %}<span class="pill bad">failing</span>{% endif %}</td>
             <td class="tiny dim">{{ {'discord': 'Discord', 'telegram': 'Telegram',
+                                     'discord_bot': 'Discord bot',
                                      'notifiarr': 'Notifiarr'}.get(d.kind, d.kind) }}</td>
             <td class="tiny dim">{{ d.event_count }}</td>
             <td style="text-align:right;white-space:nowrap">

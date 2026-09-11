@@ -270,7 +270,8 @@ CREATE TABLE IF NOT EXISTS destinations (
     -- machine, which is why passes carry one too.
     uid          TEXT,
     name         TEXT NOT NULL,
-    -- 'discord', 'telegram' or 'notifiarr'. The transport is chosen from this
+    -- 'discord', 'discord_bot', 'telegram' or 'notifiarr'. The transport is
+    -- chosen from this
     -- and nowhere else, so a fourth platform is one new function in notify.py.
     kind         TEXT NOT NULL,
     -- Discord's whole integration is this URL, and it is a bearer credential:

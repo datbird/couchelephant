@@ -10,6 +10,9 @@ behind a router with no public address, so nothing here may ever need a port
 forwarded or a socket held open.
 
   - **Discord needs no bot.** A webhook URL is the entire integration.
+  - **A Discord bot**, if you already run one, posts under its own name instead
+    of a webhook identity, and carries an icon. It needs the bot token and a
+    channel id, and the bot must be in that channel.
   - **Telegram needs a token but no running bot.** One HTTPS POST. "Bot" is
     only what Telegram calls the token.
   - **Notifiarr** is a relay somebody may already run. It costs one more hop,
@@ -54,6 +57,14 @@ TELEGRAM_BASE = "https://api.telegram.org"
 # and the Discord channel goes in the body, so there is no forgery surface here
 # either.
 NOTIFIARR_BASE = "https://notifiarr.com"
+
+# Discord's own API, for the bot route. No user-supplied host here either: the
+# channel id goes in the path and is checked to be digits before it is used.
+DISCORD_API_BASE = "https://discord.com/api/v10"
+
+# The card carries a logo so a shared channel is readable at a glance. Plex,
+# because that is the system this app reports on.
+BOT_ICON_URL = "https://cdn.jsdelivr.net/gh/selfhst/icons/png/plex.png"
 
 # Discord's webhook URL *is* user-supplied, and the server will POST to it. Left
 # unchecked that is an SSRF hole pointed at the LAN this container sits on. The
@@ -119,7 +130,7 @@ ACTIVITY_WINDOW = 7 * 86400
 # re-announce it, so the two can never meet.
 STATE_TTL = 30 * 86400
 
-KINDS = ("discord", "telegram", "notifiarr")
+KINDS = ("discord", "discord_bot", "telegram", "notifiarr")
 
 SEVERITY_COLOUR = {"bad": 0xD1453B, "warn": 0xD9822B, "ok": 0x3BA55D}
 
@@ -280,6 +291,36 @@ def _send_discord(dest, title, detail, severity) -> None:
         raise SendError(f"Discord answered {r.status_code}")
 
 
+def _send_discord_bot(dest, title, detail, severity) -> None:
+    """Post into a channel as a bot, rather than as a webhook identity.
+
+    The one real difference from the webhook route: Discord answers a message
+    create with 200 and a JSON body, not 204 and nothing. Both are success, so
+    neither status may be treated as the only one that counts.
+    """
+    payload = {"embeds": [{
+        "title": title[:256],
+        "description": (detail or "")[:4000],
+        "color": SEVERITY_COLOUR.get(severity, SEVERITY_COLOUR["warn"]),
+        "author": {"name": "CouchElephant", "icon_url": BOT_ICON_URL},
+    }]}
+    url = f"{DISCORD_API_BASE.rstrip('/')}/channels/{dest['chat_id']}/messages"
+    with httpx.Client(timeout=TIMEOUT) as http:
+        r = http.post(url, json=payload,
+                      headers={"Authorization": f"Bot {dest['token']}"})
+    if r.status_code >= 400:
+        # The reason is in the body. Discord's status line says "Forbidden" for
+        # a bot that is simply not in the channel, which sends you looking at
+        # the token instead of the invite.
+        reason = ""
+        try:
+            reason = (r.json() or {}).get("message") or ""
+        except Exception:
+            reason = (r.text or "")[:120]
+        raise SendError(f"Discord answered {r.status_code}"
+                        + (f": {reason}" if reason else ""))
+
+
 def _send_telegram(dest, title, detail, severity) -> None:
     """Plain text. Telegram answers 200 with `ok: false` for a refusal, so the
     status code alone never proves a message was delivered."""
@@ -338,6 +379,12 @@ def _deliver(dest, title, detail, severity) -> bool:
             if not dest.get("webhook"):
                 raise SendError("No webhook URL is set.")
             _send_discord(dest, title, detail, severity)
+        elif dest["kind"] == "discord_bot":
+            if not (dest.get("token") and dest.get("chat_id")):
+                raise SendError("The bot token or the channel is missing.")
+            if not str(dest["chat_id"]).strip().isdigit():
+                raise SendError("The channel must be a numeric Discord channel id.")
+            _send_discord_bot(dest, title, detail, severity)
         elif dest["kind"] == "telegram":
             if not (dest.get("token") and dest.get("chat_id")):
                 raise SendError("The token or the chat is missing.")
@@ -379,6 +426,14 @@ def test(dest_id: int) -> str:
                 return "No webhook URL is set."
             _send_discord(dest, "CouchElephant test",
                           "If you can read this, alerts will reach here.", "ok")
+        elif dest["kind"] == "discord_bot":
+            if not dest.get("token"):
+                return "No bot token is set."
+            if not str(dest.get("chat_id") or "").strip().isdigit():
+                return ("No Discord channel id is set. Turn on Developer Mode in "
+                        "Discord, right-click the channel, Copy Channel ID.")
+            _send_discord_bot(dest, "CouchElephant test",
+                              "If you can read this, alerts will reach here.", "ok")
         elif dest["kind"] == "notifiarr":
             if not dest.get("token"):
                 return "No Notifiarr API key is set."

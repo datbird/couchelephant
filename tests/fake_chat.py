@@ -5,6 +5,10 @@ rather than mocked away. The shapes are copied from the real APIs, including the
 parts that matter:
 
   - Discord answers a webhook POST with 204 and an empty body, not 200 and JSON
+  - Discord answers a BOT message create with 200 and a JSON body, not 204, and
+    demands an `Authorization: Bot ...` header it answers 401 without
+  - Discord answers 403 "Missing Access" for a bot that is simply not in the
+    channel, which is the mistake a user will actually make
   - Discord answers 401 for a webhook that has been deleted, which is what a
     revoked URL looks like and the one failure a user will actually hit
   - Telegram answers 200 with `{"ok": false, ...}` for a bad token, so an HTTP
@@ -30,6 +34,7 @@ SENT: list[tuple[str, str, dict]] = []
 
 # Flip these from a test to make the far side misbehave.
 DISCORD_STATUS = 204
+DISCORD_BOT_OK = True
 TELEGRAM_OK = True
 NOTIFIARR_OK = True
 # What getUpdates hands back. Empty is the honest default: a bot nobody has
@@ -42,6 +47,8 @@ BAD_TOKEN = "000:revoked"
 
 def reset() -> None:
     global DISCORD_STATUS, TELEGRAM_OK, TELEGRAM_UPDATES, NOTIFIARR_OK
+    global DISCORD_BOT_OK
+    DISCORD_BOT_OK = True
     SENT.clear()
     DISCORD_STATUS = 204
     TELEGRAM_OK = True
@@ -51,6 +58,14 @@ def reset() -> None:
 
 def discord_sent() -> list[dict]:
     return [b for p, _, b in SENT if p == "discord"]
+
+
+def discord_bot_sent() -> list[dict]:
+    return [b for p, _, b in SENT if p == "discord_bot"]
+
+
+def discord_bot_paths() -> list[str]:
+    return [path for p, path, _ in SENT if p == "discord_bot"]
 
 
 def telegram_sent() -> list[dict]:
@@ -105,6 +120,16 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._empty(DISCORD_STATUS)
             return
+        # Discord bot: /api/v10/channels/<id>/messages
+        if path.startswith("/channels/") and path.endswith("/messages"):
+            auth = self.headers.get("Authorization", "")
+            if not auth.startswith("Bot ") or auth[4:].strip() in ("", BAD_TOKEN):
+                return self._json(401, {"message": "401: Unauthorized", "code": 0})
+            if not DISCORD_BOT_OK:
+                # What a bot that was never invited to the channel gets.
+                return self._json(403, {"message": "Missing Access", "code": 50001})
+            SENT.append(("discord_bot", path, body))
+            return self._json(200, {"id": "1", "channel_id": path.split("/")[2]})
         # Notifiarr: /api/v1/notification/passthrough/<apikey>
         if path.startswith("/api/v1/notification/passthrough/"):
             SENT.append(("notifiarr", path, body))

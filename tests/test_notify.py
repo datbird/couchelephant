@@ -31,6 +31,7 @@ def chat(monkeypatch):
     monkeypatch.setattr(notify, "DISCORD_HOSTS", frozenset({"127.0.0.1", "localhost"}))
     monkeypatch.setattr(notify, "DISCORD_SCHEMES", frozenset({"http"}))
     monkeypatch.setattr(notify, "NOTIFIARR_BASE", url)
+    monkeypatch.setattr(notify, "DISCORD_API_BASE", url)
     yield url
     fake_chat.stop()
 
@@ -410,6 +411,98 @@ def test_an_existing_destination_renders_its_editor(chat, client):
     assert "Edit DVR alerts" in body
     # The event it carries is ticked, one it does not is not.
     assert body.count('name="events"') >= len(notify.CATALOG)
+
+
+# ---------- discord bot ----------
+
+def _discord_bot(chat, events, name="Timmy", channel="1240346969315086447",
+                 token="bot-token-abc"):
+    return notify.save_destination(
+        name=name, kind="discord_bot", events=events, remind_hours=24,
+        token=token, chat_id=channel)
+
+
+def test_discord_bot_posts_to_the_channel_with_the_bot_token(chat):
+    _discord_bot(chat, [health.EPG_STALE])
+    _raise(health.EPG_STALE)
+    notify.dispatch()
+
+    sent = fake_chat.discord_bot_sent()
+    assert len(sent) == 1
+    embed = sent[0]["embeds"][0]
+    assert "guide" in embed["title"].lower()
+    assert embed["color"] == notify.SEVERITY_COLOUR["bad"]
+    assert "/channels/1240346969315086447/messages" in fake_chat.discord_bot_paths()[0]
+
+
+def test_discord_bot_card_carries_a_name_and_an_icon(chat):
+    _discord_bot(chat, [health.EPG_STALE])
+    _raise(health.EPG_STALE)
+    notify.dispatch()
+
+    author = fake_chat.discord_bot_sent()[0]["embeds"][0]["author"]
+    assert author["name"] == "CouchElephant"
+    assert author["icon_url"].startswith("https://")
+
+
+def test_discord_bot_refuses_a_channel_that_is_not_an_id(chat):
+    dest = _discord_bot(chat, [health.EPG_STALE], channel="general")
+    _raise(health.EPG_STALE)
+    notify.dispatch()
+
+    assert fake_chat.discord_bot_sent() == []
+    assert "numeric" in (notify.get_destination(dest)["last_error"] or "").lower()
+
+
+def test_discord_bot_reports_a_missing_invite_rather_than_a_bare_status(chat):
+    """A bot that was never added to the channel gets 403 Missing Access. The
+    reason is in the body, and it is the mistake a user will actually make."""
+    dest = _discord_bot(chat, [health.EPG_STALE])
+    fake_chat.DISCORD_BOT_OK = False
+    _raise(health.EPG_STALE)
+    notify.dispatch()
+
+    assert fake_chat.discord_bot_sent() == []
+    assert "Missing Access" in (notify.get_destination(dest)["last_error"] or "")
+
+
+def test_discord_bot_without_a_token_is_refused_by_discord(chat):
+    dest = _discord_bot(chat, [health.EPG_STALE], token=fake_chat.BAD_TOKEN)
+    _raise(health.EPG_STALE)
+    notify.dispatch()
+
+    assert fake_chat.discord_bot_sent() == []
+    assert "401" in (notify.get_destination(dest)["last_error"] or "")
+
+
+def test_a_failed_bot_send_is_retried_next_run(chat):
+    """A blip must not lose the alert. No state row is written on a failure."""
+    _discord_bot(chat, [health.EPG_STALE])
+    fake_chat.DISCORD_BOT_OK = False
+    _raise(health.EPG_STALE)
+    notify.dispatch()
+    assert fake_chat.discord_bot_sent() == []
+
+    fake_chat.DISCORD_BOT_OK = True
+    notify.dispatch()
+    assert len(fake_chat.discord_bot_sent()) == 1
+
+
+def test_discord_bot_masks_its_token(chat, client):
+    _discord_bot(chat, [health.EPG_STALE])
+    page = client.get("/settings").text
+    assert "bot-token-abc" not in page
+
+
+def test_the_test_button_works_for_a_bot(chat):
+    dest = _discord_bot(chat, [health.EPG_STALE])
+    verdict = notify.test(dest)
+    assert len(fake_chat.discord_bot_sent()) == 1
+    assert "fail" not in verdict.lower()
+
+
+def test_discord_bot_is_an_accepted_kind(chat):
+    assert "discord_bot" in notify.KINDS
 
 
 # ---------- notifiarr ----------
