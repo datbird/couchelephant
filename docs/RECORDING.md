@@ -208,8 +208,13 @@ and time stays CouchElephant's, because that is the whole mechanism.
 
 **Changing a pass changes the recordings it already booked**, as soon as you
 save it. Every future booking that pass made is re-read from Plex and corrected
-to match. A booking too close to its broadcast is left alone and the reply says
-so: wrong padding on a game you are recording beats no recording of it.
+to match, however close the broadcast is: a settings change is made on the
+recording Plex already holds, so nothing is ever cancelled to apply it.
+
+The one thing with a deadline is a booking that has to be made again, which
+happens when the guide has moved the broadcast under it. That has a moment with
+nothing scheduled, so it is refused close to kickoff and the reply says so:
+wrong padding on a game you are recording beats no recording of it.
 
 ## Cancelling
 

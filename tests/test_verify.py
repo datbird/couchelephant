@@ -13,7 +13,10 @@ sync, for ever, against a live DVR. Half the tests here are that guard.
 """
 import time
 
+import pytest
+
 from app import db, health, passes, sync, verify
+from app.plex import PlexError
 from tests import fake_plex
 
 MIN = 60
@@ -382,11 +385,16 @@ def test_a_repair_plex_refuses_becomes_a_notice(plex, synced):
 
     def refuse(*a, **k):
         raise RuntimeError("Plex said no")
+    # Both roads to the fix, because a settings change is now made in place and
+    # only falls back to booking again when that cannot be done.
     passes._schedule, original = refuse, passes._schedule
+    edit = plex.update_subscription
+    plex.update_subscription = refuse
     try:
         out = sync.check_bookings(plex)
     finally:
         passes._schedule = original
+        plex.update_subscription = edit
 
     assert out["failed"] == 1, out
     assert health.BOOKING_REPAIR_FAILED in {n["code"] for n in health.open_notices()}
@@ -434,10 +442,23 @@ def test_saving_a_pass_that_changed_nothing_re_books_nothing(plex, client, synce
 
 def test_a_change_too_close_to_kickoff_says_so_rather_than_going_quiet(plex, client,
                                                                       synced):
-    """Saving and seeing nothing happen is worse than being told why."""
-    _push_kickoff(hours=1)          # inside the two sync intervals a repair needs
-    p = _chiefs_pass({"endOffsetMinutes": "0"})
+    """Saving and seeing nothing happen is worse than being told why.
+
+    A settings change is made in place and has no deadline. This is the other
+    kind: the guide moved the broadcast, so the booking has to be made again,
+    and booking again close to kickoff is the thing that is refused.
+    """
+    was = _push_kickoff(hours=6)
+    p = _chiefs_pass({"endOffsetMinutes": "30"})
     passes.run_passes()
+
+    # The guide moves the game to twenty minutes from now.
+    fake_plex.move_broadcast(fake_plex.GAME_GUID, fake_plex.LIVE_AT,
+                             int(time.time()) + 20 * MIN)
+    provider, shows, sports, movies = sync.discover(plex)
+    sync.sync_guide(plex, provider, shows, sports, movies)
+    sync.sync_recordings(plex)
+    assert was
 
     r = client.post(f"/api/rules/{p['id']}",
                     data={"settings": db.js({"endOffsetMinutes": "30"})})
@@ -461,6 +482,140 @@ def test_plex_being_unreachable_does_not_fail_a_pass_save(plex, client, synced,
     assert db.unjs(db.one("SELECT prefs FROM passes")["prefs"])["endOffsetMinutes"] == "30"
 
 
+# ---- a settings change needs no cancel, and so has no deadline ----
+
+def test_padding_is_changed_on_the_booking_plex_already_holds(plex, synced):
+    """No cancel, so no moment with nothing scheduled.
+
+    Plex takes a partial update on a subscription that exists: the settings
+    change, the pin is untouched, and the recording stays scheduled. Verified
+    against a live server on 2026-09-13. Cancelling and re-booking for a
+    padding change was doing surgery to move a number.
+    """
+    _push_kickoff()
+    _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    key = db.one("SELECT subscription FROM our_grabs")["subscription"]
+
+    _set_prefs({"endOffsetMinutes": "30"})
+    sync.sync_recordings(plex)
+    out = sync.check_bookings(plex)
+
+    assert out["repaired"] == 1, out
+    assert fake_plex.STATE.deleted == [], "nothing should have been cancelled"
+    assert db.one("SELECT subscription FROM our_grabs")["subscription"] == key
+    got = {s["id"]: s["value"] for s in (plex.subscription(key).get("Setting") or [])}
+    assert str(got.get("endOffsetMinutes")) == "30", got
+
+
+def test_a_padding_change_minutes_before_kickoff_still_lands(plex, synced):
+    """The case the deadline used to refuse, and the one somebody actually
+    hits: the game is about to start and the padding is wrong. There is no gap
+    to protect against any more, so there is nothing to refuse."""
+    kickoff = _push_kickoff(hours=6)
+    _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    key = db.one("SELECT subscription FROM our_grabs")["subscription"]
+
+    _set_prefs({"endOffsetMinutes": "30"})
+    sync.sync_recordings(plex)
+    # The clock moves, not the broadcast. Moving the broadcast would change the
+    # pin as well, which is a different repair and not the one under test.
+    out = sync.check_bookings(plex, now=kickoff - 15 * MIN)
+
+    assert out["repaired"] == 1 and out["drifted"] == 0, out
+    assert fake_plex.STATE.deleted == []
+    got = {s["id"]: s["value"] for s in (plex.subscription(key).get("Setting") or [])}
+    assert str(got.get("endOffsetMinutes")) == "30", got
+
+
+def test_only_the_settings_that_differ_are_sent(plex, synced):
+    """A partial update, and deliberately so. `compare` answers `unchecked` for
+    a setting Plex never reported, and `unchecked` never asks for a repair, so
+    the changed set can only hold settings the server already knows."""
+    _push_kickoff()
+    _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    _set_prefs({"endOffsetMinutes": "30"})
+    sync.sync_recordings(plex)
+    sync.check_bookings(plex)
+
+    assert len(fake_plex.STATE.edited) == 1, fake_plex.STATE.edited
+    assert fake_plex.STATE.edited[0]["prefs"] == {"endOffsetMinutes": "30"}
+
+
+def test_plex_refusing_an_edit_is_raised_rather_than_swallowed(plex, synced):
+    """A 404 or a 400 on the edit must not read as success.
+
+    The caller books again when an edit fails, and it cannot do that if it is
+    never told. This is the same mistake as believing a 2xx from anything: the
+    status line is the answer, so read it.
+    """
+    with pytest.raises(PlexError):
+        plex.update_subscription("9999", {"endOffsetMinutes": "30"})
+
+
+def test_a_refused_edit_falls_back_to_booking_again(plex, synced, monkeypatch):
+    """However the edit fails, the recording still ends up correct."""
+    _push_kickoff()
+    _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    key = db.one("SELECT subscription FROM our_grabs")["subscription"]
+    monkeypatch.setattr(plex, "update_subscription",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no")))
+
+    _set_prefs({"endOffsetMinutes": "30"})
+    sync.sync_recordings(plex)
+    out = sync.check_bookings(plex)
+
+    assert out["repaired"] == 1, out
+    assert key in fake_plex.STATE.deleted
+    again = db.one("SELECT subscription FROM our_grabs")["subscription"]
+    got = {s["id"]: s["value"] for s in (plex.subscription(again).get("Setting") or [])}
+    assert str(got.get("endOffsetMinutes")) == "30", got
+
+
+def test_a_recording_plex_has_lost_is_still_booked_again(plex, synced):
+    """The guard on the shortcut. An edit needs something to edit."""
+    _push_kickoff()
+    _chiefs_pass({})
+    passes.run_passes()
+    key = db.one("SELECT subscription FROM our_grabs")["subscription"]
+    plex.delete_subscription(key)
+    sync.sync_recordings(plex)
+
+    out = sync.check_bookings(plex)
+
+    assert out["repaired"] == 1, out
+    assert db.one("SELECT subscription FROM our_grabs")["subscription"] != key
+
+
+def test_an_edit_that_loses_the_recording_falls_back_to_re_booking(plex, synced,
+                                                                  monkeypatch):
+    """Settings kept and the recording gone is worse than no edit at all."""
+    _push_kickoff()
+    _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    key = db.one("SELECT subscription FROM our_grabs")["subscription"]
+
+    real = plex.update_subscription
+
+    def losing(k, prefs):
+        real(k, prefs)
+        fake_plex.STATE.subscriptions[str(k)]["_pinned"] = "-999"   # no grab now
+    monkeypatch.setattr(plex, "update_subscription", losing)
+
+    _set_prefs({"endOffsetMinutes": "30"})
+    sync.sync_recordings(plex)
+    out = sync.check_bookings(plex)
+
+    assert out["repaired"] == 1, out
+    assert key in fake_plex.STATE.deleted, "it should have fallen back"
+    again = db.one("SELECT subscription FROM our_grabs")["subscription"]
+    got = {s["id"]: s["value"] for s in (plex.subscription(again).get("Setting") or [])}
+    assert str(got.get("endOffsetMinutes")) == "30", got
+
+
 def test_a_full_sync_runs_the_check(plex, synced):
     """It has to be on the sync loop, or it is a button nobody presses."""
     _chiefs_pass({"endOffsetMinutes": "0"})
@@ -469,10 +624,9 @@ def test_a_full_sync_runs_the_check(plex, synced):
 
     ok, detail = sync.full_sync()
     assert ok, detail
-    # A full sync re-pulls the guide, which puts kickoff back inside the
-    # repair guard, so the check reports rather than repairs. Either way it
-    # ran, which is what this is here to prove.
-    assert "adrift" in detail, detail
+    # A settings change is made on the booking Plex already holds, so it lands
+    # however close the game is. That it ran at all is what this proves.
+    assert "repaired" in detail, detail
 
 
 def test_fake_plex_still_answers_one_shot_as_the_string_true(plex, synced):

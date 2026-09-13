@@ -222,6 +222,7 @@ class State:
         self.subscriptions = {}
         self.next_key = 100
         self.created = []          # every create, with its parsed parameters
+        self.edited = []           # every settings edit in place
         self.deleted = []
         self.metadata_calls = 0
         self.drop_next_create = False   # make Plex discard what it just made
@@ -238,6 +239,7 @@ class State:
         self.subscriptions = {}
         self.next_key = 100
         self.created = []
+        self.edited = []
         self.deleted = []
         self.metadata_calls = 0
         self.drop_next_create = False
@@ -598,6 +600,40 @@ class Handler(BaseHTTPRequestHandler):
             STATE.drop_next_create = False
         else:
             STATE.subscriptions[key] = sub
+        return self._container(size=1, MediaSubscription=[sub])
+
+    def do_PUT(self):
+        """A settings edit on a subscription that already exists.
+
+        A PARTIAL update, which is what the real server does: settings not sent
+        keep the values they had, the pin is untouched, and whatever was
+        scheduled stays scheduled. Verified against a live Plex server on
+        2026-09-13, where `endOffsetMinutes` changed while `startTimeslot` and
+        the grab were unchanged.
+        """
+        STATE.seen_urls.append(self.path)
+        u = urllib.parse.urlsplit(self.path)
+        key = u.path.rsplit("/", 1)[-1]
+        if not u.path.startswith("/media/subscriptions/"):
+            return self._send({"error": "not found"}, 404)
+        sub = STATE.subscriptions.get(key)
+        if not sub:
+            return self._send({"error": "gone"}, 404)
+        q = urllib.parse.parse_qs(u.query, keep_blank_values=True)
+        prefs = {k[6:-1]: v[0] for k, v in q.items()
+                 if k.startswith("prefs[") and k.endswith("]")}
+        # The real server refuses a setting its template never offered, on this
+        # route as much as on the create.
+        allowed = _setting_ids(recurring=int(sub.get("type") or 4) != 4)
+        if not set(prefs) <= allowed:
+            return self._send_html(
+                "<html><head><title>Bad Request</title></head>"
+                "<body><h1>400 Bad Request</h1></body></html>", 400)
+        have = {st["id"]: st["value"] for st in sub["Setting"]}
+        for k, v in prefs.items():
+            have[k] = "true" if v in ("1", "true") else v
+        sub["Setting"] = [{"id": k, "value": v} for k, v in have.items()]
+        STATE.edited.append({"key": key, "prefs": prefs})
         return self._container(size=1, MediaSubscription=[sub])
 
     def do_DELETE(self):

@@ -214,6 +214,38 @@ class Plex:
         except Exception:
             return None
 
+    def update_subscription(self, key: str, prefs: dict) -> None:
+        """Change settings on a subscription that already exists.
+
+        `PUT /media/subscriptions/<key>?prefs[...]`, and it is a PARTIAL
+        update: settings not sent keep their values, the pin is untouched, and
+        whatever was scheduled stays scheduled. Verified against a live server
+        on 2026-09-13, where `endOffsetMinutes` went 30, 31, 30 while
+        `startTimeslot` and the grab did not move.
+
+        This is what makes a settings change gapless. Cancelling and booking
+        again has a moment in the middle with nothing scheduled, which is why
+        that path refuses to run close to a broadcast. Editing in place has no
+        such moment, so it has no such deadline, and a padding change made
+        minutes before kickoff still lands.
+
+        The pin is not changed here. `lineupChannel` and `startTimeslot` name
+        the broadcast rather than describe the recording, and nothing has
+        established that the server will move a booking onto a different
+        broadcast in place. A difference there is booked again instead.
+        """
+        url = f"{self.base}/media/subscriptions/{urllib.parse.quote(str(key), safe='')}"
+        sep = "?"
+        for k, v in (prefs or {}).items():
+            name = urllib.parse.quote(str(k), safe="")
+            val = urllib.parse.quote(str(v), safe="")
+            url += f"{sep}prefs%5B{name}%5D={val}"
+            sep = "&"
+        r = self._client().put(url)
+        if r.status_code >= 400:
+            raise PlexError(f"update recording -> HTTP {r.status_code}: {r.text[:300]}",
+                            r.status_code)
+
     def subscription_exists(self, key: str) -> bool | None:
         """Whether Plex still holds this subscription: True, False, or None.
 

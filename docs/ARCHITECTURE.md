@@ -212,9 +212,29 @@ ones a settings check would miss:
 4. The pin still names the airing the pass chose. The guide can move a game
    after it was booked, and a stale pin hands the choice back to Plex.
 
-A real difference is repaired: cancel, then book again from what the pass says
-now. Delete before create, because creating first would leave two subscriptions
-if the delete then failed and Plex would record the game twice.
+A real difference is repaired, and there are two ways to do that.
+
+**A settings difference is changed on the booking Plex already holds.**
+`PUT /media/subscriptions/<key>?prefs[...]` is a partial update: the settings
+change, settings not sent keep their values, the pin is untouched, and whatever
+was scheduled stays scheduled. Only the settings that actually differ are sent,
+which matters because `compare` answers `unchecked` for anything Plex did not
+report, so the changed set can only hold settings the server already knows.
+There is no cancel, so there is no gap, so none of the timing below applies: a
+padding change made minutes before kickoff lands.
+
+**A pin difference is booked again**: cancel, then create from what the pass
+says now. Delete before create, because creating first would leave two
+subscriptions if the delete then failed and Plex would record the game twice.
+`lineupChannel` and `startTimeslot` name which broadcast this is rather than
+describe the recording, and nothing has established that Plex will move a
+booking onto a different broadcast in place. A subscription Plex has lost, or
+one it has scheduled nothing against, is booked again for the same reason:
+there is nothing there to edit.
+
+An edit that succeeds and leaves nothing scheduled would be worse than no edit,
+so the recording is checked afterwards, and anything less than success falls
+through to booking again.
 
 ### Refusing to invent a difference
 

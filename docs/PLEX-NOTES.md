@@ -60,6 +60,16 @@ the subscription back before claiming anything was created.
 
 ## Reading recordings
 
+`PUT /media/subscriptions/<key>?prefs%5B<name>%5D=<value>` changes settings on a
+subscription that already exists, and it is a **partial update**: settings not
+sent keep their values, the pin is untouched, and the scheduled recording
+survives. Verified against a live server on 2026-09-13, where
+`endOffsetMinutes` went 30, 31, 30 while `startTimeslot` and the grab did not
+move. `POST` to that path is a 404, and so is `PUT` to `<key>/prefs`.
+
+Whether the same call will move the **pin** onto a different broadcast is not
+established, so a pin change is still a delete followed by a create.
+
 `/media/subscriptions` lists rules. `/media/subscriptions/scheduled` lists
 individual grab operations, which is the effective schedule.
 

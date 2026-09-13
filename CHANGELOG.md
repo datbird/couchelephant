@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.2.11 - 2026-09-13
+
+### Changed
+
+- **A settings change is now made on the recording Plex already holds, so it
+  has no deadline.** Changing a pass used to cancel each recording it had
+  booked and make it again, even to move one number. That has a moment in the
+  middle with nothing scheduled, so it was refused within two sync intervals of
+  the broadcast. The result was that the padding could not be corrected at the
+  one time somebody usually notices it is wrong, which is shortly before the
+  game.
+
+  Plex takes a partial update on a subscription that exists:
+  `PUT /media/subscriptions/<key>` with the settings to change. The pin is
+  untouched and the scheduled recording survives, verified against a live
+  server. Only the settings that actually differ are sent, and they can only be
+  settings the server itself reported, so nothing here can send a setting the
+  booking will not take.
+
+  Booking again is still what happens when the guide has moved the broadcast
+  under a booking, when Plex has lost the subscription, or when it has
+  scheduled nothing against it. Those keep the timing guard, because they are
+  the ones with a gap. An edit that somehow leaves nothing scheduled falls back
+  to booking again as well.
+
 ## 1.2.10 - 2026-09-13
 
 ### Fixed

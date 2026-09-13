@@ -624,6 +624,58 @@ def _airing_left_the_guide(plex, row, key, now, lead, out, drifted):
     out["cancelled"] += 1
 
 
+def _needs_rebooking(diffs) -> bool:
+    """Whether this difference can only be fixed by booking the recording again.
+
+    Three of them can. A subscription Plex does not have, a subscription it has
+    scheduled nothing against, and a pin that names the wrong broadcast.
+
+    The pin is not a setting. `lineupChannel` and `startTimeslot` name which
+    broadcast this is, and nothing has established that Plex will move a
+    booking onto a different broadcast in place, so that case is booked again.
+    Everything else describes a recording that is already pointed at the right
+    thing, and can simply be changed.
+    """
+    for d in diffs:
+        if d["kind"] not in ("missing", "differs"):
+            continue
+        if d["field"] in ("subscription", "recording") or d["field"] in verify.PINNED:
+            return True
+    return False
+
+
+def _edit_in_place(plex, key, diffs) -> tuple[bool, str]:
+    """Change the settings on the booking Plex already holds.
+
+    No cancel, so no moment with nothing scheduled, so no deadline. A padding
+    change made minutes before kickoff lands, which is exactly when somebody
+    notices the padding is wrong.
+
+    Only the settings that actually differ are sent. `verify.compare` answers
+    `unchecked` for a setting Plex never reported, and `unchecked` never asks
+    for a repair, so the changed set can only hold settings the server already
+    knows. That is what keeps this off the fault that refused a whole booking
+    for one undeclared setting.
+    """
+    want = {d["field"]: d["want"] for d in diffs if d["kind"] == "differs"}
+    if not want:
+        return False, "nothing to change"
+    try:
+        plex.update_subscription(key, want)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+    # An edit that kept the settings and lost the recording would be worse than
+    # no edit at all. Ask rather than assume, and let the caller book again.
+    try:
+        still = any(str(o.get("mediaSubscriptionID")) == str(key)
+                    for o in plex.scheduled())
+    except Exception:
+        still = True          # could not ask; not knowing is not a failure
+    if not still:
+        return False, "the change left nothing scheduled"
+    return True, verify.describe(diffs)
+
+
 def _repair(plex, row, diffs, now):
     """Cancel this booking and make it again from what the pass says now.
 
@@ -725,6 +777,18 @@ def check_bookings(plex, now: int | None = None) -> dict:
             continue
 
         what = f"{row['title'] or 'a recording'}: {verify.describe(diffs)}"
+
+        # SETTINGS ONLY: change them on the booking Plex already holds. There
+        # is no cancel, so there is no gap, so none of the timing below
+        # applies. A failure here falls through to booking again, which is
+        # still guarded.
+        if key and not _needs_rebooking(diffs):
+            ok, detail = _edit_in_place(plex, key, diffs)
+            if ok:
+                out["repaired"] += 1
+                _note(row, "repaired", detail, now)
+                continue
+
         if not verify.can_repair(begins_at=begins, now=now, lead=lead):
             out["drifted"] += 1
             drifted.append(what)
