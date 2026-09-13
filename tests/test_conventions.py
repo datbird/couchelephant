@@ -126,3 +126,33 @@ def test_no_template_prints_a_literal_backslash_n():
             if "\\n" in line:
                 bad.append(f"{f.name}:{n}: {line.strip()[:60]}")
     assert not bad, "literal \\n in markup:\n" + "\n".join(bad)
+
+
+def test_every_fault_code_is_raised_by_its_constant():
+    """A fault raised as a bare string is correct until somebody renames it.
+
+    `expectations.py` did exactly that with `expectation_missed`. Nothing broke,
+    and nothing would have broken until the constant moved, at which point the
+    notice would have been raised under a code no sweep owns and no destination
+    can subscribe to. The first means it never clears; the second means it is
+    detected and undeliverable, which is the failure `notify.py` exists to stop.
+    """
+    import re
+    from pathlib import Path
+
+    from app import health
+
+    codes = {v for k, v in vars(health).items()
+             if k.isupper() and isinstance(v, str) and not k.startswith("_")}
+    root = Path(__file__).parent.parent / "app"
+    bad = []
+    for path in root.rglob("*.py"):
+        if path.name == "health.py":
+            continue
+        for n, line in enumerate(path.read_text().splitlines(), 1):
+            m = re.search(r'"code":\s*"([a-z_]+)"', line)
+            if m and m.group(1) in codes:
+                bad.append(f"{path.relative_to(root)}:{n} raises {m.group(1)!r} "
+                           f"as a string rather than the health constant")
+    assert not bad, "\n".join(bad)
+

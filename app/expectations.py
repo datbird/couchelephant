@@ -10,7 +10,7 @@ import datetime
 import time
 import zoneinfo
 
-from . import db, teamcat
+from . import db, health, teamcat
 
 WHEN_UNKNOWN = "date not announced"
 
@@ -207,7 +207,7 @@ def sweep_misses(guide_ends_at: int | None, now: int | None = None) -> list[dict
     if len(names) > _NAMES_SHOWN:
         shown += " and others"
     return [{
-        "code": "expectation_missed",
+        "code": health.EXPECTATION_MISSED,
         "severity": "warn",
         "title": "Something you are waiting for did not reach the guide",
         "detail": (f"The guide now runs past the date announced for {shown}, "

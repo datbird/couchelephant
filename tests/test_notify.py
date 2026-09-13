@@ -452,12 +452,30 @@ def test_discord_bot_card_carries_a_name_and_an_icon(chat):
 
 
 def test_discord_bot_refuses_a_channel_that_is_not_an_id(chat):
+    """And says how to get the right one.
+
+    `last_error` is what the settings page renders, so this sentence is the
+    one somebody reads when a destination has stopped working. It used to be
+    "the channel must be a numeric Discord channel id", while the sentence
+    explaining where to find that id was on the Test button, which is the path
+    you press once.
+    """
     dest = _discord_bot(chat, [health.EPG_STALE], channel="general")
     _raise(health.EPG_STALE)
     notify.dispatch()
 
     assert fake_chat.discord_bot_sent() == []
-    assert "numeric" in (notify.get_destination(dest)["last_error"] or "").lower()
+    said = (notify.get_destination(dest)["last_error"] or "").lower()
+    assert "channel id" in said and "developer mode" in said, said
+
+
+def test_the_test_button_says_the_same_thing_as_the_hourly_send(chat):
+    """One list of preconditions, so the two paths cannot drift apart again."""
+    dest = _discord_bot(chat, [health.EPG_STALE], channel="general")
+    _raise(health.EPG_STALE)
+    notify.dispatch()
+
+    assert notify.test(dest) == notify.get_destination(dest)["last_error"]
 
 
 def test_discord_bot_reports_a_missing_invite_rather_than_a_bare_status(chat):

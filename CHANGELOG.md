@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.4.0 - 2026-09-13
+
+The second cleanup review, over the routes, the alerts and the rest of the app.
+
+### Fixed
+
+- **Alert times ignored the timezone setting.** Every "a pass booked a
+  recording at ..." line was formatted with the container's clock rather than
+  the zone the app is set to. It is the one time the product quotes outside its
+  own pages, and it was the one time that did not honour the setting.
+
+- **The useful error message was on the path nobody takes.** Sending and the
+  Test button each carried their own list of what a destination needs, worded
+  differently, and the better sentence was on the button you press once. The
+  settings page renders the error from the hourly send, so the sentence you
+  read when something is actually broken was the worse of the two. A bot with
+  no channel now says where to find the channel id, wherever you meet it.
+
+- **A smart pass with no name read as blank** in the schedule row, the guide
+  panel and the failure panel. Four places spelled the label out instead of
+  calling the helper that describes the filter when there is no name.
+
+- **The announced search wrote to the passes table directly**, bypassing the
+  one function whose docstring calls itself the only place a pass is written,
+  after the previous three had drifted apart. It was the fourth.
+
+- **One route answered a failure with HTTP 200**, leaving the client to work it
+  out from the body alone.
+
+- A fault code was raised as a bare string rather than its constant. Correct
+  today, silently broken on a rename, and now checked by a test.
+
+### Performance
+
+Measured against the live scale: 16,700 programmes, 22,800 airings, and a
+60-day history.
+
+- **The schedule is about four times faster.** It ran the most expensive query
+  in the app twice, the second time to count rows for a number no page renders.
+  One row more than asked for answers the same question. The failure half also
+  sorted the whole history to answer a question about broadcasts that have not
+  aired yet.
+- The filter panel counted genres and teams by parsing every programme's JSON
+  in Python. SQLite reads it directly, guarded so one malformed row cannot take
+  the panel down, which is the behaviour the Python version had.
+- Guide search folded each title once per broadcast rather than once per
+  programme.
+
+### Removed
+
+Four pieces of dead code: a route nothing calls, an unused import, a helper
+that only its own recursion used, and a function written for a provider that
+was rejected and deleted. The sports source also asked its API twice for one
+row, against a rate-limited free tier.
+
 ## 1.3.1 - 2026-09-13
 
 ### Fixed

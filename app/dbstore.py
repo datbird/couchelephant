@@ -376,8 +376,3 @@ def save_shadow(backend: str, store: str, shadow: dict[str, str]) -> None:
     con.commit()
 
 
-def forget_shadow(backend: str) -> None:
-    con = db.connect()
-    con.executescript(SHADOW_SCHEMA)
-    con.execute("DELETE FROM sync_shadow WHERE backend = ?", (backend,))
-    con.commit()

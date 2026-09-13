@@ -1,7 +1,6 @@
 """The recordings page: the schedule, passes, rules, smart filters."""
 import asyncio
 import time
-import uuid
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -62,9 +61,9 @@ def _why_map():
     out = {}
     for r in db.query(
             """SELECT o.channel_vcn, o.begins_at, o.source, o.airing_id, o.pass_id,
-                      p.kind, p.team_name, p.series_title, p.label, p.enabled
+                      p.kind, p.team_name, p.series_title, p.label, p.filter
                FROM our_grabs o LEFT JOIN passes p ON p.id = o.pass_id"""):
-        name = r["team_name"] or r["series_title"] or r["label"]
+        name = passes.rule_label(r)
         if r["pass_id"] and name:
             out[(r["channel_vcn"], r["begins_at"])] = {
                 "who": "ce",
@@ -112,6 +111,13 @@ def _why_map():
 # `fail_airing_id` is resolved against the guide as it stands now rather than
 # taken from the log, because the id in the oldest failure usually no longer
 # exists and the Try again button needs one that does.
+#
+# Both grouped subqueries carry the same future cutoff as the outer WHERE, and
+# that is exact rather than an approximation: `begins_at` is a GROUP BY column,
+# so filtering on it drops whole groups and cannot change `MAX(id)` inside a
+# group that survives. Without it, a sixty-day audit trail is sorted in full to
+# answer a question about what has not aired yet, and about four fifths of the
+# rows are discarded one join later.
 _FAILED_SQL = """
   SELECT NULL AS id, pa.program_title AS title,
          COALESCE(p.grandparent_title, '') AS parent_title,
@@ -124,10 +130,12 @@ _FAILED_SQL = """
   FROM pass_actions pa
   JOIN (SELECT channel_vcn, begins_at, MAX(id) AS mx FROM pass_actions
         WHERE airing_id IS NOT NULL AND dry_run = 0
+          AND COALESCE(begins_at, 0) > ?
         GROUP BY channel_vcn, begins_at) last ON last.mx = pa.id
   JOIN (SELECT channel_vcn, begins_at, COUNT(*) AS n, MIN(created_at) AS first_at
         FROM pass_actions WHERE action = 'failed' AND dry_run = 0
-          AND airing_id IS NOT NULL GROUP BY channel_vcn, begins_at) f
+          AND airing_id IS NOT NULL AND COALESCE(begins_at, 0) > ?
+        GROUP BY channel_vcn, begins_at) f
     ON f.channel_vcn = pa.channel_vcn AND f.begins_at = pa.begins_at
   LEFT JOIN airings a ON a.id = pa.airing_id
   LEFT JOIN airings live ON live.channel_vcn = pa.channel_vcn
@@ -163,13 +171,13 @@ def _schedule_source(now):
     failure that sorts past the end of the first page lands on no page at all,
     which is the same disappearing act this was written to stop.
     """
-    return f"({_GRABS_SQL} UNION ALL {_FAILED_SQL})", [now]
+    return f"({_GRABS_SQL} UNION ALL {_FAILED_SQL})", [now, now, now]
 
 
 def failed_booking(airing_id):
     """One failed booking, for the panel that offers to try it again."""
     rows = db.query(f"SELECT * FROM ({_FAILED_SQL}) WHERE fail_airing_id = ?",
-                    (0, airing_id))
+                    (0, 0, 0, airing_id))
     return rows[0] if rows else None
 
 
@@ -221,10 +229,14 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
         "SELECT DISTINCT title FROM programs WHERE teams IS NOT NULL AND teams != '[]'")}
     logos = _logo_map()
 
-    pass_names = {r["id"]: (r["team_name"] or r["series_title"] or r["label"])
-                  for r in db.query("SELECT id, team_name, series_title, label "
-                                    "FROM passes")}
-    pass_kinds = {r["id"]: r["kind"] for r in db.query("SELECT id, kind FROM passes")}
+    # One query, and `rule_label` rather than the three-way `or` written out.
+    # A smart pass has none of those three, so the inline version read as blank
+    # here while the rules list showed the filter `rule_label` describes.
+    pass_names, pass_kinds = {}, {}
+    for r in db.query("SELECT id, kind, team_name, series_title, label, filter "
+                      "FROM passes"):
+        pass_names[r["id"]] = passes.rule_label(r)
+        pass_kinds[r["id"]] = r["kind"]
 
     out = []
     for g in db.query(sql, tuple(args)):
@@ -270,27 +282,23 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
 
 @router.get("/api/schedule")
 def api_schedule(offset: int = 0, limit: int = 40, start: int = 0, end: int = 0):
-    rows = _schedule_rows(limit=limit, offset=offset,
+    # ONE ROW MORE THAN ASKED FOR, and its presence is the whole answer to
+    # "is there another page". This used to run the entire union a second time
+    # as a COUNT, which is the most expensive query in the app run twice for a
+    # number nothing renders.
+    #
+    # The rule the count was protecting still holds and is why the extra row
+    # comes from the same query rather than from a cheaper one: `more` has to
+    # be decided over the same set the rows come from, failures included and
+    # windowed the same way. Decided over `plex_grabs` alone it would read
+    # false while failures were still unread, and the agenda would stop
+    # scrolling one page short of them.
+    rows = _schedule_rows(limit=limit + 1, offset=offset,
                           start=start or None, end=end or None)
-    # Counted over the same window as the rows. Counting every grab while the
-    # rows were windowed made `more` true forever for a windowed query.
-    # Over the same set the rows come from, failures included. Counting only
-    # `plex_grabs` here would make `more` false while failures were still
-    # unread, and the agenda would stop scrolling one page short of them.
-    src, args = _schedule_source(int(time.time()))
-    where = []
-    if start:
-        where.append("COALESCE(g.begins_at, 0) >= ?")
-        args.append(start)
-    if end:
-        where.append("COALESCE(g.begins_at, 0) < ?")
-        args.append(end)
-    sql = f"SELECT COUNT(*) c FROM {src} g"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    total = db.one(sql, tuple(args))["c"]
-    return JSONResponse({"ok": True, "rows": rows, "total": total,
-                         "more": offset + len(rows) < total})
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return JSONResponse({"ok": True, "rows": rows,
+                         "total": offset + len(rows), "more": more})
 
 
 @router.get("/api/schedule/failure")
@@ -316,7 +324,7 @@ def api_schedule_failure(airing_id: str = ""):
         "error": f["error"] or "",
         "attempts": f["attempts"] or 1,
         "first_at": f["first_at"], "last_at": f["last_at"],
-        "pass_name": (p["team_name"] or p["series_title"] or p["label"]) if p else None,
+        "pass_name": passes.rule_label(p) if p else None,
         "pass_id": f["fail_pass_id"],
         # Whether a retry can even be attempted. Saying so before the button is
         # pressed beats a button that always fails the same way.
@@ -454,17 +462,11 @@ def api_announced_follow(source: str = Form(...), source_id: str = Form(...),
     if not title:
         return JSONResponse({"ok": False, "error": "A title is required."},
                             status_code=400)
-    existing = db.one("SELECT id FROM passes WHERE kind = 'series' "
-                      "AND series_title = ?", (title,))
-    if existing:
-        pass_id = existing["id"]
-    else:
-        with db.tx() as c:
-            cur = c.execute(
-                "INSERT INTO passes (kind, series_title, uid, enabled, created_at) "
-                "VALUES ('series', ?, ?, 1, ?)",
-                (title, uuid.uuid4().hex, int(time.time())))
-            pass_id = cur.lastrowid
+    # Through `_make_pass`, which its own docstring calls the only place a pass
+    # is written, after three writers had already drifted apart. This was the
+    # fourth: it checked for a duplicate its own way, and skipped the prefs and
+    # source normalising every other pass gets.
+    pass_id, _label, _created = _make_pass("series", None, title, [], [], {}, False)
     # Series and films only. A team is never followed through here: the team
     # picker makes that pass, and `expectations.fill_team_passes` gives it its
     # games on the next sync. A branch for teams here was unreachable.
@@ -618,7 +620,11 @@ def api_rule_options(kind: str = "team", team_id: str = "", series: str = "",
         with _plex() as plex:
             options = passes.templates(plex, row)
     except Exception as e:
-        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"})
+        # 502, like every other route that could not reach Plex. Answering a
+        # failure with 200 makes the client decide from the body alone, and it
+        # is the only one here that did.
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"},
+                            status_code=502)
 
     every = _template_payload(options, row, pin=False)
     if ce_pass:
@@ -833,14 +839,18 @@ def api_filter_fields():
     def distinct(sql):
         return [r[0] for r in db.query(sql) if r[0]]
 
-    genres = set()
-    for r in db.query("SELECT genres FROM programs WHERE genres IS NOT NULL"):
-        for g in db.unjs(r["genres"]):
-            if g:
-                genres.add(g)
+    # Asked of the database rather than by parsing every programme's JSON in
+    # Python. `json_valid` is not decoration: `json_each` raises on a malformed
+    # blob and would take the whole panel down, where `db.unjs` swallowed the
+    # bad row and carried on. Skipping it keeps that behaviour and costs
+    # nothing measurable.
+    genres = [r[0] for r in db.query(
+        "SELECT DISTINCT j.value FROM programs p, json_each(p.genres) j "
+        "WHERE json_valid(p.genres) AND j.value IS NOT NULL AND j.value != '' "
+        "ORDER BY 1")]
 
     values = {
-        "genres": sorted(genres),
+        "genres": genres,
         "ratings": distinct("SELECT DISTINCT content_rating FROM programs "
                             "WHERE content_rating IS NOT NULL AND content_rating != '' "
                             "ORDER BY content_rating"),
@@ -1110,12 +1120,6 @@ def pass_delete(pass_id: int):
 def pass_toggle(pass_id: int):
     with db.tx() as c:
         c.execute("UPDATE passes SET enabled = 1 - enabled WHERE id = ?", (pass_id,))
-    return RedirectResponse("/recordings", status_code=303)
-
-
-@router.post("/passes/run")
-async def passes_run():
-    await asyncio.to_thread(passes.run_passes)
     return RedirectResponse("/recordings", status_code=303)
 
 

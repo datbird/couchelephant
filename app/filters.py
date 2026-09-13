@@ -82,18 +82,27 @@ def facets() -> list[dict]:
         c["logo"] = logos.get(vcn, False)
         c["name"] = f"{vcn} {c['name']}".strip()
 
-    # Genres and teams live in JSON columns, so they are counted in Python.
-    from collections import Counter
-    gc, tc = Counter(), Counter()
-    tnames = {}
-    for r in db.query("SELECT genres, teams FROM programs"):
-        for g in db.unjs(r["genres"]):
-            if g:
-                gc[g] += 1
-        for t in db.unjs(r["teams"]):
-            if t.get("id") is not None:
-                tc[t["id"]] += 1
-                tnames[t["id"]] = t.get("name") or str(t["id"])
+    # Genres and teams live in JSON columns, and SQLite can read them. This was
+    # a pass over every programme parsing both blobs in Python, which is two
+    # decodes per row for a pair of counters.
+    #
+    # `json_valid` is load-bearing rather than decoration. `json_each` raises on
+    # a malformed blob and would take the whole filter panel down, where
+    # `db.unjs` swallowed the bad row and carried on. The guard keeps that
+    # behaviour and costs nothing measurable.
+    gc = {r["v"]: r["n"] for r in db.query(
+        "SELECT j.value AS v, COUNT(*) AS n FROM programs p, json_each(p.genres) j "
+        "WHERE json_valid(p.genres) AND j.value IS NOT NULL AND j.value != '' "
+        "GROUP BY j.value")}
+    tc, tnames = {}, {}
+    for r in db.query(
+            "SELECT json_extract(j.value, '$.id') AS id, "
+            "       json_extract(j.value, '$.name') AS name, COUNT(*) AS n "
+            "  FROM programs p, json_each(p.teams) j "
+            " WHERE json_valid(p.teams) AND json_extract(j.value, '$.id') IS NOT NULL "
+            " GROUP BY 1, 2"):
+        tc[r["id"]] = tc.get(r["id"], 0) + r["n"]
+        tnames.setdefault(r["id"], r["name"] or str(r["id"]))
 
     flags = []
     for key, label, sql in FLAGS:

@@ -251,14 +251,6 @@ def _describe(node, top=False):
     return inner if top else f"({inner})"
 
 
-def count_nodes(tree: dict) -> int:
-    if not isinstance(tree, dict):
-        return 0
-    if "op" not in tree:
-        return 1
-    return 1 + sum(count_nodes(n) for n in (tree.get("nodes") or []))
-
-
 # ---------------------------------------------------------------- looseness
 
 # A filter that names nothing specific about the programme matches most of the

@@ -49,7 +49,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from . import db, health
+from . import db, expectations, health
 
 TIMEOUT = 10.0
 
@@ -443,6 +443,67 @@ def _send_timmyd(dest, title, detail, severity) -> None:
         raise SendError(f"The relay refused it: {why}")
 
 
+SENDERS = {
+    "discord": lambda *a: _send_discord(*a),
+    "discord_bot": lambda *a: _send_discord_bot(*a),
+    "telegram": lambda *a: _send_telegram(*a),
+    "notifiarr": lambda *a: _send_notifiarr(*a),
+    "timmyd": lambda *a: _send_timmyd(*a),
+}
+
+
+# What each kind needs before it can send anything, and the sentence to say
+# when it does not have it.
+#
+# ONE LIST, because there were two. `_deliver` and `test` each carried their
+# own chain of preconditions, worded differently, and the useful sentence was
+# on the wrong one: `test` told you to turn on Developer Mode and copy the
+# channel id, while `_deliver` said "the bot token or the channel is missing".
+# `_deliver` is the path that runs hourly, and its message is what lands in
+# `last_error` and is rendered on the settings page, so the sentence a person
+# reads when something is actually broken was the worse of the two.
+#
+# The chains had also drifted apart: `test` reached Telegram through a bare
+# `else`, so an unknown kind was sent to Telegram there and refused here.
+def _numeric_channel(dest):
+    return str(dest.get("chat_id") or "").strip().isdigit()
+
+
+_CHANNEL_HELP = ("No Discord channel id is set. Turn on Developer Mode in "
+                 "Discord, right-click the channel, Copy Channel ID.")
+
+NEEDS = {
+    "discord": [(lambda d: d.get("webhook"), "No webhook URL is set.")],
+    "discord_bot": [
+        (lambda d: d.get("token"), "No Discord bot token is set."),
+        (_numeric_channel, _CHANNEL_HELP),
+    ],
+    "telegram": [
+        (lambda d: d.get("token"), "No Telegram bot token is set."),
+        (lambda d: d.get("chat_id"),
+         "No chat is set. Message the bot, then press Find chat."),
+    ],
+    "notifiarr": [
+        (lambda d: d.get("token"), "No Notifiarr API key is set."),
+        (_numeric_channel, _CHANNEL_HELP),
+    ],
+    "timmyd": [
+        (lambda d: d.get("webhook"), "No relay address is set."),
+        (lambda d: d.get("token"), "No relay token is set."),
+    ],
+}
+
+
+def not_ready(dest) -> str | None:
+    """Why this destination cannot send, or None when it can."""
+    if dest["kind"] not in SENDERS:
+        return f"Unknown kind {dest['kind']!r}"
+    for ok, why in NEEDS[dest["kind"]]:
+        if not ok(dest):
+            return why
+    return None
+
+
 def _deliver(dest, title, detail, severity) -> bool:
     """One message, one destination. Never raises.
 
@@ -451,34 +512,10 @@ def _deliver(dest, title, detail, severity) -> bool:
     is written, and the next sync tries again. One blip must not lose the alert.
     """
     try:
-        if dest["kind"] == "discord":
-            if not dest.get("webhook"):
-                raise SendError("No webhook URL is set.")
-            _send_discord(dest, title, detail, severity)
-        elif dest["kind"] == "discord_bot":
-            if not (dest.get("token") and dest.get("chat_id")):
-                raise SendError("The bot token or the channel is missing.")
-            if not str(dest["chat_id"]).strip().isdigit():
-                raise SendError("The channel must be a numeric Discord channel id.")
-            _send_discord_bot(dest, title, detail, severity)
-        elif dest["kind"] == "telegram":
-            if not (dest.get("token") and dest.get("chat_id")):
-                raise SendError("The token or the chat is missing.")
-            _send_telegram(dest, title, detail, severity)
-        elif dest["kind"] == "notifiarr":
-            if not (dest.get("token") and dest.get("chat_id")):
-                raise SendError("The API key or the channel is missing.")
-            if not str(dest["chat_id"]).strip().isdigit():
-                raise SendError("The channel must be a numeric Discord channel id.")
-            _send_notifiarr(dest, title, detail, severity)
-        elif dest["kind"] == "timmyd":
-            if not dest.get("webhook"):
-                raise SendError("No relay address is set.")
-            if not dest.get("token"):
-                raise SendError("No relay token is set.")
-            _send_timmyd(dest, title, detail, severity)
-        else:
-            raise SendError(f"Unknown kind {dest['kind']!r}")
+        missing = not_ready(dest)
+        if missing:
+            raise SendError(missing)
+        SENDERS[dest["kind"]](dest, title, detail, severity)
     except Exception as e:
         _mark(dest["id"], ok=False, error=f"{type(e).__name__}: {e}"
               if not isinstance(e, SendError) else str(e))
@@ -502,45 +539,14 @@ def test(dest_id: int) -> str:
     dest = get_destination(dest_id)
     if not dest:
         return "That destination no longer exists."
+    missing = not_ready(dest)
+    if missing:
+        return missing
     try:
-        if dest["kind"] == "discord":
-            if not dest.get("webhook"):
-                return "No webhook URL is set."
-            _send_discord(dest, "CouchElephant test",
-                          "If you can read this, alerts will reach here.", "ok")
-        elif dest["kind"] == "discord_bot":
-            if not dest.get("token"):
-                return "No bot token is set."
-            if not str(dest.get("chat_id") or "").strip().isdigit():
-                return ("No Discord channel id is set. Turn on Developer Mode in "
-                        "Discord, right-click the channel, Copy Channel ID.")
-            _send_discord_bot(dest, "CouchElephant test",
+        # Sent at `ok`. A relay routes on severity, and testing a destination
+        # is not an emergency.
+        SENDERS[dest["kind"]](dest, "CouchElephant test",
                               "If you can read this, alerts will reach here.", "ok")
-        elif dest["kind"] == "notifiarr":
-            if not dest.get("token"):
-                return "No Notifiarr API key is set."
-            if not str(dest.get("chat_id") or "").strip().isdigit():
-                return ("No Discord channel id is set. Turn on Developer Mode in "
-                        "Discord, right-click the channel, Copy Channel ID.")
-            _send_notifiarr(dest, "CouchElephant test",
-                            "If you can read this, alerts will reach here.", "ok")
-        elif dest["kind"] == "timmyd":
-            if not dest.get("webhook"):
-                return "No relay address is set."
-            if not dest.get("token"):
-                return "No relay token is set."
-            # Sent at `ok`, so a test lands in the channel for things you read
-            # later rather than the one you watch. Testing a destination is not
-            # an emergency.
-            _send_timmyd(dest, "CouchElephant test",
-                         "If you can read this, alerts will reach here.", "ok")
-        else:
-            if not dest.get("token"):
-                return "No bot token is set."
-            if not dest.get("chat_id"):
-                return "No chat is set. Message the bot, then press Find chat."
-            _send_telegram(dest, "CouchElephant test",
-                           "If you can read this, alerts will reach here.", "ok")
     except Exception as e:
         _mark(dest_id, ok=False, error=str(e))
         return f"Failed: {e}"
@@ -726,6 +732,14 @@ def _activity(dest, wanted, now) -> int:
 
 
 def _clock(ts) -> str:
+    """A broadcast time, in the zone the app is set to.
+
+    Not the container's clock. This is the one time the product quotes outside
+    its own pages, and it was the one time that ignored the setting, so a
+    server whose container runs in UTC announced every booking an hour or six
+    away from what the schedule showed.
+    """
     if not ts:
         return ""
-    return time.strftime(" at %a %d %b %H:%M", time.localtime(int(ts)))
+    return " at " + expectations.render_when(int(ts), "time",
+                                             db.get_setting("timezone"))

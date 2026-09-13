@@ -87,8 +87,7 @@ def season(team_name: str, league_id: str, key: str = "",
         return []
     if season is None:
         season = current_season(league_id, key=key, base=base)
-    url = (f"{(base or BASE).rstrip('/')}/api/v1/json/"
-           f"{(key or '').strip() or FREE_KEY}/eventsround.php")
+    url = _url("eventsround.php", key, base)
     events, quiet = [], 0
     with httpx.Client(timeout=TIMEOUT) as http:
         for rnd in range(1, _MAX_ROUNDS + 1):
@@ -112,30 +111,12 @@ def season(team_name: str, league_id: str, key: str = "",
                              title=team_name)
 
 
-def league_info(league_id: str, key: str = "",
-                base: str | None = None) -> dict:
-    """`{"name": ..., "season": ...}` for a league, or empty strings.
 
-    One call answering both, because both callers want it at the same moment:
-    the season call needs `s`, and ESPN needs the league's NAME to find its own
-    path for it. Asking twice for one row would double the requests against a
-    rate-limited free tier for nothing.
-    """
-    league_id = (league_id or "").strip()
-    if not league_id:
-        return {"name": "", "season": ""}
-    url = (f"{(base or BASE).rstrip('/')}/api/v1/json/"
-           f"{(key or '').strip() or FREE_KEY}/lookupleague.php")
-    try:
-        with httpx.Client(timeout=TIMEOUT) as http:
-            response = http.get(url, params={"id": league_id})
-            response.raise_for_status()
-            leagues = (response.json() or {}).get("leagues") or []
-    except Exception:                    # noqa: BLE001 — a miss is not a league
-        return {"name": "", "season": ""}
-    row = leagues[0] if leagues else {}
-    return {"name": str(row.get("strLeague") or "").strip(),
-            "season": str(row.get("strCurrentSeason") or "").strip()}
+
+def _url(endpoint: str, key: str = "", base: str | None = None) -> str:
+    """One place the API address is composed. It was written out five times."""
+    return (f"{(base or BASE).rstrip('/')}/api/v1/json/"
+            f"{(key or '').strip() or FREE_KEY}/{endpoint}")
 
 
 def current_season(league_id: str, key: str = "",
@@ -153,8 +134,7 @@ def current_season(league_id: str, key: str = "",
     league_id = (league_id or "").strip()
     if not league_id:
         return ""
-    url = (f"{(base or BASE).rstrip('/')}/api/v1/json/"
-           f"{(key or '').strip() or FREE_KEY}/lookupleague.php")
+    url = _url("lookupleague.php", key, base)
     try:
         with httpx.Client(timeout=TIMEOUT) as http:
             response = http.get(url, params={"id": league_id})
@@ -211,8 +191,7 @@ def team(name: str, key: str = "", base: str | None = None) -> dict | None:
     name = (name or "").strip()
     if not name:
         return None
-    url = (f"{(base or BASE).rstrip('/')}/api/v1/json/"
-           f"{(key or '').strip() or FREE_KEY}/searchteams.php")
+    url = _url("searchteams.php", key, base)
     with httpx.Client(timeout=TIMEOUT) as http:
         response = http.get(url, params={"t": name})
         response.raise_for_status()
@@ -240,8 +219,7 @@ def upcoming(team_id: str, key: str = "", base: str | None = None) -> list[Annou
     team_id = (team_id or "").strip()
     if not team_id:
         return []
-    url = (f"{(base or BASE).rstrip('/')}/api/v1/json/"
-           f"{(key or '').strip() or FREE_KEY}/eventsnext.php")
+    url = _url("eventsnext.php", key, base)
     with httpx.Client(timeout=TIMEOUT) as http:
         response = http.get(url, params={"id": team_id})
         response.raise_for_status()
