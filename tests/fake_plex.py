@@ -246,9 +246,82 @@ class State:
         self.epg_task_enabled = True
         self.epg_task_interval = 1
         self.serve_butler = True
+        # What the guide has since done to its own listings. A refresh re-times
+        # a broadcast and renumbers it, and it drops programmes off the end of
+        # the window. Both are ordinary, both move the identity the app books
+        # against, so the fake has to be able to do them.
+        self.moves = {}         # (programme guid, old beginsAt) -> new beginsAt
+        self.gone = set()       # programmes the guide no longer carries
 
 
 STATE = State()
+
+
+def move_broadcast(guid, was, now_at):
+    """The guide re-times one broadcast, the way a guide refresh does."""
+    STATE.moves[(guid, int(was))] = int(now_at)
+
+
+def drop_from_guide(guid):
+    """The guide stops carrying a programme at all."""
+    STATE.gone.add(guid)
+
+
+def _as_the_guide_has_it(item):
+    """One item as the guide carries it now, with any re-timing applied.
+
+    The airing id is minted from the slot, so moving a broadcast renumbers it.
+    That is not incidental: the renumbering is what breaks every lookup the
+    app makes by airing id, and a fake that moved the time but kept the id
+    would test a world that does not exist.
+    """
+    media = []
+    for m in (item.get("Media") or []):
+        moved = STATE.moves.get((item["guid"], int(m["beginsAt"])))
+        if moved is None:
+            media.append(m)
+            continue
+        m = dict(m, beginsAt=moved, endsAt=moved + (m["endsAt"] - m["beginsAt"]))
+        m["id"] = f"{m['channelVcn']}-{moved}"
+        media.append(m)
+    return dict(item, Media=media)
+
+
+def _items(src):
+    """Everything in one section, as the guide stands now."""
+    return [_as_the_guide_has_it(m) for m in src if m["guid"] not in STATE.gone]
+
+
+def _current_media(guid):
+    for src in (SPORTS_ITEMS, SHOW_ITEMS, MOVIE_ITEMS):
+        for m in _items(src):
+            if m["guid"] == guid:
+                return m.get("Media") or []
+    return []
+
+
+def _scheduled_meta(sub):
+    """What this subscription has scheduled, or None if it has nothing.
+
+    A pinned one-shot names one slot. Move that broadcast in the guide and the
+    pin names nothing, so the server schedules nothing against the
+    subscription. It does not delete the subscription either, which is how an
+    orphan comes to exist.
+
+    Measured on a live DVR on 2026-09-13: a game that shifted fifteen minutes
+    left its old subscription holding no grab at all, while a second
+    subscription booked at the new time recorded it. This fake used to answer
+    with the frozen old listing for ever, which hid the whole consequence.
+    """
+    meta = sub["_meta"]
+    if int(sub.get("type") or 4) != 4:
+        return meta                       # a recurring rule is not pinned
+    pinned = sub.get("_pinned")
+    if not pinned or pinned == "-1":
+        return meta
+    media = [m for m in _current_media(meta["guid"])
+             if str(m["beginsAt"]) == str(pinned)]
+    return dict(meta, Media=media) if media else None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -323,11 +396,11 @@ class Handler(BaseHTTPRequestHandler):
             # Querying a section with the wrong type returns nothing rather
             # than erroring, exactly as the real server does.
             if section == "3" and itype == "4":
-                return self._container(Metadata=SPORTS_ITEMS)
+                return self._container(Metadata=_items(SPORTS_ITEMS))
             if section == "1" and itype == "4":
-                return self._container(Metadata=SHOW_ITEMS)
+                return self._container(Metadata=_items(SHOW_ITEMS))
             if section == "2" and itype == "1":
-                return self._container(Metadata=MOVIE_ITEMS)
+                return self._container(Metadata=_items(MOVIE_ITEMS))
             return self._container(Metadata=[])
 
         if p.endswith("/team"):
@@ -338,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
             key = urllib.parse.unquote(p.rsplit("/", 1)[-1])
             item = None
             for src in (SPORTS_ITEMS, SHOW_ITEMS, MOVIE_ITEMS):
-                for m in src:
+                for m in _items(src):
                     if urllib.parse.unquote(m["ratingKey"]) == key:
                         item = dict(m)
             if not item:
@@ -406,13 +479,18 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/media/subscriptions/scheduled":
             ops = []
             for key, sub in STATE.subscriptions.items():
+                meta = _scheduled_meta(sub)
+                if meta is None:
+                    # Pinned to a slot the guide no longer has. The server
+                    # schedules nothing and keeps the subscription.
+                    continue
                 ops.append({
                     "id": f"op-{key}",
                     "mediaSubscriptionID": key,
                     # A string, as the real server sends it.
                     "mediaIndex": "0",
                     "status": "scheduled",
-                    "Metadata": sub["_meta"],
+                    "Metadata": meta,
                 })
             return self._container(MediaGrabOperation=ops)
 
@@ -458,7 +536,7 @@ class Handler(BaseHTTPRequestHandler):
 
         meta = None
         for src in (SPORTS_ITEMS, SHOW_ITEMS, MOVIE_ITEMS):
-            for m in src:
+            for m in _items(src):
                 if m["guid"] == guid:
                     meta = m
         media = list((meta or {}).get("Media") or [])
@@ -486,6 +564,9 @@ class Handler(BaseHTTPRequestHandler):
             # oneShot comes back as a string, not a 1.
             "Setting": [{"id": k, "value": ("true" if v in ("1", "true") else v)}
                         for k, v in prefs.items()],
+            # The slot this booking is pinned to, which is what decides
+            # whether it still has anything scheduled after a guide refresh.
+            "_pinned": pinned,
             "_meta": {"guid": guid,
                       "title": (meta or {}).get("title"),
                       "grandparentTitle": (meta or {}).get("grandparentTitle"),

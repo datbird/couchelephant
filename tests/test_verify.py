@@ -178,12 +178,16 @@ def _push_kickoff(hours=6):
     `verify.can_repair` insists on. Moving the game is the honest way to reach
     the repair path; lowering the guard would test something the product does
     not do. Done before the pass runs, so the booking pins the moved time.
+
+    Moved in the guide and then pulled in, rather than written straight into
+    the database. The server decides what it has scheduled by reading its own
+    listing, so a database that disagreed with the guide would be a state no
+    real install can reach.
     """
     when = int(time.time()) + hours * HOUR
-    with db.tx() as c:
-        c.execute("UPDATE airings SET begins_at = ?, ends_at = ? "
-                  "WHERE program_guid = ? AND premiere = 1",
-                  (when, when + 2 * HOUR, fake_plex.GAME_GUID))
+    fake_plex.move_broadcast(fake_plex.GAME_GUID, fake_plex.LIVE_AT, when)
+    ok, detail = sync.full_sync()
+    assert ok, detail
     return when
 
 
