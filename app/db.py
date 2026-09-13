@@ -118,6 +118,12 @@ CREATE TABLE IF NOT EXISTS plex_grabs (
     ends_at       INTEGER,
     updated_at    INTEGER
 );
+-- `plex_grabs` holds the WHOLE DVR schedule, not only ours, and three hot
+-- questions read it: has this booking a recording, does another booking cover
+-- this game, and is Plex already recording this programme. Each was a full
+-- scan, the last one once per airing of the programme.
+CREATE INDEX IF NOT EXISTS idx_grabs_sub ON plex_grabs(subscription);
+CREATE INDEX IF NOT EXISTS idx_grabs_slot ON plex_grabs(channel_vcn, begins_at);
 
 -- Ours. A pass says "follow this team"; the scheduler turns it into pinned
 -- one-shot recordings on the airing we choose.
@@ -474,10 +480,41 @@ def init() -> None:
         conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     _backfill_uids(conn)
     _strip_recurring_only_prefs(conn)
+    _reslot_airing_ids(conn)
     # After the migration and the backfill, not inside SCHEMA: on an existing
     # install the column does not exist until _migrate has run.
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS passes_uid ON passes(uid)")
     conn.commit()
+
+
+def _reslot_airing_ids(conn):
+    """Re-key existing bookings onto the slot-minted airing id.
+
+    An airing id used to be minted from Plex's own `Media.id`, which a guide
+    refresh changes for a broadcast that has not moved. It is now minted from
+    the programme, the channel and the start time, so the same broadcast keeps
+    the same id.
+
+    Bookings made before that change hold the old form, and everything that
+    reads `our_grabs.airing_id` would miss them: the guide's "Being recorded"
+    filter, cancelling by hand, and the panel a schedule row opens. The row
+    already carries the three parts, so the new id is computed rather than
+    looked up, and a booking whose broadcast is long gone is re-keyed just as
+    correctly as a live one.
+
+    `UPDATE OR REPLACE` because the id is the primary key: two rows for one
+    broadcast can only be duplicates of each other, and keeping one is right.
+
+    `pass_actions` is deliberately left alone. It is history, and the schedule
+    already resolves a failure's airing against the guide as it stands rather
+    than trusting the id it recorded.
+    """
+    conn.execute(
+        """UPDATE OR REPLACE our_grabs
+              SET airing_id = program_guid || '#' || channel_vcn || '@' || begins_at
+            WHERE program_guid IS NOT NULL AND channel_vcn IS NOT NULL
+              AND begins_at IS NOT NULL
+              AND airing_id <> program_guid || '#' || channel_vcn || '@' || begins_at""")
 
 
 # Settings only a recurring Plex rule can honour. A pass always books the

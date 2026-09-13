@@ -14,12 +14,29 @@ def _now():
 
 
 def _airing_id(guid, media):
-    """Stable per-broadcast id. Plex's own Media id is not always present, so
-    the channel and start time identify the broadcast instead."""
-    mid = media.get("id")
-    if mid:
-        return f"{guid}#{mid}"
-    return f"{guid}#{media.get('channelIdentifier')}@{media.get('beginsAt')}"
+    """A broadcast's id, minted from the broadcast.
+
+    THE PROGRAMME, THE CHANNEL AND THE START TIME, and nothing else. Those
+    three are what a broadcast IS, so the id is the same every time the guide
+    describes the same broadcast.
+
+    This used to prefer Plex's own `Media.id`, which is the one value in the
+    payload that moves: a guide refresh renumbers airings without changing
+    anything about them, and one game here collected nine ids over three
+    weeks. Every lookup keyed on the id then had to be taught to resolve a
+    retired one, and four of them were taught one at a time, after each had
+    failed in front of somebody: a red NOT RECORDING row on a game that was
+    recording, an orphan subscription nobody could see, a booking that stopped
+    being checked, and a panel that said the programme did not exist.
+
+    Minting from the slot removes the question rather than answering it again.
+    A re-time still changes the id, which is right: that is a different
+    broadcast and the app has to notice.
+
+    The channel is the vcn rather than Plex's channel identifier because every
+    other lookup in this app keys on the vcn, and `our_grabs` stores it.
+    """
+    return f"{guid}#{media.get('channelVcn')}@{media.get('beginsAt')}"
 
 
 def _int_or_none(v):
@@ -66,7 +83,26 @@ def _upsert_program(c, m, section, now):
     )
 
 
-def _upsert_channel(c, med, now):
+def _upsert_channel(c, med, now, seen=None):
+    """One channel row. `seen` skips a payload already written this sync.
+
+    This is called once per broadcast, and there are about 22,800 of those
+    against 63 channels, so all but 63 of the writes say what the row already
+    says. Keyed on the whole payload rather than on the vcn, because two
+    sightings of one channel can carry different fields and the COALESCE below
+    is what fills the gaps.
+    """
+    if seen is not None:
+        mark = (med.get("channelVcn"), med.get("channelCallSign"),
+                med.get("channelTitle"), med.get("channelIdentifier"),
+                med.get("channelThumb"))
+        if mark in seen:
+            return
+        seen.add(mark)
+    return _upsert_channel_row(c, med, now)
+
+
+def _upsert_channel_row(c, med, now):
     """Channel identity, including the Gracenote logo Plex points at."""
     vcn = med.get("channelVcn")
     if not vcn:
@@ -88,12 +124,17 @@ def _upsert_channel(c, med, now):
     )
 
 
-def _upsert_airings(c, m, now, seen=None):
+def _upsert_airings(c, m, now, seen, channels_seen=None):
+    """Write this programme's broadcasts, and record which ids were seen.
+
+    `seen` is required. It decides what the prune keeps, so a caller that
+    omitted it would write airings and have them deleted moments later.
+    """
     guid = m.get("guid")
     for med in (m.get("Media") or []):
-        if seen is not None:
-            seen.add(_airing_id(guid, med))
-        _upsert_channel(c, med, now)
+        aid = _airing_id(guid, med)
+        seen.add(aid)
+        _upsert_channel(c, med, now, channels_seen)
         c.execute(
             """INSERT INTO airings (id, program_guid, channel_vcn, channel_call_sign,
                                     channel_identifier, channel_title, begins_at, ends_at,
@@ -106,7 +147,7 @@ def _upsert_airings(c, m, now, seen=None):
                  ends_at=excluded.ends_at, premiere=excluded.premiere,
                  resolution=excluded.resolution, drm=excluded.drm,
                  updated_at=excluded.updated_at""",
-            (_airing_id(guid, med), guid, med.get("channelVcn"), med.get("channelCallSign"),
+            (aid, guid, med.get("channelVcn"), med.get("channelCallSign"),
              med.get("channelIdentifier"), med.get("channelTitle"),
              int(med.get("beginsAt") or 0) or None, int(med.get("endsAt") or 0) or None,
              1 if str(med.get("premiere") or "0") == "1" else 0,
@@ -127,6 +168,7 @@ def sync_guide(plex: Plex, provider: str, shows, sports, movies=None) -> dict[st
     # airing that no longer exists in the guide, which is the precise shape of
     # bug this module spends the rest of its length defending against.
     seen = set()
+    channels_seen = set()
     with db.tx() as c:
         for section, label, itype in ((shows, "shows", 4), (sports, "sports", 4),
                                       (movies, "movies", 1)):
@@ -134,17 +176,11 @@ def sync_guide(plex: Plex, provider: str, shows, sports, movies=None) -> dict[st
                 continue
             for m in plex.section_all(provider, section, type=itype):
                 _upsert_program(c, m, label, now)
-                _upsert_airings(c, m, now, seen)
+                _upsert_airings(c, m, now, seen, channels_seen)
                 counts["programs"] += 1
                 counts["airings"] += len(m.get("Media") or [])
-        # Drop anything that fell out of the guide window. Held in a temporary
-        # table rather than bound as twenty thousand parameters.
-        c.execute("CREATE TEMP TABLE IF NOT EXISTS seen_airings (id TEXT PRIMARY KEY)")
-        c.execute("DELETE FROM seen_airings")
-        c.executemany("INSERT OR IGNORE INTO seen_airings (id) VALUES (?)",
-                      [(i,) for i in seen])
-        c.execute("DELETE FROM airings WHERE id NOT IN (SELECT id FROM seen_airings)")
-        c.execute("DELETE FROM seen_airings")
+        # Drop anything that fell out of the guide window.
+        _prune(c, "airings", "id", seen)
         c.execute("DELETE FROM programs WHERE guid NOT IN (SELECT program_guid FROM airings)")
     return counts
 
@@ -187,11 +223,11 @@ def cache_logos(force: bool = False) -> tuple[int, int, int]:
         # Back off a URL that keeps failing, but let the age check retry it later.
         if (r["logo_attempts"] or 0) >= LOGO_MAX_TRIES and reason == "never fetched":
             continue
-        todo.append((r, reason))
+        todo.append(r)
 
     fetched = failed = 0
     with httpx.Client(timeout=30.0, follow_redirects=True) as c:
-        for r, _reason in todo:
+        for r in todo:
             safe = "".join(ch if (ch.isalnum() and ch.isascii()) or ch in "._-" else "_" for ch in r["vcn"])
             path = os.path.join(LOGO_DIR, f"{safe}.png")
             try:
@@ -392,7 +428,11 @@ def check_team_passes() -> int:
     """
     idle = []
     for p in db.query("SELECT * FROM passes WHERE kind = 'team' AND enabled = 1"):
-        if not passes.candidate_airings(p["team_id"], team_name=p["team_name"]):
+        # One row answers "is there anything at all". Without the limit this
+        # hydrates every match in the thirty-day window, running the team
+        # lookup over the whole guide, to look at the length of the list.
+        if not passes.candidate_airings(p["team_id"], team_name=p["team_name"],
+                                        limit=1):
             idle.append(p["team_name"] or f"pass {p['id']}")
     now = _now()
     raised = []
@@ -486,19 +526,30 @@ def _covered_elsewhere(row):
         (row["program_guid"], row["airing_id"])))
 
 
-def _would_choose(row):
+def _label(row) -> str:
+    return row["title"] or "a recording"
+
+
+def _would_choose(row, passes_by_id=None):
     """The broadcast the pass that made this booking would choose today.
 
     Its own choice, not merely the first airing left in the guide. A pass
     limited to one network must not be re-pointed onto a channel it was told
     to stay off, and a game with a repeat must land on the live airing again.
+
+    The pass rows are handed in rather than read here. A guide refresh can
+    orphan many bookings at once, and this used to read the same handful of
+    passes once per booking.
     """
-    p = db.one("SELECT * FROM passes WHERE id = ?", (row["pass_id"],))
+    p = (passes_by_id or {}).get(row["pass_id"]) \
+        or db.one("SELECT * FROM passes WHERE id = ?", (row["pass_id"],))
     if not p:
         return None
     try:
-        mine = [a for a in passes.rule_airings(p)
-                if a["program_guid"] == row["program_guid"]]
+        # The programme is asked for in SQL rather than filtered afterwards.
+        # A pass's window holds every airing it could record for thirty days,
+        # and all but one programme's worth is thrown away here.
+        mine = passes.rule_airings(p, program_guid=row["program_guid"])
     except Exception:
         # An unusable filter is the pass's problem, not grounds for touching
         # a recording that already exists.
@@ -551,23 +602,33 @@ def _cancel(plex, row, why, now):
     _note(row, "cancelled", why, now)
 
 
-def _repoint(plex, row, airing, why, now):
-    """Move a booking onto the broadcast the guide moved it to.
+def _rebook(plex, row, airing, why, now):
+    """Cancel this booking and make it again, on the airing given.
 
-    Cancel first and then book, for the reason `_repair` does: creating first
-    and then failing to delete would record the game twice.
+    Delete then create, in that order. Creating first would leave two
+    subscriptions if the delete then failed, and Plex would record the game
+    twice; this way a failure leaves one gap that the next sync fills, which
+    is why `verify.can_repair` refuses to run inside two sync intervals of
+    kickoff.
 
-    The old `our_grabs` row is dropped rather than updated, because the new
-    booking carries a new airing id. Left behind, it would be checked again on
-    every sync for ever, against an airing that is never coming back.
+    A renumbered or re-timed airing is booked under its new id, so the row
+    naming the old one has to go with it. Left behind, it would be checked
+    again on every sync for ever, against an airing that is never coming back.
+
+    One function because there is one protocol. It used to be two, one for a
+    booking whose settings had drifted and one for a booking whose broadcast
+    had moved, and the copies had already disagreed about whether to log a
+    failure and when to forget the old row.
     """
     old = row["subscription"]
     if old:
         try:
             plex.delete_subscription(old)
         except PlexError:
+            # Already gone is the normal case here: that is often the drift.
             pass
-    passes.forget(row["airing_id"])
+    if row["airing_id"] != airing["id"]:
+        passes.forget(row["airing_id"])
     try:
         passes._schedule(plex, airing, None, "pass",
                          prefs=dict(db.unjs(row["prefs"]) or {}),
@@ -580,7 +641,7 @@ def _repoint(plex, row, airing, why, now):
     return True, why
 
 
-def _airing_left_the_guide(plex, row, key, now, lead, out, drifted):
+def _airing_left_the_guide(plex, row, key, now, lead, passes_by_id=None):
     """What to do about a booking whose broadcast is no longer in the guide.
 
     A guide refresh renumbers airings and re-times them, so the airing a
@@ -590,38 +651,45 @@ def _airing_left_the_guide(plex, row, key, now, lead, out, drifted):
     holding on 2026-09-13.
 
     Four things can be true here and only one of them is leave it alone.
+
+    Returns `(outcome, note)`. The counting and the notices belong to the
+    caller: when this function did its own accounting, one branch bumped the
+    `failed` counter without adding to the list the notices are built from, so
+    a re-point Plex refused was counted and never mentioned. One place to
+    account is how that stays impossible.
     """
     # 1. Plex is still recording something for this booking. Plex knows more
     #    about its own schedule than we do, and a guide that has merely shrunk
     #    must never read as permission to cancel a recording.
     if _has_grab(key, row["booked_vcn"], row["booked_at"]):
-        out["unchecked"] += 1
-        return
+        return "unchecked", None
 
     # 2. Another booking of ours already covers this game. This one is a
     #    duplicate rather than a gap, so it goes and nothing replaces it.
     if _covered_elsewhere(row):
         _cancel(plex, row, "a second booking for a game already recorded", now)
-        out["cancelled"] += 1
-        return
+        return "cancelled", None
 
     # 3. The guide still carries the game, at a new time or on a new channel.
-    airing = _would_choose(row)
+    airing = _would_choose(row, passes_by_id)
     if airing:
         why = "the guide moved this broadcast"
         if not verify.can_repair(begins_at=airing["begins_at"], now=now, lead=lead):
-            out["drifted"] += 1
-            drifted.append(f"{row['title'] or 'a recording'}: {why}")
-            return
-        ok, _detail = _repoint(plex, row, airing, why, now)
-        out["repaired" if ok else "failed"] += 1
-        return
+            return "drifted", f"{_label(row)}: {why}"
+        ok, detail = _rebook(plex, row, airing, why, now)
+        return ("repaired", None) if ok else ("failed", f"{_label(row)}: {detail}")
 
     # 4. The guide has dropped the programme and Plex has nothing scheduled.
     #    Nothing will ever match the pin, so the subscription is rubbish that
     #    would otherwise outlive every season.
     _cancel(plex, row, "the guide no longer carries this broadcast", now)
-    out["cancelled"] += 1
+    return "cancelled", None
+
+
+# A difference in any of these can only be fixed by booking again. The pin is
+# not a setting, and a subscription that is missing or holds no recording has
+# nothing to edit.
+_REBOOK_FIELDS = frozenset({"subscription", "recording", *verify.PINNED})
 
 
 def _needs_rebooking(diffs) -> bool:
@@ -636,12 +704,8 @@ def _needs_rebooking(diffs) -> bool:
     Everything else describes a recording that is already pointed at the right
     thing, and can simply be changed.
     """
-    for d in diffs:
-        if d["kind"] not in ("missing", "differs"):
-            continue
-        if d["field"] in ("subscription", "recording") or d["field"] in verify.PINNED:
-            return True
-    return False
+    return any(d["field"] in _REBOOK_FIELDS
+               for d in diffs if d["kind"] in ("missing", "differs"))
 
 
 def _edit_in_place(plex, key, diffs) -> tuple[bool, str]:
@@ -677,45 +741,12 @@ def _edit_in_place(plex, key, diffs) -> tuple[bool, str]:
 
 
 def _repair(plex, row, diffs, now):
-    """Cancel this booking and make it again from what the pass says now.
-
-    Delete then create, in that order. Creating first would leave two
-    subscriptions if the delete then failed, and Plex would record the game
-    twice; this way a failure leaves one gap that the next sync fills, which
-    is why `verify.can_repair` refuses to run inside two sync intervals of
-    kickoff.
-    """
+    """Book this recording again from what the pass says now."""
     # The id the guide holds now, which is not always the one we stored.
-    airing = _airing_for_schedule(row["live_airing_id"] or row["airing_id"])
+    airing = _airing_for_schedule(row["live_airing_id"])
     if not airing:
         return False, "the airing is no longer in the guide"
-    old = row["subscription"]
-    if old:
-        try:
-            plex.delete_subscription(old)
-        except PlexError:
-            # Already gone is the normal case here: that is often the drift.
-            pass
-    # A renumbered airing is booked under its new id, so the row naming the old
-    # one has to go or it is checked again for ever against an id the guide
-    # will never hand back.
-    if row["airing_id"] != airing["id"]:
-        passes.forget(row["airing_id"])
-    prefs = dict(db.unjs(row["prefs"]) or {})
-    try:
-        passes._schedule(plex, airing, None, "pass", prefs=prefs,
-                         pass_id=row["pass_id"])
-    except Exception as e:
-        return False, f"{type(e).__name__}: {e}"
-    with db.tx() as c:
-        c.execute(
-            """INSERT INTO pass_actions (pass_id, program_guid, airing_id,
-                                         program_title, channel_vcn, begins_at,
-                                         action, reason, dry_run, created_at)
-               VALUES (?,?,?,?,?,?,'repaired',?,0,?)""",
-            (row["pass_id"], row["program_guid"], row["airing_id"], row["title"],
-             airing["channel_vcn"], airing["begins_at"], verify.describe(diffs), now))
-    return True, verify.describe(diffs)
+    return _rebook(plex, row, airing, verify.describe(diffs), now)
 
 
 def check_bookings(plex, now: int | None = None) -> dict:
@@ -737,6 +768,9 @@ def check_bookings(plex, now: int | None = None) -> dict:
     out = {"checked": 0, "repaired": 0, "drifted": 0, "unchecked": 0,
            "failed": 0, "cancelled": 0}
     drifted, failed = [], []
+    # Read once. A guide refresh can orphan many bookings at a time, and each
+    # one used to re-read the same handful of pass rows.
+    passes_by_id = {p["id"]: p for p in db.query("SELECT * FROM passes")}
 
     for row in db.query(_BOOKING_SQL, (now,)):
         out["checked"] += 1
@@ -761,11 +795,23 @@ def check_bookings(plex, now: int | None = None) -> dict:
             out["unchecked"] += 1
             continue
 
+        # OUR GUIDE FIRST, then Plex's answer. This is a question about our own
+        # data, and asking Plex first got it wrong: a booking whose
+        # subscription Plex had lost AND whose broadcast had left the guide
+        # took the `gone` branch, which re-books, which needs an airing that no
+        # longer exists. It failed on every sync for ever and raised a notice
+        # each time, while the branch below that exists to cancel exactly that
+        # booking was unreachable for it.
+        if not row["begins_at"]:
+            outcome, note = _airing_left_the_guide(plex, row, key, now, lead,
+                                                   passes_by_id)
+            out[outcome] += 1
+            if note:
+                (failed if outcome == "failed" else drifted).append(note)
+            continue
+
         if state == "gone":
             diffs = verify.no_recording("subscription")
-        elif not row["begins_at"]:
-            _airing_left_the_guide(plex, row, key, now, lead, out, drifted)
-            continue
         else:
             have = {s.get("id"): s.get("value") for s in (body.get("Setting") or [])}
             diffs = verify.compare(want=verify.wanted(db.unjs(row["prefs"]), row),
@@ -775,8 +821,6 @@ def check_bookings(plex, now: int | None = None) -> dict:
 
         if not verify.needs_repair(diffs):
             continue
-
-        what = f"{row['title'] or 'a recording'}: {verify.describe(diffs)}"
 
         # SETTINGS ONLY: change them on the booking Plex already holds. There
         # is no cancel, so there is no gap, so none of the timing below
@@ -788,6 +832,10 @@ def check_bookings(plex, now: int | None = None) -> dict:
                 out["repaired"] += 1
                 _note(row, "repaired", detail, now)
                 continue
+
+        # Built here rather than above, because the common case is a settings
+        # change that lands in place and never needs a sentence about itself.
+        what = f"{_label(row)}: {verify.describe(diffs)}"
 
         if not verify.can_repair(begins_at=begins, now=now, lead=lead):
             out["drifted"] += 1
@@ -803,7 +851,7 @@ def check_bookings(plex, now: int | None = None) -> dict:
             out["repaired"] += 1
         else:
             out["failed"] += 1
-            failed.append(f"{row['title'] or 'a recording'}: {detail}")
+            failed.append(f"{_label(row)}: {detail}")
 
     if out["repaired"] or out["cancelled"]:
         # Our copy of Plex's schedule was read before these changes were made,
@@ -975,13 +1023,11 @@ def sync_recordings(plex: Plex) -> int:
                 media = [media]
             # Plex returns mediaIndex as a string on some payloads and an int on
             # others, so coerce before using it as an index.
-            try:
-                idx = int(op.get("mediaIndex") or 0)
-            except (TypeError, ValueError):
-                idx = 0
+            idx = _int_or_none(op.get("mediaIndex")) or 0
             pool = media or [{}]
             chosen = pool[idx] if 0 <= idx < len(pool) else pool[0]
-            seen_grabs.add(op.get("id") or f"{meta.get('guid')}#{idx}")
+            grab_id = op.get("id") or f"{meta.get('guid')}#{idx}"
+            seen_grabs.add(grab_id)
             c.execute(
                 """INSERT INTO plex_grabs (id, subscription, status, title, parent_title,
                                            channel_vcn, begins_at, ends_at, updated_at)
@@ -989,7 +1035,7 @@ def sync_recordings(plex: Plex) -> int:
                    ON CONFLICT(id) DO UPDATE SET status=excluded.status,
                      channel_vcn=excluded.channel_vcn, begins_at=excluded.begins_at,
                      ends_at=excluded.ends_at, updated_at=excluded.updated_at""",
-                (op.get("id") or f"{meta.get('guid')}#{idx}",
+                (grab_id,
                  str(op.get("mediaSubscriptionID") or ""), op.get("status"),
                  meta.get("title"), meta.get("grandparentTitle"),
                  chosen.get("channelVcn"),

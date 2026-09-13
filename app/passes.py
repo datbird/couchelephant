@@ -36,7 +36,7 @@ _AIRING_SQL = """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams
            WHERE a.begins_at BETWEEN ? AND ?"""
 
 
-def _future(extra="", args=(), horizon_days=30, limit=None):
+def _future(extra="", args=(), horizon_days=30, limit=None, program_guid=None):
     """Future airings with a WHERE fragment applied by SQLite, not by Python.
 
     The guide holds around twenty thousand future airings. Pulling them all in
@@ -44,6 +44,12 @@ def _future(extra="", args=(), horizon_days=30, limit=None):
     """
     cutoff = _now() - LEAD_SECONDS
     until = _now() + horizon_days * 86400
+    # Narrowing to one programme is done here rather than by the caller, so
+    # `idx_airings_program` serves it instead of the whole window being
+    # hydrated and then thrown away.
+    if program_guid:
+        extra = f"a.program_guid = ?{f' AND {extra}' if extra else ''}"
+        args = (program_guid, *args)
     sql = _AIRING_SQL + (f" AND {extra}" if extra else "") + " ORDER BY a.begins_at"
     if limit:
         sql += f" LIMIT {int(limit)}"
@@ -51,7 +57,8 @@ def _future(extra="", args=(), horizon_days=30, limit=None):
 
 
 def candidate_airings(team_id: int | None, horizon_days: int = 30,
-                      team_name: str | None = None) -> list:
+                      team_name: str | None = None, program_guid: str | None = None,
+                      limit: int | None = None) -> list:
     """Future airings of games featuring this team.
 
     Matched on the team's NAME. The id is a fallback and nothing more.
@@ -95,16 +102,18 @@ def candidate_airings(team_id: int | None, horizon_days: int = 30,
     if key:
         return _future("EXISTS (SELECT 1 FROM json_each(p.teams) t "
                        "WHERE tident(json_extract(t.value, '$.name')) = ?)",
-                       (key,), horizon_days)
+                       (key,), horizon_days, limit=limit, program_guid=program_guid)
     # No name to go on. An old pass made before the name was stored has only
     # the id, and a wrong match is still better than a pass that matches
     # nothing at all and looks like a quiet week.
     return _future("EXISTS (SELECT 1 FROM json_each(p.teams) t "
                    "WHERE json_extract(t.value, '$.id') = ?)",
-                   (int(team_id or 0),), horizon_days)
+                   (int(team_id or 0),), horizon_days, limit=limit,
+                   program_guid=program_guid)
 
 
-def series_airings(series_guid: str, horizon_days: int = 30) -> list:
+def series_airings(series_guid: str, horizon_days: int = 30,
+                   program_guid: str | None = None) -> list:
     """Future airings of one programme, wherever it turns up.
 
     Matched on the show rather than the episode, so a rule follows the series
@@ -113,10 +122,12 @@ def series_airings(series_guid: str, horizon_days: int = 30) -> list:
     if not series_guid:
         return []
     return _future("(a.program_guid = ? OR p.grandparent_title = ?)",
-                   (series_guid, series_guid), horizon_days)
+                   (series_guid, series_guid), horizon_days,
+                   program_guid=program_guid)
 
 
-def smart_airings(tree: dict, horizon_days: int = 30) -> list:
+def smart_airings(tree: dict, horizon_days: int = 30,
+                  program_guid: str | None = None) -> list:
     """Future airings matching a smart filter.
 
     Compiled to SQL and asked of the database, rather than pulled into Python
@@ -124,7 +135,7 @@ def smart_airings(tree: dict, horizon_days: int = 30) -> list:
     of the count in the panel is that it comes back before the user has given up.
     """
     frag, args = smartfilter.build(tree)
-    return _future(f"({frag})", args, horizon_days)
+    return _future(f"({frag})", args, horizon_days, program_guid=program_guid)
 
 
 def any_airing(horizon_days: int = 30) -> list:
@@ -138,17 +149,25 @@ def any_airing(horizon_days: int = 30) -> list:
     return _future("COALESCE(a.drm, 0) = 0", (), horizon_days, limit=1)
 
 
-def rule_airings(rule, horizon_days: int = 30) -> list:
-    """Everything a rule could record, before the source limit is applied."""
+def rule_airings(rule, horizon_days: int = 30, program_guid: str | None = None) -> list:
+    """Everything a rule could record, before the source limit is applied.
+
+    `program_guid` narrows the answer to one programme, in SQL. A caller that
+    wants one game was otherwise served the pass's whole thirty-day window and
+    threw all but one programme away, which is a full scan of the guide with a
+    `json_each` per row for a result an index can find.
+    """
     if rule["kind"] == "smart":
-        return smart_airings(db.unjs(rule["filter"], {}) or {}, horizon_days)
+        return smart_airings(db.unjs(rule["filter"], {}) or {}, horizon_days,
+                             program_guid=program_guid)
     if rule["kind"] == "series":
-        return series_airings(rule["series_guid"] or rule["series_title"], horizon_days)
+        return series_airings(rule["series_guid"] or rule["series_title"],
+                              horizon_days, program_guid=program_guid)
     # The name goes with the id. A pass followed from the catalogue has only a
     # name until the team first plays, and after Plex renumbers, the name is
     # the half that is still true.
     return candidate_airings(rule["team_id"], horizon_days,
-                             team_name=rule["team_name"])
+                             team_name=rule["team_name"], program_guid=program_guid)
 
 
 def allowed_sources(rule) -> tuple[list[str], list[str]]:
@@ -167,7 +186,12 @@ def in_sources(row, networks: list[str], channels: list[str]) -> bool:
         return True
     if row["channel_vcn"] in channels:
         return True
-    net = row["channel_network"] if "channel_network" in row.keys() else None
+    try:
+        net = row["channel_network"]
+    except (IndexError, KeyError):
+        # A row shape without the column. Cheaper to ask forgiveness than to
+        # build and scan a list of column names for every airing.
+        net = None
     return bool(net and net in networks)
 
 
@@ -194,7 +218,17 @@ def group_by_game(rows: list) -> dict[str, list]:
     return games
 
 
-def already_handled(program_guid: str) -> str | None:
+def last_read() -> int:
+    """When Plex was last read back into our copy.
+
+    A constant for the length of one pass run, so `run_passes` reads it once
+    and hands it down rather than paying for it per game.
+    """
+    return db.one("SELECT COALESCE(MAX(started_at), 0) t FROM sync_log "
+                  "WHERE ok = 1")["t"]
+
+
+def already_handled(program_guid: str, read_at: int | None = None) -> str | None:
     """Why this game needs no booking, or None.
 
     THE LIVE STATE, NEVER THE LOG. This used to answer yes to any programme
@@ -217,8 +251,8 @@ def already_handled(program_guid: str) -> str | None:
     # the OR is the moment between booking one and reading Plex back: the row
     # exists, `plex_subscriptions` is only refreshed by a sync and cannot see
     # it yet, and without this two runs in a row would book the game twice.
-    read_at = db.one("SELECT COALESCE(MAX(started_at), 0) t FROM sync_log "
-                     "WHERE ok = 1")["t"]
+    if read_at is None:
+        read_at = last_read()
     mine = db.one(
         """SELECT 1 FROM our_grabs o
              LEFT JOIN plex_subscriptions s ON s.key = o.subscription
@@ -427,6 +461,9 @@ def run_passes(force_dry_run: bool | None = None) -> list[dict]:
 
 
 def _evaluate(rows, plex, dry, results):
+    # Read once for the whole run. It cannot change while this is running, and
+    # it was being asked once per game per pass.
+    read_at = last_read()
     for p in rows:
         label = rule_label(p)
         networks, channels = allowed_sources(p)
@@ -458,7 +495,7 @@ def _evaluate(rows, plex, dry, results):
                 results.append({"pass": label, "game": allowed[0]["title"],
                                 "action": "skipped", "reason": reason})
                 continue
-            blocked = already_handled(guid)
+            blocked = already_handled(guid, read_at)
             if blocked:
                 results.append({"pass": label, "game": pick["title"],
                                 "action": "skipped", "reason": blocked,

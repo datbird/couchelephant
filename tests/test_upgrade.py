@@ -177,3 +177,56 @@ def test_an_upgrade_strips_a_setting_a_pass_could_never_send(tmp_path, monkeypat
     assert "autoDeletionItemPolicyWatchedLibrary" not in cfg
     assert cfg["startOffsetMinutes"] == "1", "a real setting is kept"
     del db._local.conn
+
+
+def test_an_upgrade_re_keys_a_booking_onto_its_broadcast(tmp_path, monkeypatch):
+    """An airing id used to be minted from Plex's own Media id, which a guide
+    refresh changes for a broadcast that has not moved. It is now minted from
+    the programme, the channel and the start time.
+
+    A booking made before that carries the old form, and everything that reads
+    `our_grabs.airing_id` would miss it: the guide's "Being recorded" filter,
+    cancelling by hand, and the panel a schedule row opens.
+    """
+    path = tmp_path / "old.db"
+    _old_install(path)
+    monkeypatch.setattr(db, "DB_PATH", str(path))
+    if hasattr(db._local, "conn"):
+        del db._local.conn
+    db.init()
+    with db.tx() as c:
+        c.execute("""INSERT INTO our_grabs (airing_id, program_guid, title,
+                                            channel_vcn, begins_at, source,
+                                            created_at)
+                     VALUES ('plex://episode/old#99999',
+                             'plex://episode/old', 'Old Game', '41.1',
+                             1789286400, 'pass', 1)""")
+    db.init()
+
+    got = db.one("SELECT airing_id FROM our_grabs")["airing_id"]
+    assert got == "plex://episode/old#41.1@1789286400", got
+    del db._local.conn
+
+
+def test_re_keying_a_booking_twice_is_not_an_error(tmp_path, monkeypatch):
+    """It runs on every start, so it has to be a no-op the second time."""
+    path = tmp_path / "old.db"
+    _old_install(path)
+    monkeypatch.setattr(db, "DB_PATH", str(path))
+    if hasattr(db._local, "conn"):
+        del db._local.conn
+    db.init()
+    with db.tx() as c:
+        c.execute("""INSERT INTO our_grabs (airing_id, program_guid, title,
+                                            channel_vcn, begins_at, source,
+                                            created_at)
+                     VALUES ('plex://episode/old#99999',
+                             'plex://episode/old', 'Old Game', '41.1',
+                             1789286400, 'pass', 1)""")
+    db.init()
+    db.init()
+
+    rows = db.query("SELECT airing_id FROM our_grabs")
+    assert len(rows) == 1, rows
+    assert rows[0]["airing_id"] == "plex://episode/old#41.1@1789286400"
+    del db._local.conn

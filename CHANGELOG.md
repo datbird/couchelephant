@@ -1,5 +1,69 @@
 # Changelog
 
+## 1.3.0 - 2026-09-13
+
+A cleanup review of `sync.py` and `passes.py` found the cause under four fixes
+that shipped this week, two silences, and two bugs nobody had reached yet.
+
+### Fixed
+
+- **A broadcast's id is now minted from the broadcast.** It used to prefer
+  Plex's own `Media.id`, which is the one value in the payload that moves: a
+  guide refresh renumbers airings without changing anything about them, and one
+  game here collected nine ids over three weeks. Every lookup keyed on the id
+  had to be taught to resolve a retired one, and four of them were taught one at
+  a time, each after failing in front of somebody.
+
+  An id is now the programme, the channel and the start time. A renumber
+  produces the same id. A re-time still changes it, which is correct: that is a
+  different broadcast and the app has to notice. Bookings made before this are
+  re-keyed when the app starts.
+
+  Two more places had the same fault and nobody had reached them. The guide's
+  "Being recorded" filter stopped matching a booked game after a refresh, and
+  cancelling a recording by hand answered "CouchElephant did not schedule this"
+  for a recording CouchElephant had scheduled.
+
+- **A re-point that Plex refused was counted and never mentioned.** It
+  incremented the failure count without adding to the list the notices are
+  built from, so nothing was raised. That is the silence this whole check
+  exists to remove.
+
+- **A booking could be trapped in a permanent failure.** Plex was asked about
+  the subscription before our own guide was consulted, so a booking whose
+  subscription Plex had lost and whose broadcast had left the guide went to the
+  re-book path. There is nothing to re-book from, so it failed and raised a
+  notice on every sync, for ever, while the branch that exists to cancel
+  exactly that booking was unreachable for it.
+
+- **A repaired booking's history row could name two broadcasts at once**,
+  recording the old airing id beside the new channel and start time.
+
+### Changed
+
+- One re-book path instead of two. They had already disagreed about when to
+  forget the old booking and whether to write down a failure.
+- Guide and schedule pulls share one prune helper rather than two copies.
+- The booking check counts in one place, so a new outcome cannot be counted in
+  one half and forgotten in the other.
+
+### Performance
+
+Measured against the live install: about 16,700 programmes and 22,800 airings
+per sync, hourly.
+
+- A channel is written once per sync instead of once per broadcast: about
+  22,700 redundant writes and the same number of redundant title parses, gone.
+- Two indexes on `plex_grabs`, which holds the whole DVR schedule and was
+  scanned in full by three hot questions, one of them once per airing of a
+  programme.
+- Asking whether a team pass matches anything now stops at the first match
+  instead of hydrating every match in the window.
+- Re-pointing a booking asks for one programme in SQL rather than the pass's
+  whole thirty-day window, and reads the pass rows once per check rather than
+  once per booking.
+- A pass run reads the last sync time once rather than once per game.
+
 ## 1.2.12 - 2026-09-13
 
 ### Fixed

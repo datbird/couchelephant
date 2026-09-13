@@ -455,3 +455,111 @@ def test_a_broadcast_that_really_has_gone_says_which(client, synced):
     r = client.get("/api/program", params={"airing_id": "plex://episode/nope#1"})
     assert r.status_code == 404
     assert "guide" in r.json()["error"].lower(), r.json()
+
+
+# ---- the two silences the cleanup review found ----
+
+def test_a_re_point_plex_refuses_raises_a_notice(plex, synced, monkeypatch):
+    """A re-point that fails must shout, like every other failed repair.
+
+    It was counted in the sync line and never added to the list the notices
+    are built from, so the one outcome worse than the drift it was fixing
+    happened quietly.
+    """
+    was = _kickoff(plex)
+    _chiefs_pass()
+    passes.run_passes()
+    _guide_says(plex, was + 15 * 60)
+    monkeypatch.setattr(passes, "_schedule",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Plex said no")))
+
+    out = sync.check_bookings(plex)
+
+    assert out["failed"] == 1, out
+    assert db.one("SELECT * FROM notices WHERE code = 'booking_repair_failed' "
+                  "AND resolved_at IS NULL"), "a failed re-point has to be visible"
+
+
+def test_a_booking_with_no_subscription_and_no_broadcast_is_cancelled(plex, synced):
+    """Both halves gone at once, which is the ordinary end of a stale booking.
+
+    Plex is asked first, so a lost subscription used to win the branch and send
+    this to the re-book path. There is nothing to re-book from, so it failed,
+    and it failed again on every sync for ever while raising a notice each
+    time. Whether our own guide still carries the broadcast is a question about
+    our data, and it has to be asked before Plex's answer is interpreted.
+    """
+    _kickoff(plex)
+    _chiefs_pass()
+    passes.run_passes()
+    key = _booked()[0]["subscription"]
+    plex.delete_subscription(key)
+    _guide_drops_the_game(plex)
+
+    out = sync.check_bookings(plex)
+
+    assert out["cancelled"] == 1, out
+    assert out["failed"] == 0, out
+    assert not _booked(), "and our record of it goes with it"
+    assert not db.one("SELECT 1 FROM notices WHERE code = 'booking_repair_failed' "
+                      "AND resolved_at IS NULL")
+
+
+# ---- the root of the whole family ----
+
+def test_a_renumber_does_not_change_a_broadcasts_id(plex, synced):
+    """An airing id is minted from the slot, so it does not move when Plex
+    renumbers its guide. Every other fix in this file exists because it did."""
+    before = {r["id"] for r in db.query("SELECT id FROM airings")}
+    _guide_renumbers(plex)
+    after = {r["id"] for r in db.query("SELECT id FROM airings")}
+    assert before == after, "a renumber alone must not rename a broadcast"
+
+
+def test_a_re_time_does_change_it(plex, synced):
+    """The other half. A re-time is a real change, and the id says so, which
+    is what sends it to the re-point path rather than leaving it silent."""
+    was = _kickoff(plex)
+    before = {r["id"] for r in db.query("SELECT id FROM airings")}
+    _guide_says(plex, was + 15 * 60)
+    assert {r["id"] for r in db.query("SELECT id FROM airings")} != before
+
+
+def test_the_being_recorded_filter_survives_a_renumber(client, plex, synced):
+    """A guide filter keyed on the stored id stopped matching a booked game."""
+    _kickoff(plex)
+    _chiefs_pass()
+    passes.run_passes()
+    booked = _booked()[0]["airing_id"]
+    _guide_renumbers(plex)
+
+    assert db.one("SELECT 1 FROM airings WHERE id = ? AND id IN "
+                  "(SELECT airing_id FROM our_grabs)", (booked,))
+
+
+def test_the_guide_still_says_we_booked_it_after_a_renumber(client, plex, synced):
+    """The grid re-labelled a booking of ours as one of Plex's own."""
+    when = _kickoff(plex)
+    _chiefs_pass()
+    passes.run_passes()
+    sync.sync_recordings(plex)
+    _guide_renumbers(plex)
+
+    rows = client.get("/api/schedule").json()["rows"]
+    mine = [r for r in rows if r["b"] == when]
+    assert mine and mine[0]["who"] == "ce", mine
+
+
+def test_cancelling_by_hand_works_after_a_renumber(client, plex, synced):
+    """It answered "CouchElephant did not schedule this" for a recording
+    CouchElephant had scheduled."""
+    _kickoff(plex)
+    _chiefs_pass()
+    passes.run_passes()
+    _guide_renumbers(plex)
+    aid = db.one("SELECT id FROM airings WHERE program_guid = ? AND premiere = 1",
+                 (fake_plex.GAME_GUID,))["id"]
+
+    r = client.post("/api/record/cancel", data={"airing_id": aid})
+    assert r.json()["ok"], r.text
+    assert not _booked()
