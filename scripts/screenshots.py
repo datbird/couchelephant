@@ -160,11 +160,14 @@ def _seed_expectations():
 
 
 def seed_destinations():
-    """Two alert destinations, so the Notifications shot is not an empty page.
+    """Three alert destinations, so the Notifications shot is not an empty page.
 
     The credentials are invented and nothing is ever sent: the screenshot run
     only renders the page. The webhook still has to be a real Discord host,
     because `notify.save_destination` refuses anything else.
+
+    One of each shape that behaves differently: a webhook, a bot token with a
+    chat, and a relay that picks its own channel from the severity.
     """
     from app import health, notify
     notify.save_destination(
@@ -177,6 +180,10 @@ def seed_destinations():
         name="Phone", kind="telegram", remind_hours=72,
         token="0000000:example", chat_id="000000000",
         events=[health.EPG_STALE, notify.PASS_BOOKED])
+    notify.save_destination(
+        name="Relay", kind="timmyd", remind_hours=24,
+        webhook="http://192.168.1.10:8791", token="example-token",
+        events=sorted(notify.CATALOG_CODES))
 
 
 def shot(page, name):

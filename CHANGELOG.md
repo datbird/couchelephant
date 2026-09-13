@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.8 - 2026-09-13
+
+### Changed
+
+- The Notifications page says what a relay is for, and the documentation
+  screenshots show one. A destination nobody can tell apart from the others is
+  a destination nobody picks.
+
 ## 1.2.7 - 2026-09-13
 
 ### Added

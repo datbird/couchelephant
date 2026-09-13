@@ -170,7 +170,7 @@
           <div class="empty tiny">Nothing is set up, so nothing is sent.</div>
         {% endif %}
 
-        <div class="setblock" data-find="add notification destination discord webhook telegram bot token">
+        <div class="setblock" data-find="add notification destination discord webhook telegram bot token relay timmyd severity alerts">
           <h3>Add a destination</h3>
           <p class="dim"><b>Discord needs no bot.</b> Open your channel's settings,
             Integrations, Webhooks, make one, and paste the URL here.
@@ -178,7 +178,11 @@
             paste it, save, then message the bot once and press Find chat.
             <b>Notifiarr</b> suits you if you already run it: one bot in one
             channel, and everything you own arrives through it rather than
-            through a webhook set up per application.</p>
+            through a webhook set up per application.
+            <b>A relay on your network</b> is the only one that picks its own
+            channel: it is handed how serious the message is, so a fault can
+            land where you will see it while a recording that started lands
+            where you can read it later.</p>
           {{ dest_form(none) }}
         </div>
       </section>
