@@ -192,7 +192,12 @@ def api_program(airing_id: str):
            FROM airings a JOIN programs p ON p.guid = a.program_guid
            WHERE a.id = ?""", (airing_id,))
     if not a:
-        return JSONResponse({"error": "not found"}, status_code=404)
+        # Say which thing is missing. "not found" reads as a broken page, and
+        # the usual cause is not a broken page: the guide has moved on, either
+        # because the broadcast has aired or because a refresh renumbered it.
+        return JSONResponse(
+            {"error": "That broadcast is no longer in the Plex guide."},
+            status_code=404)
 
     siblings = db.query(
         "SELECT * FROM airings WHERE program_guid = ? ORDER BY begins_at", (a["program_guid"],))

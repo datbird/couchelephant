@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.12 - 2026-09-13
+
+### Fixed
+
+- **Clicking a recording could open a panel reading "not found".** A booking
+  stores the airing id it was made against, and the schedule row carried that
+  id straight through. A guide refresh mints new ids for broadcasts that have
+  not changed at all, so the stored one retires and the row points at nothing.
+  The recording was perfectly fine; only the link was stale, and refreshing the
+  page did not help because the row was rebuilt from the same stored id.
+
+  A row now names the broadcast the guide holds now. A broadcast that really
+  has gone says so in words, rather than "not found", because that reads as a
+  broken page and the usual cause is not a broken page.
+
 ## 1.2.11 - 2026-09-13
 
 ### Changed

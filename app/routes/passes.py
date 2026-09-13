@@ -37,6 +37,22 @@ def passes_redirect():
     return RedirectResponse("/recordings", status_code=301)
 
 
+def _live_airing_id(stored, vcn, begins_at):
+    """The id the guide holds for this broadcast now.
+
+    A stored id is a handle into the guide as it was, never a name for a
+    broadcast: a refresh renumbers airings without moving them, and one game
+    here collected nine ids over three weeks. A row carrying a retired id opens
+    a panel saying the programme does not exist, which is how a recording that
+    is perfectly fine comes to look broken.
+    """
+    if stored and db.one("SELECT 1 FROM airings WHERE id = ?", (stored,)):
+        return stored
+    a = db.one("SELECT id FROM airings WHERE channel_vcn = ? AND begins_at = ? LIMIT 1",
+               (vcn, begins_at))
+    return a["id"] if a else stored
+
+
 def _why_map():
     """For each broadcast we booked, what booked it.
 
@@ -240,10 +256,8 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
                 else "scheduled in Plex"
         # Match the grab back to a broadcast in the guide, so clicking it opens
         # the same panel the guide opens.
-        if not airing_id and g["begins_at"]:
-            a = db.one("SELECT id FROM airings WHERE channel_vcn = ? AND begins_at = ? "
-                       "LIMIT 1", (g["channel_vcn"], g["begins_at"]))
-            airing_id = a["id"] if a else None
+        if g["begins_at"]:
+            airing_id = _live_airing_id(airing_id, g["channel_vcn"], g["begins_at"])
         out.append({
             "id": g["id"], "title": g["title"], "parent": g["parent_title"] or "",
             "vcn": g["channel_vcn"] or "", "logo": bool(logos.get(g["channel_vcn"])),

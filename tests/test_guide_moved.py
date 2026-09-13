@@ -423,3 +423,35 @@ def test_a_renumbered_booking_that_agrees_is_left_alone(plex, synced):
         sync.sync_recordings(plex)
 
     assert fake_plex.STATE.deleted == [], "nothing should have been cancelled"
+
+
+# ---- clicking a recording after the guide renumbered ----
+
+def test_a_recording_still_opens_after_the_guide_renumbers(client, plex, synced):
+    """The row a person actually clicks.
+
+    A booking stores the airing id it was made against. A guide refresh mints
+    new ids for broadcasts that have not changed at all, so the stored one
+    retires, and the row went on carrying it. Clicking a perfectly good
+    recording then opened a panel reading "not found", which is how a correct
+    recording comes to look broken.
+    """
+    _kickoff(plex)
+    _chiefs_pass()
+    passes.run_passes()
+    _guide_renumbers(plex)
+
+    row = [r for r in client.get("/api/schedule").json()["rows"]
+           if r["status"] == "scheduled"][0]
+    assert row["airing_id"], row
+    assert db.one("SELECT 1 FROM airings WHERE id = ?", (row["airing_id"],)), \
+        "the row must name a broadcast the guide still has"
+    assert client.get("/api/program",
+                      params={"airing_id": row["airing_id"]}).status_code == 200
+
+
+def test_a_broadcast_that_really_has_gone_says_which(client, synced):
+    """And when it truly is not there, say so in words rather than "not found"."""
+    r = client.get("/api/program", params={"airing_id": "plex://episode/nope#1"})
+    assert r.status_code == 404
+    assert "guide" in r.json()["error"].lower(), r.json()
