@@ -505,16 +505,35 @@ def _reslot_airing_ids(conn):
     `UPDATE OR REPLACE` because the id is the primary key: two rows for one
     broadcast can only be duplicates of each other, and keeping one is right.
 
+    `notify_state` goes first, and it has to. Its whole rule is that a row
+    exists means this destination has been told, and a `pass_booked` row is
+    keyed on the airing id. Re-key the booking without re-keying its state and
+    the row no longer matches, so the next dispatch reads a booking nobody has
+    heard about and announces it again. That happened on a live install: an
+    upgrade re-keyed two bookings and both were announced a second time, hours
+    after they were made, to a channel that had already been told.
+
+    Only `pass_booked` is keyed on an airing. A recording started or finished is
+    keyed on Plex's own grab id, a failed sync on the sync_log id, and a fault
+    on its own code, none of which this touches.
+
     `pass_actions` is deliberately left alone. It is history, and the schedule
     already resolves a failure's airing against the guide as it stands rather
     than trusting the id it recorded.
     """
-    conn.execute(
-        """UPDATE OR REPLACE our_grabs
-              SET airing_id = program_guid || '#' || channel_vcn || '@' || begins_at
-            WHERE program_guid IS NOT NULL AND channel_vcn IS NOT NULL
-              AND begins_at IS NOT NULL
-              AND airing_id <> program_guid || '#' || channel_vcn || '@' || begins_at""")
+    slot = "program_guid || '#' || channel_vcn || '@' || begins_at"
+    usable = ("program_guid IS NOT NULL AND channel_vcn IS NOT NULL "
+              "AND begins_at IS NOT NULL")
+    conn.execute(f"""
+        UPDATE OR REPLACE notify_state
+           SET key = (SELECT {slot} FROM our_grabs o
+                       WHERE o.airing_id = notify_state.key AND {usable})
+         WHERE event = 'pass_booked'
+           AND EXISTS (SELECT 1 FROM our_grabs o
+                        WHERE o.airing_id = notify_state.key AND {usable}
+                          AND o.airing_id <> {slot})""")
+    conn.execute(f"""UPDATE OR REPLACE our_grabs SET airing_id = {slot}
+                      WHERE {usable} AND airing_id <> {slot}""")
 
 
 # Settings only a recurring Plex rule can honour. A pass always books the

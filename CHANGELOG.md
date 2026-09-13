@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.1 - 2026-09-13
+
+### Fixed
+
+- **Upgrading to 1.3.0 announced bookings that had already been announced.**
+  1.3.0 re-keys existing bookings onto the new airing id. The alert state is
+  keyed on that same id, and it was not re-keyed with them, so the next
+  dispatch read a booking nobody had heard about and said so again. Seen on a
+  live install: two recordings booked days earlier were announced a second time
+  at the moment of the upgrade.
+
+  The whole rule `notify_state` runs on is that a row exists means this
+  destination has been told, and the migration broke the key that rule depends
+  on. Both are now re-keyed together, state first.
+
+  Nothing was booked twice and no recording was affected. Only the messages
+  were duplicated.
+
 ## 1.3.0 - 2026-09-13
 
 A cleanup review of `sync.py` and `passes.py` found the cause under four fixes

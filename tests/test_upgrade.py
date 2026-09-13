@@ -230,3 +230,43 @@ def test_re_keying_a_booking_twice_is_not_an_error(tmp_path, monkeypatch):
     assert len(rows) == 1, rows
     assert rows[0]["airing_id"] == "plex://episode/old#41.1@1789286400"
     del db._local.conn
+
+
+def test_re_keying_a_booking_does_not_re_announce_it(tmp_path, monkeypatch):
+    """The rule `notify_state` runs on is that a row exists means this
+    destination has been told. That row is keyed on the airing id, so re-keying
+    a booking without re-keying its state breaks the only thing stopping a
+    second announcement.
+
+    It happened on a live install: upgrading re-keyed two bookings and both
+    were announced again, hours after they were made, to a channel that had
+    already been told.
+    """
+    path = tmp_path / "old.db"
+    _old_install(path)
+    monkeypatch.setattr(db, "DB_PATH", str(path))
+    if hasattr(db._local, "conn"):
+        del db._local.conn
+    db.init()
+    old_id = "plex://episode/old#99999"
+    with db.tx() as c:
+        c.execute("""INSERT INTO our_grabs (airing_id, program_guid, title,
+                                            channel_vcn, begins_at, source,
+                                            created_at)
+                     VALUES (?, 'plex://episode/old', 'Old Game', '41.1',
+                             1789286400, 'pass', 1)""", (old_id,))
+        c.execute("""INSERT INTO destinations (uid, name, kind, events,
+                                               remind_hours, enabled,
+                                               created_at, updated_at)
+                     VALUES ('u1','Relay','timmyd','pass_booked',24,1,1,1)""")
+        c.execute("""INSERT INTO notify_state (destination_id, event, key,
+                                               opened_at, last_sent_at)
+                     VALUES (1, 'pass_booked', ?, 1, 1)""", (old_id,))
+    db.init()
+
+    new_id = "plex://episode/old#41.1@1789286400"
+    assert db.one("SELECT airing_id FROM our_grabs")["airing_id"] == new_id
+    keys = [r["key"] for r in db.query(
+        "SELECT key FROM notify_state WHERE event = 'pass_booked'")]
+    assert keys == [new_id], keys
+    del db._local.conn
