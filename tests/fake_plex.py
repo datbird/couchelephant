@@ -252,6 +252,10 @@ class State:
         # against, so the fake has to be able to do them.
         self.moves = {}         # (programme guid, old beginsAt) -> new beginsAt
         self.gone = set()       # programmes the guide no longer carries
+        # A guide refresh that renumbers everything without moving anything.
+        # Plex does this on its own, and it is the half of a refresh that is
+        # invisible from the outside: the same broadcast, a different id.
+        self.id_suffix = ""
 
 
 STATE = State()
@@ -267,6 +271,16 @@ def drop_from_guide(guid):
     STATE.gone.add(guid)
 
 
+def renumber(suffix="r2"):
+    """A guide refresh mints new ids for the same broadcasts.
+
+    Plex does this by itself, and nothing about the broadcast changes: same
+    channel, same time, new id. One game here collected nine ids over three
+    weeks.
+    """
+    STATE.id_suffix = suffix
+
+
 def _as_the_guide_has_it(item):
     """One item as the guide carries it now, with any re-timing applied.
 
@@ -278,11 +292,11 @@ def _as_the_guide_has_it(item):
     media = []
     for m in (item.get("Media") or []):
         moved = STATE.moves.get((item["guid"], int(m["beginsAt"])))
-        if moved is None:
-            media.append(m)
-            continue
-        m = dict(m, beginsAt=moved, endsAt=moved + (m["endsAt"] - m["beginsAt"]))
-        m["id"] = f"{m['channelVcn']}-{moved}"
+        if moved is not None:
+            m = dict(m, beginsAt=moved, endsAt=moved + (m["endsAt"] - m["beginsAt"]))
+            m["id"] = f"{m['channelVcn']}-{moved}"
+        if STATE.id_suffix:
+            m = dict(m, id=f"{m['id']}-{STATE.id_suffix}")
         media.append(m)
     return dict(item, Media=media)
 

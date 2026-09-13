@@ -417,15 +417,31 @@ def check_team_passes() -> int:
 # capped and the rest waits for the next sync.
 MAX_REPAIRS = 10
 
+# THE BROADCAST, NOT ONLY THE ID. A guide refresh mints new airing ids for
+# broadcasts that have not changed at all: same channel, same time, new id. One
+# game here collected nine ids over three weeks. Read only by the stored id, a
+# booking silently drops out of this check the first time that happens, and
+# every later change to its pass misses it in silence.
+#
+# So the airing is looked up by id first, and by the broadcast the booking was
+# made against second. `live_airing_id` is whichever one the guide still has,
+# and is what a repair re-books from.
 _BOOKING_SQL = """
     SELECT o.airing_id, o.subscription, o.title, o.program_guid, o.pass_id,
            o.begins_at AS booked_at, o.channel_vcn AS booked_vcn,
-           a.begins_at, a.channel_identifier, a.channel_vcn, p.prefs
+           COALESCE(a.id, b.id) AS live_airing_id,
+           COALESCE(a.begins_at, b.begins_at) AS begins_at,
+           COALESCE(a.channel_identifier, b.channel_identifier) AS channel_identifier,
+           COALESCE(a.channel_vcn, b.channel_vcn) AS channel_vcn,
+           p.prefs
       FROM our_grabs o
       JOIN passes p ON p.id = o.pass_id
       LEFT JOIN airings a ON a.id = o.airing_id
+      LEFT JOIN airings b ON b.program_guid = o.program_guid
+                         AND b.channel_vcn = o.channel_vcn
+                         AND b.begins_at = o.begins_at
      WHERE o.source = 'pass'
-       AND COALESCE(a.begins_at, o.begins_at) > ?
+       AND COALESCE(a.begins_at, b.begins_at, o.begins_at) > ?
 """
 
 
@@ -617,7 +633,8 @@ def _repair(plex, row, diffs, now):
     is why `verify.can_repair` refuses to run inside two sync intervals of
     kickoff.
     """
-    airing = _airing_for_schedule(row["airing_id"])
+    # The id the guide holds now, which is not always the one we stored.
+    airing = _airing_for_schedule(row["live_airing_id"] or row["airing_id"])
     if not airing:
         return False, "the airing is no longer in the guide"
     old = row["subscription"]
@@ -627,6 +644,11 @@ def _repair(plex, row, diffs, now):
         except PlexError:
             # Already gone is the normal case here: that is often the drift.
             pass
+    # A renumbered airing is booked under its new id, so the row naming the old
+    # one has to go or it is checked again for ever against an id the guide
+    # will never hand back.
+    if row["airing_id"] != airing["id"]:
+        passes.forget(row["airing_id"])
     prefs = dict(db.unjs(row["prefs"]) or {})
     try:
         passes._schedule(plex, airing, None, "pass", prefs=prefs,

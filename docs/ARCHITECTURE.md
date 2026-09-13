@@ -234,6 +234,15 @@ The same rule covers Plex being unreachable. `Plex.subscription_state` answers
 touched. Reading a network blip as "the recording is gone" would cancel and
 re-book every booking on the server at once.
 
+### The booking is read by its broadcast, not only by its id
+
+A guide refresh mints new airing ids for broadcasts that have not changed at
+all: same channel, same time, new id. One game here collected nine ids over
+three weeks. A booking read only by the id it stored drops out of this check
+the first time that happens, quietly, and every later change to its pass misses
+it. So the airing is looked up by id first and by the broadcast second, and a
+repair re-books from whichever id the guide holds now.
+
 ### When the guide moves the broadcast
 
 A guide refresh re-times a game and renumbers its airings, so the airing a

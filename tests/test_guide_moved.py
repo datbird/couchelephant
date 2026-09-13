@@ -70,6 +70,14 @@ def _kickoff(plex, hours=6):
     return when
 
 
+def _guide_renumbers(plex):
+    """A guide refresh mints new ids for the same broadcasts, and we read it."""
+    fake_plex.renumber()
+    provider, shows, sports, movies = sync.discover(plex)
+    sync.sync_guide(plex, provider, shows, sports, movies)
+    sync.sync_recordings(plex)
+
+
 def _booked():
     return db.query("SELECT * FROM our_grabs ORDER BY created_at")
 
@@ -374,3 +382,44 @@ def test_a_subscription_plex_no_longer_has_leaves_our_copy_at_once(plex, synced)
 
     assert not db.one("SELECT 1 FROM plex_subscriptions WHERE key = ?", (key,))
     assert not db.one("SELECT 1 FROM plex_grabs WHERE subscription = ?", (key,))
+
+
+# ---- a guide refresh that only renumbers ----
+
+def test_a_booking_survives_a_renumber_and_is_still_checked(plex, synced):
+    """The quiet half of a guide refresh. Nothing about the broadcast changes,
+    so nothing needs repairing, but the booking still names an id that no
+    longer exists. Read only by that id, it drops out of the check for ever,
+    and every later change to the pass misses it in silence.
+    """
+    _kickoff(plex)
+    p = _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    _guide_renumbers(plex)
+
+    with db.tx() as c:
+        c.execute("UPDATE passes SET prefs = ?", (db.js({"endOffsetMinutes": "30"}),))
+    out = sync.check_bookings(plex)
+
+    assert out["unchecked"] == 0, out
+    assert out["repaired"] == 1, out
+    key = _booked()[0]["subscription"]
+    got = {s["id"]: s["value"] for s in (plex.subscription(key).get("Setting") or [])}
+    assert str(got.get("endOffsetMinutes")) == "30", got
+    assert len(_booked()) == 1, "one booking, not one per id the guide has used"
+    assert p
+
+
+def test_a_renumbered_booking_that_agrees_is_left_alone(plex, synced):
+    """The loop guard on the same path. A renumber on its own is not drift."""
+    _kickoff(plex)
+    _chiefs_pass({"endOffsetMinutes": "30"})
+    passes.run_passes()
+    _guide_renumbers(plex)
+
+    for _ in range(3):
+        out = sync.check_bookings(plex)
+        assert out["repaired"] == 0 and out["cancelled"] == 0, out
+        sync.sync_recordings(plex)
+
+    assert fake_plex.STATE.deleted == [], "nothing should have been cancelled"

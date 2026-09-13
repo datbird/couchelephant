@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.10 - 2026-09-13
+
+### Fixed
+
+- **A booking stopped being checked the first time Plex renumbered its guide.**
+  A guide refresh mints new airing ids for broadcasts that have not changed at
+  all: same channel, same time, new id. One game here collected nine ids over
+  three weeks. A booking was read only by the id it had stored, so after a
+  renumber it was quietly skipped, and every later change to its pass missed it
+  with nothing said. Found on a live DVR with one of two recordings already in
+  that state.
+
+  A booking is now looked up by its id first and by the broadcast it was made
+  against second, and a repair re-books from whichever id the guide holds now.
+
 ## 1.2.9 - 2026-09-13
 
 ### Fixed
