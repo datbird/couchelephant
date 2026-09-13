@@ -16,26 +16,31 @@
       <option value="discord_bot" {{ 'selected' if d and d.kind == 'discord_bot' }}>Discord bot</option>
       <option value="telegram" {{ 'selected' if d and d.kind == 'telegram' }}>Telegram</option>
       <option value="notifiarr" {{ 'selected' if d and d.kind == 'notifiarr' }}>Notifiarr</option>
+      <option value="timmyd" {{ 'selected' if d and d.kind == 'timmyd' }}>A relay on your network (timmyd)</option>
     </select>
     <span class="help">Fill in only the fields for the one you picked. The rest
       are ignored.</span>
   </div>
   <div class="field">
-    <label>Discord webhook URL</label>
-    <input name="webhook" type="password" value="{{ d.webhook if d else '' }}"
+    <label>Discord webhook URL, or the relay address</label>
+    <input name="webhook" type="{{ 'text' if d and d.kind == 'timmyd' else 'password' }}"
+           value="{{ d.webhook if d else '' }}"
            placeholder="https://discord.com/api/webhooks/...">
-    <span class="help">Anyone holding this can post to your channel, so it is kept
-      like a password and never logged. Leave the dots alone to keep it. Only a
-      Discord address is accepted.</span>
+    <span class="help">Discord: anyone holding this can post to your channel, so
+      it is kept like a password and never logged. Leave the dots alone to keep
+      it. Only a Discord address is accepted. Relay: the address of the relay
+      you run, such as <code>http://192.168.1.10:8791</code>. That one is an
+      address rather than a secret, so it is shown back to you.</span>
   </div>
   <div class="field">
-    <label>Discord bot token, Telegram bot token, or Notifiarr API key</label>
+    <label>Discord bot token, Telegram bot token, Notifiarr API key, or relay token</label>
     <input name="token" type="password" value="{{ d.token if d else '' }}"
            placeholder="123456:ABC-DEF...">
     <span class="help">Discord bot: from the Developer Portal, and the bot has to
       be in the channel already. Telegram: from BotFather. Nothing runs or listens; this is
       one outgoing message at a time. Notifiarr: your <b>global</b> API key, not
-      an integration-specific one, which the passthrough will not accept. Kept
+      an integration-specific one, which the passthrough will not accept. Relay:
+      the API token the relay was configured with. Kept
       like a password and never logged.</span>
   </div>
   <div class="field">
@@ -43,7 +48,10 @@
     <input name="chat_id" value="{{ (d.chat_id or '') if d else '' }}" placeholder="found for you">
     <span class="help">Telegram: message the bot once, save, then press Find chat
       below. Notifiarr: the numeric Discord channel it should post into. Turn on
-      Developer Mode in Discord, right-click the channel, Copy Channel ID.</span>
+      Developer Mode in Discord, right-click the channel, Copy Channel ID. A
+      relay needs nothing here: it is handed the severity and picks the channel
+      itself, so what you have to act on and what you can read later can land in
+      two different places.</span>
   </div>
   <div class="field">
     <label>Remind me while it is still wrong</label>
@@ -131,7 +139,8 @@
               {% if d.last_error %}<span class="pill bad">failing</span>{% endif %}</td>
             <td class="tiny dim">{{ {'discord': 'Discord', 'telegram': 'Telegram',
                                      'discord_bot': 'Discord bot',
-                                     'notifiarr': 'Notifiarr'}.get(d.kind, d.kind) }}</td>
+                                     'notifiarr': 'Notifiarr',
+                                     'timmyd': 'Relay'}.get(d.kind, d.kind) }}</td>
             <td class="tiny dim">{{ d.event_count }}</td>
             <td style="text-align:right;white-space:nowrap">
               <form method="post" action="/settings/notify/{{ d.id }}/test"

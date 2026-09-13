@@ -822,6 +822,19 @@ def prune_history(days: int = KEEP_HISTORY_DAYS) -> None:
         c.execute("DELETE FROM pass_actions WHERE begins_at < ?", (cutoff,))
 
 
+def _prune(c, table, key_col, seen):
+    """Drop every row of `table` this pull did not see.
+
+    Held in a temporary table rather than bound as one parameter per row.
+    """
+    c.execute("CREATE TEMP TABLE IF NOT EXISTS seen_keys (k TEXT PRIMARY KEY)")
+    c.execute("DELETE FROM seen_keys")
+    c.executemany("INSERT OR IGNORE INTO seen_keys (k) VALUES (?)",
+                  [(str(k),) for k in seen])
+    c.execute(f"DELETE FROM {table} WHERE {key_col} NOT IN (SELECT k FROM seen_keys)")
+    c.execute("DELETE FROM seen_keys")
+
+
 def sync_recordings(plex: Plex) -> int:
     """Mirror Plex's subscriptions and scheduled grabs.
 
@@ -830,12 +843,19 @@ def sync_recordings(plex: Plex) -> int:
     """
     now = _now()
     subs = plex.subscriptions()
+    # WHAT THIS PULL SAW, not what has a recent timestamp. Pruning on
+    # `updated_at < now` reads as the same thing and is not: two pulls inside
+    # one second keep every row the first one wrote. A subscription this app
+    # has just cancelled then survives in our copy, and `already_handled` reads
+    # it as a live booking and leaves the game unrecorded.
+    seen_subs, seen_grabs = set(), set()
     # our_grabs holds the subscription key of everything a pass booked.
     ours = {r["subscription"] for r in db.query(
         "SELECT DISTINCT subscription FROM our_grabs WHERE subscription IS NOT NULL")}
     with db.tx() as c:
         for s in subs:
             key = str(s.get("key"))
+            seen_subs.add(key)
             # Some server versions carry Setting on the list itself. Only ask
             # for the detail when it does not, rather than one request each.
             detail = s if s.get("Setting") else (plex.subscription(key) or s)
@@ -860,7 +880,7 @@ def sync_recordings(plex: Plex) -> int:
                  str(s.get("targetLibrarySectionID")),
                  db.js(settings), s.get("createdAt"), now, 1 if key in ours else 0),
             )
-        c.execute("DELETE FROM plex_subscriptions WHERE updated_at < ?", (now,))
+        _prune(c, "plex_subscriptions", "key", seen_subs)
 
         for op in plex.scheduled():
             meta = op.get("Metadata") or op.get("Video") or {}
@@ -875,6 +895,7 @@ def sync_recordings(plex: Plex) -> int:
                 idx = 0
             pool = media or [{}]
             chosen = pool[idx] if 0 <= idx < len(pool) else pool[0]
+            seen_grabs.add(op.get("id") or f"{meta.get('guid')}#{idx}")
             c.execute(
                 """INSERT INTO plex_grabs (id, subscription, status, title, parent_title,
                                            channel_vcn, begins_at, ends_at, updated_at)
@@ -889,7 +910,7 @@ def sync_recordings(plex: Plex) -> int:
                  int(chosen.get("beginsAt") or 0) or None,
                  int(chosen.get("endsAt") or 0) or None, now),
             )
-        c.execute("DELETE FROM plex_grabs WHERE updated_at < ?", (now,))
+        _prune(c, "plex_grabs", "id", seen_grabs)
 
         # Attribution. Matching on the pass_actions subscription key alone
         # missed every recording, because the key Plex mints on create was

@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.2.7 - 2026-09-13
+
+### Added
+
+- **A relay on your own network as an alert destination**, speaking timmyd's
+  `/notify`. It is the only destination that names no channel. It is handed the
+  severity and decides for itself, so a fault lands in the channel you watch
+  while a recording that started, a pass that booked something, or a fault that
+  cleared lands in the one you read later. Nothing is configured twice and this
+  end never learns which channels exist.
+
+  The address is checked as an ordinary http or https address with a host and no
+  credentials in it, and deliberately not against a host allowlist: a relay is a
+  service you run, usually on the same network as this container, so there is
+  nothing to pin it to. Plain http is allowed for the same reason.
+
+  The relay answers 202 once it has queued a message and 503 when its queue is
+  full, both with `ok` in the body. Queued is not delivered, and it is the
+  strongest thing a relay can honestly say, but a 2xx alone still proves
+  nothing, so the body is what is believed and a refusal is never recorded as
+  sent.
+
+### Changed
+
+- A destination's address is only masked when the address is itself the
+  credential. A Discord webhook URL still is, so it stays masked. A relay's
+  address is a machine on your network, and masking it only hid which relay a
+  destination pointed at.
+
+### Fixed
+
+- **A subscription this app had just cancelled survived in its copy of Plex's
+  schedule.** Our copy was pruned by timestamp, so two pulls inside one second
+  kept every row the first one wrote. A stale row then read as a live booking,
+  and a pass would skip a game nothing was recording. Both the subscription and
+  the grab lists are now pruned by what the pull actually saw. Same fault as the
+  guide prune in 1.2.6, in the other mirror.
+
 ## 1.2.6 - 2026-09-13
 
 ### Fixed

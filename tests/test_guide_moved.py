@@ -350,3 +350,27 @@ def test_a_failure_still_shows_when_nothing_is_recording_the_game(client, plex,
     fail = [r for r in rows if r["status"] == "failed"]
     assert len(fail) == 1, rows
     assert fail[0]["attempts"] == 3
+
+
+# ---- our copy of what Plex holds ----
+
+def test_a_subscription_plex_no_longer_has_leaves_our_copy_at_once(plex, synced):
+    """Pruned by what the pull saw, never by a timestamp.
+
+    Two pulls inside one second used to keep every row the first one wrote,
+    because its stamp was not lower than the second one's. A subscription this
+    app had just cancelled then survived in our copy, and `already_handled`
+    read it as a live booking and left the game unrecorded.
+    """
+    _kickoff(plex)
+    _chiefs_pass()
+    passes.run_passes()
+    key = _booked()[0]["subscription"]
+    sync.sync_recordings(plex)
+    assert db.one("SELECT 1 FROM plex_subscriptions WHERE key = ?", (key,))
+
+    plex.delete_subscription(key)
+    sync.sync_recordings(plex)            # same second as the pull above
+
+    assert not db.one("SELECT 1 FROM plex_subscriptions WHERE key = ?", (key,))
+    assert not db.one("SELECT 1 FROM plex_grabs WHERE subscription = ?", (key,))

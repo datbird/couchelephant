@@ -16,6 +16,10 @@ parts that matter:
   - Telegram's getUpdates returns an empty list until somebody messages the bot
   - Notifiarr answers 200 with a text body, and says "error" in that body rather
     than in the status code, so a 200 alone never proves delivery
+  - a timmyd relay answers 401 without a bearer token, 400 for a message with
+    neither a title nor a body, and 202 with `{"ok": true}` once it has queued
+    one. 202 means queued, not delivered, and a full queue is 503 with
+    `{"ok": false}`, so the body is what decides
 
 **No test may reach Discord or Telegram.** Every send is pointed here.
 
@@ -37,6 +41,14 @@ DISCORD_STATUS = 204
 DISCORD_BOT_OK = True
 TELEGRAM_OK = True
 NOTIFIARR_OK = True
+# The relay's queue. False makes it answer 503 with ok false, which is what a
+# relay that cannot keep up looks like.
+TIMMYD_OK = True
+# A relay that answers a success status and says no in the body. The relay this
+# was written against never does: it refuses with 503. This is here because the
+# app believes the body over the status line either way, and recording a
+# non-delivery as sent loses the alert for good.
+TIMMYD_LIES = False
 # What getUpdates hands back. Empty is the honest default: a bot nobody has
 # messaged has no chat id to find.
 TELEGRAM_UPDATES: list[dict] = []
@@ -47,12 +59,14 @@ BAD_TOKEN = "000:revoked"
 
 def reset() -> None:
     global DISCORD_STATUS, TELEGRAM_OK, TELEGRAM_UPDATES, NOTIFIARR_OK
-    global DISCORD_BOT_OK
+    global DISCORD_BOT_OK, TIMMYD_OK, TIMMYD_LIES
     DISCORD_BOT_OK = True
     SENT.clear()
     DISCORD_STATUS = 204
     TELEGRAM_OK = True
     NOTIFIARR_OK = True
+    TIMMYD_OK = True
+    TIMMYD_LIES = False
     TELEGRAM_UPDATES = []
 
 
@@ -70,6 +84,10 @@ def discord_bot_paths() -> list[str]:
 
 def telegram_sent() -> list[dict]:
     return [b for p, path, b in SENT if p == "telegram" and path.endswith("/sendMessage")]
+
+
+def timmyd_sent() -> list[dict]:
+    return [b for p, _, b in SENT if p == "timmyd"]
 
 
 def notifiarr_sent() -> list[dict]:
@@ -141,6 +159,23 @@ class _Handler(BaseHTTPRequestHandler):
                 self._text(200, '{"result":"success","details":'
                                 '{"response":"notification sent"}}')
             return
+        # A timmyd relay: /notify, bearer token, 202 once queued.
+        if path == "/notify":
+            auth = self.headers.get("Authorization", "")
+            if not auth.startswith("Bearer ") or not auth[7:].strip():
+                return self._json(401, {"ok": False,
+                                        "error": "bad or missing token"})
+            if not body.get("title") and not body.get("body"):
+                return self._json(400, {"ok": False,
+                                        "error": "a title or a body is required"})
+            SENT.append(("timmyd", path, body))
+            if TIMMYD_LIES:
+                return self._json(202, {"ok": False, "error": "queue is full"})
+            if not TIMMYD_OK:
+                # A full queue. 503, and the refusal is in the body as well.
+                return self._json(503, {"ok": False, "error": "queue is full"})
+            return self._json(202, {"ok": True, "source": body.get("source"),
+                                    "channel": "1", "error": None})
         # Telegram: /bot<token>/<method>
         if path.startswith("/bot"):
             token = path[4:].split("/")[0]

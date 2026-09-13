@@ -54,6 +54,12 @@ def _notifiarr(chat, events, name="Notifiarr", remind_hours=24, channel="7354814
         token="nkey-abc", chat_id=channel)
 
 
+def _timmyd(chat, events, name="Timmy", remind_hours=24, url=None):
+    return notify.save_destination(
+        name=name, kind="timmyd", events=events, remind_hours=remind_hours,
+        webhook=url if url is not None else chat, token="relay-token")
+
+
 def _raise(code, severity="bad", title="Guide has gone stale", now=None):
     health.record([{"code": code, "severity": severity, "title": title,
                     "detail": "Plex last refreshed 5 days ago.", "hint": "h"}],
@@ -621,3 +627,127 @@ def test_the_secrets_stay_behind_unless_the_export_asked_for_them(chat):
         # What it is and what it carries still travel, so a restore knows what
         # to ask you to paste back in.
         assert rec["kind"] and rec["events"]
+
+
+# ---------- a timmyd relay ----------
+#
+# The relay is the one destination that does not name a channel. It routes on
+# the severity it is handed: what somebody has to act on goes to the channel
+# they watch, everything else to the one they read later. So the whole contract
+# on this side is that the severity leaves here unchanged and honest.
+
+def test_the_relay_is_handed_the_severity_and_names_no_channel(chat):
+    _timmyd(chat, [health.EPG_STALE])
+    _raise(health.EPG_STALE, severity="bad")
+    assert notify.dispatch() == 1
+
+    body = fake_chat.timmyd_sent()[0]
+    assert body["severity"] == "bad"
+    assert body["source"] == "couchelephant"
+    assert body["title"] == "Guide has gone stale"
+    assert "channel" not in body, "the relay decides where it goes, not this end"
+
+
+def test_a_fault_goes_out_as_a_fault_and_activity_does_not(chat):
+    """The whole of what was asked for. A guide that has stopped refreshing is
+    something to act on; a recording that started is not, and the relay can
+    only tell them apart if this end is honest about which is which."""
+    _timmyd(chat, [health.EPG_STALE, notify.PASS_BOOKED])
+    _raise(health.EPG_STALE, severity="bad")
+    _book("a1", "Chiefs at Broncos")
+    notify.dispatch()
+
+    said = {b["title"]: b["severity"] for b in fake_chat.timmyd_sent()}
+    assert said["Guide has gone stale"] == "bad"
+    assert said["A pass booked a recording"] == "ok"
+
+
+def test_a_fault_clearing_is_not_itself_a_fault(chat):
+    """"Cleared" is good news. Sent at fault severity it would land in the
+    channel somebody watches, which is how a useful channel gets muted."""
+    _timmyd(chat, [health.EPG_STALE])
+    _raise(health.EPG_STALE, severity="bad")
+    notify.dispatch()
+    health.record([], int(time.time()), owns={health.EPG_STALE})
+    notify.dispatch()
+
+    last = fake_chat.timmyd_sent()[-1]
+    assert last["title"].startswith("Cleared:")
+    assert last["severity"] == "ok"
+
+
+def test_a_reminder_keeps_the_severity_of_the_fault_it_is_about(chat):
+    now = int(time.time())
+    _timmyd(chat, [health.EPG_STALE], remind_hours=6)
+    _raise(health.EPG_STALE, severity="warn", now=now)
+    notify.dispatch(now=now)
+    notify.dispatch(now=now + 7 * HOUR)
+
+    said = fake_chat.timmyd_sent()
+    assert said[-1]["title"].startswith("Still open:")
+    assert said[-1]["severity"] == "warn"
+
+
+def test_the_relay_refuses_a_message_with_no_token(chat):
+    dest = notify.save_destination(name="Timmy", kind="timmyd",
+                                   events=[health.EPG_STALE], webhook=chat)
+    assert "token" in notify.test(dest).lower()
+    assert fake_chat.timmyd_sent() == []
+
+
+def test_a_relay_that_cannot_keep_up_is_not_recorded_as_delivered(chat):
+    """202 means queued. 503 means it was not, and it says so in the body as
+    well. Recording that as sent would lose the alert for good."""
+    _timmyd(chat, [health.EPG_STALE])
+    _raise(health.EPG_STALE)
+    fake_chat.TIMMYD_OK = False
+    assert notify.dispatch() == 0
+    assert db.one("SELECT last_error FROM destinations")["last_error"]
+
+    fake_chat.TIMMYD_OK = True
+    assert notify.dispatch() == 1
+
+
+def test_a_refusal_in_the_body_beats_a_success_status(chat):
+    """The relay this was written against always refuses with 503, so the
+    status line alone would do today. The body is believed anyway: if the two
+    ever disagree, recording a non-delivery as sent loses the alert for good.
+    """
+    _timmyd(chat, [health.EPG_STALE])
+    _raise(health.EPG_STALE)
+    fake_chat.TIMMYD_LIES = True
+    assert notify.dispatch() == 0
+
+    fake_chat.TIMMYD_LIES = False
+    assert notify.dispatch() == 1
+
+
+def test_the_relay_address_must_be_a_real_http_address(chat):
+    for bad in ("ftp://relay/notify", "not a url", "http://", "//relay"):
+        with pytest.raises(ValueError):
+            notify.save_destination(name="Timmy", kind="timmyd",
+                                    events=[health.EPG_STALE],
+                                    webhook=bad, token="t")
+
+
+def test_the_relay_address_is_shown_back_rather_than_masked(chat, client):
+    """It is an address on your own network, not a credential. Masking it means
+    nobody can see which relay a destination points at. The token is the
+    secret, and that one stays masked."""
+    _timmyd(chat, [health.EPG_STALE])
+    d = notify.destinations()[0]
+    assert d["webhook"] == chat
+    assert d["token"].startswith("*")
+    assert "relay-token" not in client.get("/settings").text
+
+
+def test_a_discord_webhook_is_still_masked(chat, client):
+    """The guard on the guard above. A Discord webhook URL IS the credential."""
+    _discord(chat, [health.EPG_STALE])
+    assert notify.destinations()[0]["webhook"].startswith("*")
+
+
+def test_a_test_message_reaches_the_relay(chat):
+    dest = _timmyd(chat, [health.EPG_STALE])
+    assert notify.test(dest).startswith("OK")
+    assert fake_chat.timmyd_sent()[0]["severity"] == "ok"

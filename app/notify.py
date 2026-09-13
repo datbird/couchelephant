@@ -19,6 +19,10 @@ forwarded or a socket held open.
     and it buys one bot in one channel instead of a webhook per application.
     Whoever already routes Radarr, Sonarr and Plex through it wants this here
     too, rather than a fifteenth integration to set up and remember.
+  - **A relay on your own network** that speaks timmyd's `/notify`. It is the
+    only destination here that names no channel: it is handed the severity and
+    decides for itself, so what you have to act on and what you can read later
+    can land in two different places without this end knowing either exists.
 
 Two kinds of thing are worth sending, and they behave differently.
 
@@ -130,7 +134,13 @@ ACTIVITY_WINDOW = 7 * 86400
 # re-announce it, so the two can never meet.
 STATE_TTL = 30 * 86400
 
-KINDS = ("discord", "discord_bot", "telegram", "notifiarr")
+KINDS = ("discord", "discord_bot", "telegram", "notifiarr", "timmyd")
+
+# The kinds whose `webhook` column holds a credential rather than an address.
+# A Discord webhook URL is the whole authorisation to post, so it is masked
+# like a password. A relay's address is a machine on your own network and
+# masking it only hides which relay a destination points at.
+SECRET_WEBHOOK_KINDS = frozenset({"discord"})
 
 SEVERITY_COLOUR = {"bad": 0xD1453B, "warn": 0xD9822B, "ok": 0x3BA55D}
 
@@ -166,13 +176,38 @@ def _mask(v) -> str:
     return "*" * 12 if v else ""
 
 
+def valid_relay(url: str) -> bool:
+    """Is this an address this app could post to?
+
+    Deliberately not a host allowlist. Discord and Telegram are one known
+    service each, so their hosts are pinned. A relay is a service YOU run, at
+    an address only you know, usually on the same network as this container, so
+    there is nothing to pin it to. What is checked is that it is an ordinary
+    http or https address with a host and no credentials smuggled into it.
+
+    Plain http is allowed on purpose. A relay on a home network commonly has no
+    certificate, and refusing http would push people to put the token in a
+    query string somewhere worse.
+    """
+    try:
+        u = urlparse((url or "").strip())
+    except ValueError:
+        return False
+    if u.scheme not in ("http", "https"):
+        return False
+    if not u.hostname:
+        return False
+    return not (u.username or u.password)
+
+
 def destinations() -> list[dict]:
     """Every destination, safe to render. Secrets are masked here rather than in
     the template, so a new template cannot leak one by forgetting to."""
     out = []
     for r in db.query("SELECT * FROM destinations ORDER BY id"):
         d = dict(r)
-        d["webhook"] = _mask(d.get("webhook"))
+        if d.get("kind") in SECRET_WEBHOOK_KINDS:
+            d["webhook"] = _mask(d.get("webhook"))
         d["token"] = _mask(d.get("token"))
         d["event_list"] = split_events(d.get("events"))
         d["event_count"] = len(d["event_list"])
@@ -209,6 +244,10 @@ def save_destination(*, name, kind, events, remind_hours=24, webhook=None,
     if kind == "discord":
         if webhook and not valid_webhook(webhook, hosts=hosts, schemes=schemes):
             raise ValueError("That is not a Discord webhook URL.")
+    if kind == "timmyd":
+        if not valid_relay(webhook):
+            raise ValueError("That is not a relay address. It should look like "
+                             "http://192.168.1.10:8791.")
     now = _now()
     with db.tx() as c:
         if dest_id:
@@ -367,6 +406,43 @@ def _send_notifiarr(dest, title, detail, severity) -> None:
         raise SendError(f"Notifiarr refused it: {body[:200]}")
 
 
+def _send_timmyd(dest, title, detail, severity) -> None:
+    """Hand a message to a relay, which decides which channel it belongs in.
+
+    The severity goes out unchanged, and that is the whole contract. The relay
+    routes what somebody has to act on to the channel they watch, and
+    everything else to the channel they read later. So nothing here names a
+    channel, and this end never has to know which channels exist.
+
+    No icon is sent either. The relay resolves one from the source name, and an
+    icon in the payload would override whatever the relay's owner configured.
+
+    It answers 202 once it has queued the message and 503 when its queue is
+    full, both with `ok` in a JSON body. Queued is not delivered, and it is the
+    strongest thing a relay can honestly say, but a 2xx alone still proves
+    nothing: the body is what is believed.
+    """
+    payload = {
+        "source": "couchelephant",
+        "severity": severity or "ok",
+        "title": title[:256],
+        "body": (detail or "")[:4000],
+    }
+    url = f"{dest['webhook'].rstrip('/')}/notify"
+    with httpx.Client(timeout=TIMEOUT) as http:
+        r = http.post(url, json=payload,
+                      headers={"Authorization": f"Bearer {dest['token']}"})
+    try:
+        body = r.json() if r.content else {}
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    if r.status_code >= 400 or body.get("ok") is False:
+        why = body.get("error") or f"HTTP {r.status_code}"
+        raise SendError(f"The relay refused it: {why}")
+
+
 def _deliver(dest, title, detail, severity) -> bool:
     """One message, one destination. Never raises.
 
@@ -395,6 +471,12 @@ def _deliver(dest, title, detail, severity) -> bool:
             if not str(dest["chat_id"]).strip().isdigit():
                 raise SendError("The channel must be a numeric Discord channel id.")
             _send_notifiarr(dest, title, detail, severity)
+        elif dest["kind"] == "timmyd":
+            if not dest.get("webhook"):
+                raise SendError("No relay address is set.")
+            if not dest.get("token"):
+                raise SendError("No relay token is set.")
+            _send_timmyd(dest, title, detail, severity)
         else:
             raise SendError(f"Unknown kind {dest['kind']!r}")
     except Exception as e:
@@ -442,6 +524,16 @@ def test(dest_id: int) -> str:
                         "Discord, right-click the channel, Copy Channel ID.")
             _send_notifiarr(dest, "CouchElephant test",
                             "If you can read this, alerts will reach here.", "ok")
+        elif dest["kind"] == "timmyd":
+            if not dest.get("webhook"):
+                return "No relay address is set."
+            if not dest.get("token"):
+                return "No relay token is set."
+            # Sent at `ok`, so a test lands in the channel for things you read
+            # later rather than the one you watch. Testing a destination is not
+            # an emergency.
+            _send_timmyd(dest, "CouchElephant test",
+                         "If you can read this, alerts will reach here.", "ok")
         else:
             if not dest.get("token"):
                 return "No bot token is set."

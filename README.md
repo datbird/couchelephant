@@ -57,8 +57,8 @@ It also does several things Plex cannot say at all:
   it. You find out the evening the recording does not happen. CouchElephant
   checks every sync and badges the sync button instead.
 - **Say it somewhere you will actually see it.** A badge only exists on a page
-  you have open. Alerts go out to Discord, Telegram or Notifiarr, and you
-  choose which events reach which channel.
+  you have open. Alerts go out to Discord, Telegram, Notifiarr or a relay on
+  your own network, and you choose which events reach which channel.
 
 ## What it looks like
 
@@ -165,6 +165,11 @@ own list of events, so faults can go to one channel and recordings to another.
 - **Notifiarr**, if you already run it. One bot in one channel, and everything
   you own arrives through it instead of through a webhook set up per
   application.
+- **A relay on your own network**, speaking
+  [timmyd](https://github.com/datbird/timmyd)'s `/notify`. The only destination
+  that names no channel: it is handed the severity and decides for itself, so a
+  fault lands in the channel you watch while a recording that started lands in
+  the one you read later.
 
 A fault reports its whole life: once when it opens, a reminder on the interval
 you pick while it stays open, and once when it clears. A one-off event, like a
