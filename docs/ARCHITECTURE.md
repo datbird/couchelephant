@@ -261,6 +261,20 @@ Four things can be true and only one of them is leave it alone:
 Every one of those is written into the pass history, and a re-point obeys the
 same timing guard as any other repair.
 
+### When it runs
+
+Every sync, and **also the moment a pass is saved**. Saving used to book new
+games and nothing else, so a recording already on the DVR kept the settings it
+was made with until the next sync. A padding change made an hour before kickoff
+would reach Plex after the game had started, or never, because by then it is
+too close to re-book safely. The save refreshes the copy of Plex's schedule
+first, so a recording booked minutes ago is not read as one Plex has scheduled
+nothing for.
+
+The pass itself is saved whatever Plex is doing. A server that cannot be
+reached for a moment must not fail the save, and the next sync carries the
+change to the DVR.
+
 ### When it will not repair
 
 Repair has a moment in the middle with nothing scheduled, so it needs room. It

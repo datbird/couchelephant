@@ -774,10 +774,36 @@ async def api_rule_edit(rule_id: int, networks: str = Form(""),
                   (db.js(nets), db.js(chans), keep, filt, label, on, rule_id))
     done = await asyncio.to_thread(passes.run_passes)
     made = len([d for d in done if d["action"] == "scheduled"])
+
+    # AND THE RECORDINGS ALREADY BOOKED. `run_passes` only books games nobody
+    # has, which is the half a pass edit does not need: the game is booked, and
+    # what changed is how. Left to the next sync, a padding change made an hour
+    # before kickoff reaches Plex after the game has started, or never, because
+    # by then it is too close to re-book safely. That is the exact failure
+    # `app/verify.py` exists for, and the moment somebody changes a pass is the
+    # moment it has to run.
+    fixed = adrift = 0
+    try:
+        with _plex() as plex:
+            # Our copy of Plex's schedule is as old as the last sync. Refresh
+            # it first, or a recording booked minutes ago reads as one Plex has
+            # scheduled nothing for, and gets cancelled and made again.
+            await asyncio.to_thread(sync.sync_recordings, plex)
+            out = await asyncio.to_thread(sync.check_bookings, plex)
+        fixed, adrift = out["repaired"], out["drifted"]
+    except Exception:
+        # The settings belong to the pass and are already saved. Plex being
+        # unreachable for a moment must not fail the save, and the next sync
+        # carries the change to the DVR.
+        pass
+
     where = " or ".join(nets + chans)
     return JSONResponse({"ok": True, "message":
                          (f"Saved. Only from {where}. " if where else "Saved. ")
-                         + f"{made} new airing(s) scheduled."})
+                         + f"{made} new airing(s) scheduled."
+                         + (f" {fixed} existing recording(s) updated." if fixed else "")
+                         + (f" {adrift} too close to the broadcast to change"
+                            " safely, so they were left alone." if adrift else "")})
 
 
 SMART_LIMIT = 40          # airings a smart filter may book without being told twice

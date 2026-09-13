@@ -206,6 +206,11 @@ A pass carries those settings too and applies them to every broadcast it books,
 so using a pass does not mean giving up padding or quality. The pin to channel
 and time stays CouchElephant's, because that is the whole mechanism.
 
+**Changing a pass changes the recordings it already booked**, as soon as you
+save it. Every future booking that pass made is re-read from Plex and corrected
+to match. A booking too close to its broadcast is left alone and the reply says
+so: wrong padding on a game you are recording beats no recording of it.
+
 ## Cancelling
 
 Anything CouchElephant booked can be cancelled from the same panel. It deletes

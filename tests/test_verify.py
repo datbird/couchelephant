@@ -392,6 +392,75 @@ def test_a_repair_plex_refuses_becomes_a_notice(plex, synced):
     assert health.BOOKING_REPAIR_FAILED in {n["code"] for n in health.open_notices()}
 
 
+def test_changing_a_pass_corrects_its_bookings_at_once(plex, client, synced):
+    """The check, at the moment somebody actually needs it.
+
+    Saving a pass used to book new games and nothing else. The recordings
+    already on the DVR kept the settings they were made with until the next
+    sync, up to an hour later, so the page said one thing and the DVR did
+    another. A game inside that hour was never corrected at all, because by
+    then it is too close to kickoff to re-book safely.
+    """
+    _push_kickoff()
+    p = _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    assert db.one("SELECT * FROM our_grabs"), "the pass should have booked the game"
+
+    r = client.post(f"/api/rules/{p['id']}",
+                    data={"settings": db.js({"endOffsetMinutes": "30"})})
+    assert r.json()["ok"], r.text
+
+    key = db.one("SELECT subscription FROM our_grabs")["subscription"]
+    got = {s["id"]: s["value"] for s in (plex.subscription(key).get("Setting") or [])}
+    assert str(got.get("endOffsetMinutes")) == "30", got
+    assert "1 existing recording" in r.json()["message"], r.json()
+
+
+def test_saving_a_pass_that_changed_nothing_re_books_nothing(plex, client, synced):
+    """The loop guard, on the same path. Pressing Save twice must not cancel
+    and re-book a recording that already agrees."""
+    _push_kickoff()
+    p = _chiefs_pass({"endOffsetMinutes": "30"})
+    passes.run_passes()
+    before = len(fake_plex.STATE.deleted)
+
+    for _ in range(3):
+        r = client.post(f"/api/rules/{p['id']}",
+                        data={"settings": db.js({"endOffsetMinutes": "30"})})
+        assert r.json()["ok"], r.text
+
+    assert len(fake_plex.STATE.deleted) == before, "nothing should have been cancelled"
+
+
+def test_a_change_too_close_to_kickoff_says_so_rather_than_going_quiet(plex, client,
+                                                                      synced):
+    """Saving and seeing nothing happen is worse than being told why."""
+    _push_kickoff(hours=1)          # inside the two sync intervals a repair needs
+    p = _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+
+    r = client.post(f"/api/rules/{p['id']}",
+                    data={"settings": db.js({"endOffsetMinutes": "30"})})
+    assert r.json()["ok"], r.text
+    assert "too close" in r.json()["message"], r.json()
+
+
+def test_plex_being_unreachable_does_not_fail_a_pass_save(plex, client, synced,
+                                                          monkeypatch):
+    """The settings belong to the pass. They are saved whatever Plex is doing,
+    and the next sync carries them to the DVR."""
+    _push_kickoff()
+    p = _chiefs_pass({"endOffsetMinutes": "0"})
+    passes.run_passes()
+    monkeypatch.setattr(sync, "check_bookings",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+
+    r = client.post(f"/api/rules/{p['id']}",
+                    data={"settings": db.js({"endOffsetMinutes": "30"})})
+    assert r.json()["ok"], r.text
+    assert db.unjs(db.one("SELECT prefs FROM passes")["prefs"])["endOffsetMinutes"] == "30"
+
+
 def test_a_full_sync_runs_the_check(plex, synced):
     """It has to be on the sync loop, or it is a button nobody presses."""
     _chiefs_pass({"endOffsetMinutes": "0"})

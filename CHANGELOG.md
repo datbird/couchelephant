@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.9 - 2026-09-13
+
+### Fixed
+
+- **Changing a pass did not change the recordings it had already booked.**
+  Saving a pass booked any new games and stopped there, so a recording already
+  on the DVR kept the settings it was made with until the next sync, up to an
+  hour later. The page said one thing and the DVR did another, and a game
+  inside that hour was never corrected at all: by then it is too close to
+  kickoff to re-book safely.
+
+  The booking check now runs when a pass is saved as well as on every sync. It
+  refreshes the copy of Plex's schedule first, so a recording booked minutes
+  ago is not read as one Plex has scheduled nothing for and cancelled. The
+  reply says how many existing recordings were updated, and how many were left
+  alone for being too close to their broadcast.
+
+  The pass is saved whatever Plex is doing. A server unreachable for a moment
+  never fails the save, and the next sync carries the change.
+
 ## 1.2.8 - 2026-09-13
 
 ### Changed
