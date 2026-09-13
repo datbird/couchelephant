@@ -82,6 +82,61 @@ _PRESETS = {
 }
 
 
+# What a setting means, in the words the panel shows. Plex sends ids and raw
+# values; these turn them into a sentence a person can check against what they
+# asked for.
+#
+# The three pinning settings are absent on purpose: the channel and the start
+# time are already on screen, right above this, as the airing itself.
+def _minutes(v, early_or_late):
+    n = int(v)
+    if n == 0:
+        return "on time"
+    return f"{n} minute{'' if n == 1 else 's'} {early_or_late}"
+
+
+_QUALITY = {"0": "any", "100000": "8 Mbps", "20000": "2 Mbps", "10000": "1 Mbps",
+            "4000": "720p", "2000": "480p"}
+
+
+def _yes_no(yes, no):
+    return lambda v: yes if str(v).lower() in ("1", "true", "yes", "on") else no
+
+
+SETTING_WORDS = {
+    "startOffsetMinutes": ("Starts", lambda v: _minutes(v, "early")),
+    "endOffsetMinutes": ("Ends", lambda v: _minutes(v, "late")),
+    "minVideoQuality": ("Quality", lambda v: _QUALITY.get(str(v), str(v))),
+    "recordPartials": ("Partial airings", _yes_no("recorded", "skipped")),
+    "replaceLowerQuality": ("Lower quality", _yes_no("replaced", "kept")),
+    "comskipEnabled": ("Commercials", _yes_no("detected", "kept")),
+    "remoteMedia": ("Remote media", _yes_no("allowed", "not allowed")),
+    "onlyNewAirings": ("Repeats", _yes_no("skipped", "recorded")),
+}
+
+
+def describe_settings(settings: dict) -> list[dict]:
+    """One line per setting, in plain words, for the programme panel.
+
+    Reads what Plex holds rather than what a pass asked for, because the point
+    of showing it is to confirm the setting took effect.
+
+    A setting this does not know is shown with its own id and raw value rather
+    than dropped. A server offering something new should not be able to hide it
+    from the one screen that exists to say what is in force.
+    """
+    out = []
+    for key, value in (settings or {}).items():
+        if key in _PASS_PREF_BLOCKED or key == "comskipMethod":
+            continue
+        label, say = SETTING_WORDS.get(key, (key, str))
+        try:
+            out.append({"label": label, "value": say(value)})
+        except (TypeError, ValueError):
+            out.append({"label": label, "value": str(value)})
+    return out
+
+
 def _template_payload(options, row=None, pin=True):
     """Plex's own recording choices, ready to render.
 

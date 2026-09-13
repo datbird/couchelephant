@@ -215,6 +215,24 @@ def _setting_ids(recurring):
     return {s["id"] for s in _settings(recurring)}
 
 
+# Which settings are booleans. Only those come back as "true"/"false"; an int
+# setting comes back as the number it was given.
+#
+# This fake used to answer "true" to any value of "1", so `startOffsetMinutes:
+# 1` read back as `true`. That is not what the real server does, and the
+# difference hid a panel showing "Starts true" instead of "Starts 1 minute
+# early". A fake that is merely DIFFERENT from the real server is as useless
+# as one that is more permissive.
+_BOOL_SETTINGS = {s["id"] for s in _settings(True) + _settings(False)
+                  if s.get("type") == "bool"}
+
+
+def _as_plex_answers(key, value):
+    if key in _BOOL_SETTINGS:
+        return "true" if str(value).lower() in ("1", "true") else "false"
+    return str(value)
+
+
 class State:
     """What the fake server remembers, so tests can assert on it."""
 
@@ -578,7 +596,7 @@ class Handler(BaseHTTPRequestHandler):
             "key": key, "type": 4 if one_shot else 2,
             "targetLibrarySectionID": 2, "title": title,
             # oneShot comes back as a string, not a 1.
-            "Setting": [{"id": k, "value": ("true" if v in ("1", "true") else v)}
+            "Setting": [{"id": k, "value": _as_plex_answers(k, v)}
                         for k, v in prefs.items()],
             # The slot this booking is pinned to, which is what decides
             # whether it still has anything scheduled after a guide refresh.
@@ -631,7 +649,7 @@ class Handler(BaseHTTPRequestHandler):
                 "<body><h1>400 Bad Request</h1></body></html>", 400)
         have = {st["id"]: st["value"] for st in sub["Setting"]}
         for k, v in prefs.items():
-            have[k] = "true" if v in ("1", "true") else v
+            have[k] = _as_plex_answers(k, v)
         sub["Setting"] = [{"id": k, "value": v} for k, v in have.items()]
         STATE.edited.append({"key": key, "prefs": prefs})
         return self._container(size=1, MediaSubscription=[sub])

@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.5.0 - 2026-09-13
+
+### Added
+
+- **A scheduled recording now says what settings are in force on it.** Open any
+  recording, from the guide, the agenda, the calendar or the recordings list,
+  and the panel lists the padding, the quality and the rest in plain words:
+  "Ends 60 minutes late", not `endOffsetMinutes 60`.
+
+  Read from Plex's own copy of the recording rather than from what the pass
+  asked for, because the point is to confirm the setting took effect. It works
+  for recordings Plex scheduled by its own rule too. Opening the panel never
+  waits on Plex: the values come from the copy every sync refreshes.
+
+  A setting CouchElephant has no words for is shown with its own name and value
+  rather than hidden, so a server offering something new cannot disappear from
+  the one screen that exists to say what is in force.
+
+### Changed
+
+- The fake Plex server used by the tests answers a setting by its declared
+  type. It used to return "true" for any value of `1`, so a one-minute padding
+  read back as `true`, and the panel would have said "Starts true". A fake that
+  differs from the real server is as useless as one that is more permissive.
+
 ## 1.4.0 - 2026-09-13
 
 The second cleanup review, over the routes, the alerts and the rest of the app.

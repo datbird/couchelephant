@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .. import db, filters, smartfilter
+from . import record
 from ._shared import _logo_map, page, templates, tz
 
 router = APIRouter()
@@ -210,6 +211,20 @@ def api_program(airing_id: str):
         (a["channel_vcn"], a["begins_at"]))
     ours = {r["airing_id"] for r in db.query(
         "SELECT airing_id FROM our_grabs WHERE program_guid = ?", (a["program_guid"],))}
+    # What Plex is actually holding for this recording, so somebody can see
+    # their padding took effect rather than trusting that it did. Read from the
+    # copy of Plex's own subscription, refreshed every sync, so opening a panel
+    # never depends on Plex answering.
+    sub = db.one(
+        """SELECT s.settings FROM plex_subscriptions s
+             JOIN our_grabs o ON o.subscription = s.key
+            WHERE o.channel_vcn = ? AND o.begins_at = ?""",
+        (a["channel_vcn"], a["begins_at"])) or db.one(
+        """SELECT s.settings FROM plex_subscriptions s
+             JOIN plex_grabs g ON g.subscription = s.key
+            WHERE g.channel_vcn = ? AND g.begins_at = ?""",
+        (a["channel_vcn"], a["begins_at"]))
+    settings = record.describe_settings(db.unjs(sub["settings"], {})) if sub else []
     my_passes = {r["team_id"] for r in db.query("SELECT team_id FROM passes")}
 
     teams = db.unjs(a["teams"])
@@ -225,6 +240,7 @@ def api_program(airing_id: str):
         "originally_available": a["originally_available"],
         "scheduled": scheduled["status"] if scheduled else None,
         "scheduled_by_us": bool(ours),
+        "settings": settings,
         "why": _why_for(a),
         "dry_run": db.get_setting("dry_run") == "1",
         "airings": [{

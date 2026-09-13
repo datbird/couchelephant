@@ -227,3 +227,35 @@ def test_the_calendar_week_starts_where_the_viewer_says(browser, base_url, synce
             f"{locale} started the week on {names[0]!r}"
     finally:
         ctx.close()
+
+
+def test_the_panel_shows_the_settings_in_force_on_a_recording(recordings):
+    """Clicking a scheduled recording says what Plex is actually holding.
+
+    The point is confidence: somebody who set an hour of padding should be able
+    to see that the hour is there, rather than take it on trust.
+    """
+    from app import db, passes, sync
+    from app import plex as plexmod
+    from app.routes import record as record_routes
+
+    team = db.one("SELECT * FROM teams WHERE name LIKE 'Kansas City%'")
+    record_routes._make_pass("team", team=dict(team),
+                             prefs={"endOffsetMinutes": "60",
+                                    "startOffsetMinutes": "1"})
+    passes.run_passes()
+    p = plexmod.Plex(db.get_setting("plex_url"), db.get_setting("plex_token"))
+    sync.sync_recordings(p)
+    p.close()
+
+    recordings.reload()
+    recordings.wait_for_selector(".agrow")
+    recordings.locator(".agrow").first.click()
+    recordings.wait_for_selector(".setlist")
+
+    said = recordings.locator(".setlist").inner_text()
+    assert "Ends" in said and "60 minutes late" in said, said
+    assert "Starts" in said and "1 minute early" in said, said
+    # The pin is the airing above it, not a setting.
+    assert "startTimeslot" not in said and "lineupChannel" not in said, said
+

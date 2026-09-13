@@ -363,6 +363,14 @@ dl.kv dd{margin:0}
 .ovlsec:last-child{border-bottom:none}
 .ovlsec h3{margin:0 0 10px;font-size:11px;text-transform:uppercase;letter-spacing:.6px;
   color:var(--dim);font-weight:600}
+/* The settings in force on a booking: a label column that stays put and a
+   value column that reads down cleanly, so a wrong number is easy to spot. */
+.setlist{display:grid;grid-template-columns:auto 1fr;gap:4px 18px;margin:0}
+.setlist dt{color:var(--dim);font-size:13px}
+.setlist dd{margin:0;font-size:13px}
+@media (max-width:520px){.setlist{grid-template-columns:1fr;gap:0 0}
+  .setlist dd{margin:0 0 8px}}
+
 .air{display:flex;align-items:center;gap:12px;padding:9px 10px;border-radius:6px;
   border:1px solid transparent}
 .air+.air{margin-top:4px}

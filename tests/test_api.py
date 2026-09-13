@@ -824,3 +824,67 @@ def test_a_pass_cannot_store_a_setting_a_one_shot_booking_cannot_send(client, sy
                         "autoDeletionItemPolicyWatchedLibrary": "0",
                         "oneShot": "0", "lineupChannel": "id-41-1"})
     assert kept == {"startOffsetMinutes": "1"}
+
+
+# ---- what a booking's settings say on the programme panel ----
+
+def test_the_panel_says_what_plex_is_holding_for_a_booking(client, plex, synced):
+    """A person should be able to see their padding took effect rather than
+    trust that it did, so this reads Plex's own copy of the subscription."""
+    from app import db, passes
+
+    row = db.one("""SELECT a.*, p.title, p.rating_key FROM airings a
+                    JOIN programs p ON p.guid = a.program_guid
+                    WHERE a.premiere = 1 LIMIT 1""")
+    passes._schedule(plex, row, None, "pass",
+                     prefs={"endOffsetMinutes": "60", "startOffsetMinutes": "1"})
+    from app import sync
+    sync.sync_recordings(plex)
+
+    d = client.get("/api/program", params={"airing_id": row["id"]}).json()
+    said = {s["label"]: s["value"] for s in d["settings"]}
+    assert said["Ends"] == "60 minutes late", said
+    assert said["Starts"] == "1 minute early", said
+
+
+def test_the_panel_leaves_out_the_pin(client, plex, synced):
+    """The channel and the start time are already on screen as the airing."""
+    from app import db, passes, sync
+
+    row = db.one("""SELECT a.*, p.title, p.rating_key FROM airings a
+                    JOIN programs p ON p.guid = a.program_guid
+                    WHERE a.premiere = 1 LIMIT 1""")
+    passes._schedule(plex, row, None, "pass", prefs={})
+    sync.sync_recordings(plex)
+
+    d = client.get("/api/program", params={"airing_id": row["id"]}).json()
+    labels = {s["label"] for s in d["settings"]}
+    assert not ({"lineupChannel", "startTimeslot", "oneShot"} & labels), labels
+
+
+def test_a_setting_nobody_has_named_is_still_shown(client, plex, synced):
+    """A server offering something new must not be able to hide it from the
+    one screen that exists to say what is in force."""
+    from app import db, passes, sync
+
+    row = db.one("""SELECT a.*, p.title, p.rating_key FROM airings a
+                    JOIN programs p ON p.guid = a.program_guid
+                    WHERE a.premiere = 1 LIMIT 1""")
+    passes._schedule(plex, row, None, "pass", prefs={})
+    sync.sync_recordings(plex)
+    key = db.one("SELECT subscription FROM our_grabs")["subscription"]
+    with db.tx() as c:
+        c.execute("UPDATE plex_subscriptions SET settings = ? WHERE key = ?",
+                  (db.js({"somethingNew": "42"}), key))
+
+    d = client.get("/api/program", params={"airing_id": row["id"]}).json()
+    assert {"label": "somethingNew", "value": "42"} in d["settings"], d["settings"]
+
+
+def test_a_programme_nobody_is_recording_says_nothing_about_settings(client, synced):
+    from app import db
+
+    row = db.one("SELECT id FROM airings LIMIT 1")
+    d = client.get("/api/program", params={"airing_id": row["id"]}).json()
+    assert d["settings"] == []
+

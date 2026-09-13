@@ -193,6 +193,18 @@
     }
     h += '</div>';
 
+    // What Plex is actually holding for this recording. The point is to see
+    // that a setting took effect, so this reads Plex's own copy rather than
+    // what the pass asked for.
+    if ((d.settings || []).length) {
+      h += '<div class="ovlsec"><h3>Recording settings</h3><dl class="setlist">';
+      d.settings.forEach(function (s) {
+        h += '<dt>' + esc(s.label) + '</dt><dd>' + esc(s.value) + '</dd>';
+      });
+      h += '</dl><div class="note" style="margin-top:8px">As Plex has them, ' +
+           'read back from the server.</div></div>';
+    }
+
     if ((d.teams || []).length) {
       h += '<div class="ovlsec"><h3>Teams</h3><div class="row">';
       d.teams.forEach(function (t) {
