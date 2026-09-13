@@ -197,16 +197,36 @@ def group_by_game(rows: list) -> dict[str, list]:
 def already_handled(program_guid: str) -> str | None:
     """Why this game needs no booking, or None.
 
+    THE LIVE STATE, NEVER THE LOG. This used to answer yes to any programme
+    that had ever been written down as scheduled, which is a different
+    question and the wrong one. A booking can be lost after it is made: Plex
+    drops a subscription on its own, the user cancels one, or the guide
+    re-times the broadcast and the pinned recording stops existing. In every
+    one of those the log still said scheduled, so the pass never looked at the
+    game again and nothing recorded it. A stale record read as consent, which
+    is the same shape as a failed lookup read as permission.
+
     Matching Plex's grabs by title alone treated any programme that keeps its
-    title, a daily news or quiz show, as already covered forever. A broadcast
-    is identified by its channel and start time, so the check is against the
-    times this programme actually airs.
+    title, a daily news or quiz show, as already covered for ever. A programme
+    guid names one episode and so one game, which is why it is what is asked
+    about here: the rebroadcast of a game shares its programme, and recording
+    either of them is recording the game.
     """
+    # Our own booking, and then whether it is real. `our_grabs` alone is an
+    # intention; Plex listing the subscription is the fact. The second half of
+    # the OR is the moment between booking one and reading Plex back: the row
+    # exists, `plex_subscriptions` is only refreshed by a sync and cannot see
+    # it yet, and without this two runs in a row would book the game twice.
+    read_at = db.one("SELECT COALESCE(MAX(started_at), 0) t FROM sync_log "
+                     "WHERE ok = 1")["t"]
     mine = db.one(
-        "SELECT 1 FROM pass_actions WHERE program_guid = ? AND action = 'scheduled' "
-        "AND dry_run = 0 LIMIT 1", (program_guid,))
+        """SELECT 1 FROM our_grabs o
+             LEFT JOIN plex_subscriptions s ON s.key = o.subscription
+            WHERE o.program_guid = ?
+              AND (s.key IS NOT NULL OR o.created_at >= ?) LIMIT 1""",
+        (program_guid, read_at))
     if mine:
-        return "already scheduled by a pass"
+        return "already booked by a pass"
     hit = db.one(
         """SELECT g.status FROM plex_grabs g
            JOIN airings a ON a.channel_vcn = g.channel_vcn AND a.begins_at = g.begins_at

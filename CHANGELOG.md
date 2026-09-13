@@ -1,5 +1,72 @@
 # Changelog
 
+## 1.2.6 - 2026-09-13
+
+### Fixed
+
+- **A game the guide re-timed was shown as NOT RECORDING while it was
+  recording.** A failed booking is drawn against a channel and a start time,
+  and a guide refresh moves both. One NFL game shifted fifteen minutes on the
+  same channel, and the red row went on claiming the game was not being
+  recorded, directly above the booking that was recording it, until kickoff.
+
+  A failure row now clears when the **game** is covered, whoever booked it and
+  whatever time it moved to. A programme names one episode and so one game, so
+  this is the honest question to ask. A failure with nothing recording the game
+  still shows, with its attempt count, which is what the row exists for.
+
+- **A booking whose broadcast left the guide was left on the server for ever.**
+  The check that re-reads every future booking gave up as soon as the airing it
+  named was no longer in the guide, and counted it unchecked. The subscription
+  stayed on Plex, pinned to a slot nothing airs in, and the game itself went
+  unrecorded.
+
+  A booking like that is now handled four ways, and only one of them is leave
+  it alone. Plex still holding a recording for it means nothing is touched, so
+  a guide that has merely shrunk can never read as permission to cancel.
+  Another booking of ours already covering the game makes this one a duplicate,
+  so it is cancelled and not replaced. The guide still carrying the game moves
+  the booking onto the broadcast the pass would choose today, by the pass's own
+  rules. The guide having dropped the programme, with nothing scheduled against
+  the subscription, cancels it. All four are written into the pass history, and
+  a move obeys the same timing guard as any other repair.
+
+- **A pass would not book a game it had once booked, even after the recording
+  was gone.** The check asked the log rather than the server: any programme
+  ever written down as scheduled was treated as handled for the life of the
+  install. A recording lost afterwards, because Plex dropped the subscription,
+  because you cancelled it, or because the guide moved the broadcast, was never
+  replaced, and nothing said so.
+
+  It now asks the live state. A booking counts when Plex still holds the
+  subscription, or when it was made since the last sync, which is the moment
+  before Plex has been read back and is what stops two runs in a row booking
+  the same game twice.
+
+### Changed
+
+- The fake Plex server used by the tests now drops the recording for a pinned
+  one-shot whose slot the guide no longer has, as the real server does. The old
+  fake answered with the frozen original listing for ever, which hid every
+  consequence above. A fake that is more permissive than the real server is not
+  a test double.
+
+- A guide pull now prunes by what it actually saw rather than by timestamp. Two
+  pulls inside one second left every airing the first one wrote, because its
+  stamp was not lower than the second one's. The result was a ghost airing that
+  no longer exists in the guide, which is the same bug shape as everything
+  above.
+
+- The booking check re-reads Plex's schedule after it changes anything, so the
+  next check is not asking a copy that was read before the change.
+
+## 1.2.5 - 2026-09-12
+
+### Added
+
+- **A Discord bot destination**, so alerts arrive as the bot rather than as a
+  webhook.
+
 ## 1.2.4 - 2026-09-10
 
 ### Fixed

@@ -214,13 +214,26 @@ started, it says so, because Plex keeps the part it captured.
 
 ## What "already handled" means
 
-Before booking, a pass checks whether the game is covered. It skips when:
+Before booking, a pass checks whether the game is covered **now**. It skips
+when:
 
-- a pass already scheduled this programme, or
+- a pass booked this programme and Plex still holds that subscription, or
+- a pass booked it since the last sync, which is the moment before Plex has
+  been read back, or
 - Plex already has a recording of it, scheduled, running or finished.
 
-That is why an entry can read `already scheduled by a pass` rather than
+That is why an entry can read `already booked by a pass` rather than
 `will schedule`.
+
+**The live state, never the log.** This used to answer yes to any programme
+that had ever been written down as scheduled. A booking can be lost after it is
+made: Plex drops a subscription on its own, you cancel one, or the guide
+re-times the broadcast and the pinned recording stops existing. In all three
+the log still said scheduled, so the pass never looked at the game again and
+nothing recorded it.
+
+A programme names one episode and so one game. The rebroadcast of a game shares
+its programme, which is why recording either of them counts as covering it.
 
 ## Following something the guide has not reached
 

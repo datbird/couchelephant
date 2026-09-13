@@ -138,14 +138,55 @@ def test_a_repeated_title_does_not_block_a_later_broadcast():
     assert passes.already_handled(g2) is None, "tomorrow's is not"
 
 
-def test_a_pass_that_already_scheduled_a_game_says_so():
+def test_a_pass_that_already_booked_a_game_says_so():
     g = "plex://episode/g"
     _airing("a1", g, "41.1", 1000, premiere=1)
     with db.tx() as c:
+        c.execute("""INSERT INTO our_grabs (airing_id, program_guid, title,
+                                            channel_vcn, begins_at, source,
+                                            subscription, created_at)
+                     VALUES ('a1',?,'Game','41.1',1000,'pass','7',0)""", (g,))
+        c.execute("""INSERT INTO plex_subscriptions (key, title, type, created_at,
+                                                     updated_at, owned_by_us)
+                     VALUES ('7','This Event','4',0,0,1)""")
+    assert "already booked by a pass" == passes.already_handled(g)
+
+
+def test_having_once_scheduled_a_game_is_not_a_reason_to_ignore_it():
+    """The log is not the live state, and reading it as one loses recordings.
+
+    A booking can be lost after it is made: Plex drops a subscription on its
+    own, the user cancels one, or the guide re-times the broadcast and the
+    pinned recording stops existing. This used to answer "already scheduled"
+    to all three, for the life of the install, so the pass never looked at the
+    game again and nothing recorded it.
+    """
+    g = "plex://episode/g"
+    _airing("a1", g, "41.1", 1000, premiere=1)
+    with db.tx() as c:
+        c.execute("""INSERT INTO sync_log (started_at, ended_at, ok)
+                     VALUES (500, 500, 1)""")
         c.execute("""INSERT INTO pass_actions (pass_id, program_guid, action,
                                                dry_run, created_at)
-                     VALUES (1, ?, 'scheduled', 0, 0)""", (g,))
-    assert "already scheduled by a pass" == passes.already_handled(g)
+                     VALUES (1, ?, 'scheduled', 0, 100)""", (g,))
+    assert passes.already_handled(g) is None
+
+
+def test_a_booking_made_since_the_last_sync_still_counts():
+    """The other half of it. Plex is only read back by a sync, so between
+    booking a game and the next sync nothing else knows the recording exists.
+    Without this, two runs of a pass in a row would book it twice.
+    """
+    g = "plex://episode/g"
+    _airing("a1", g, "41.1", 1000, premiere=1)
+    with db.tx() as c:
+        c.execute("""INSERT INTO sync_log (started_at, ended_at, ok)
+                     VALUES (500, 500, 1)""")
+        c.execute("""INSERT INTO our_grabs (airing_id, program_guid, title,
+                                            channel_vcn, begins_at, source,
+                                            subscription, created_at)
+                     VALUES ('a1',?,'Game','41.1',1000,'pass','7',900)""", (g,))
+    assert "already booked by a pass" == passes.already_handled(g)
 
 
 # ---- booking ----

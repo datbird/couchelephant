@@ -81,9 +81,12 @@ def _why_map():
 # `last` is the newest action for the broadcast and it has to be the failure, or
 # a booking that succeeded on the retry would keep showing as broken. `fails`
 # counts every attempt, which is what says whether this is a blip or a wall.
-# A row is dropped once Plex actually holds a grab for that channel and time,
-# whoever made it, and once the broadcast is in the past: neither is something
-# the user can still act on.
+# A row is dropped once the GAME is being recorded, whoever booked it, and
+# once the broadcast is in the past: neither is something the user can still
+# act on. Three ways it can be recorded, because a channel and a start time
+# are not a durable name for a broadcast. A guide refresh moved one NFL game
+# fifteen minutes on 2026-09-13 and the red row went on saying NOT RECORDING
+# directly above the booking that was recording it, until kickoff.
 #
 # GROUPED BY CHANNEL AND START, NOT BY AIRING. An airing id is not stable: a
 # guide refresh mints new ones, so one broadcast that failed for three weeks had
@@ -118,6 +121,13 @@ _FAILED_SQL = """
     AND NOT EXISTS (SELECT 1 FROM plex_grabs g
                     WHERE g.channel_vcn = pa.channel_vcn
                       AND g.begins_at = pa.begins_at)
+    AND NOT EXISTS (SELECT 1 FROM plex_grabs g
+                      JOIN airings ga ON ga.channel_vcn = g.channel_vcn
+                                     AND ga.begins_at = g.begins_at
+                     WHERE ga.program_guid = pa.program_guid)
+    AND NOT EXISTS (SELECT 1 FROM our_grabs o
+                      JOIN plex_grabs g ON g.subscription = o.subscription
+                     WHERE o.program_guid = pa.program_guid)
 """
 
 _GRABS_SQL = """

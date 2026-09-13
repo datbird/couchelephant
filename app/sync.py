@@ -88,9 +88,11 @@ def _upsert_channel(c, med, now):
     )
 
 
-def _upsert_airings(c, m, now):
+def _upsert_airings(c, m, now, seen=None):
     guid = m.get("guid")
     for med in (m.get("Media") or []):
+        if seen is not None:
+            seen.add(_airing_id(guid, med))
         _upsert_channel(c, med, now)
         c.execute(
             """INSERT INTO airings (id, program_guid, channel_vcn, channel_call_sign,
@@ -118,6 +120,13 @@ def sync_guide(plex: Plex, provider: str, shows, sports, movies=None) -> dict[st
     and it returns nothing, which is how 16 channels came to look empty."""
     now = _now()
     counts = {"programs": 0, "airings": 0}
+    # WHAT THIS PULL ACTUALLY SAW, rather than what has a recent timestamp.
+    # Pruning on `updated_at < now` reads as the same thing and is not: two
+    # syncs inside one second leave every airing the first one wrote, because
+    # its stamp is not less than the second one's. The result is a ghost
+    # airing that no longer exists in the guide, which is the precise shape of
+    # bug this module spends the rest of its length defending against.
+    seen = set()
     with db.tx() as c:
         for section, label, itype in ((shows, "shows", 4), (sports, "sports", 4),
                                       (movies, "movies", 1)):
@@ -125,11 +134,17 @@ def sync_guide(plex: Plex, provider: str, shows, sports, movies=None) -> dict[st
                 continue
             for m in plex.section_all(provider, section, type=itype):
                 _upsert_program(c, m, label, now)
-                _upsert_airings(c, m, now)
+                _upsert_airings(c, m, now, seen)
                 counts["programs"] += 1
                 counts["airings"] += len(m.get("Media") or [])
-        # Drop anything that fell out of the guide window.
-        c.execute("DELETE FROM airings WHERE updated_at < ?", (now,))
+        # Drop anything that fell out of the guide window. Held in a temporary
+        # table rather than bound as twenty thousand parameters.
+        c.execute("CREATE TEMP TABLE IF NOT EXISTS seen_airings (id TEXT PRIMARY KEY)")
+        c.execute("DELETE FROM seen_airings")
+        c.executemany("INSERT OR IGNORE INTO seen_airings (id) VALUES (?)",
+                      [(i,) for i in seen])
+        c.execute("DELETE FROM airings WHERE id NOT IN (SELECT id FROM seen_airings)")
+        c.execute("DELETE FROM seen_airings")
         c.execute("DELETE FROM programs WHERE guid NOT IN (SELECT program_guid FROM airings)")
     return counts
 
@@ -441,6 +456,158 @@ def _has_grab(key, vcn, begins_at) -> bool:
             LIMIT 1""", (key or "", key or "", vcn, begins_at)))
 
 
+def _covered_elsewhere(row):
+    """Whether another booking of ours already records this programme.
+
+    Asked of Plex's own grab list rather than of our intentions, because a
+    second booking that Plex is not acting on covers nothing.
+    """
+    return bool(db.one(
+        """SELECT 1 FROM our_grabs o
+             JOIN plex_grabs g ON g.subscription = o.subscription
+            WHERE o.program_guid = ? AND o.airing_id != ?
+              AND g.status IN ('scheduled','inprogress','complete') LIMIT 1""",
+        (row["program_guid"], row["airing_id"])))
+
+
+def _would_choose(row):
+    """The broadcast the pass that made this booking would choose today.
+
+    Its own choice, not merely the first airing left in the guide. A pass
+    limited to one network must not be re-pointed onto a channel it was told
+    to stay off, and a game with a repeat must land on the live airing again.
+    """
+    p = db.one("SELECT * FROM passes WHERE id = ?", (row["pass_id"],))
+    if not p:
+        return None
+    try:
+        mine = [a for a in passes.rule_airings(p)
+                if a["program_guid"] == row["program_guid"]]
+    except Exception:
+        # An unusable filter is the pass's problem, not grounds for touching
+        # a recording that already exists.
+        return None
+    networks, channels = passes.allowed_sources(p)
+    allowed = [a for a in mine if passes.in_sources(a, networks, channels)]
+    if not allowed:
+        return None
+    pick, _why = passes.choose_airing(allowed)
+    return pick
+
+
+def _note(row, action, reason, now, airing=None):
+    """One line of pass history, for anything that changed a booking.
+
+    Written against the broadcast the change landed on: the new one after a
+    re-point, and the booked one otherwise. `booked_vcn` and `booked_at` are
+    the fallback because the airing a cancelled booking named is, by then,
+    gone from the guide and has no time of its own to report.
+    """
+    if airing:
+        aid, vcn, begins = airing["id"], airing["channel_vcn"], airing["begins_at"]
+    else:
+        aid = row["airing_id"]
+        vcn = row["channel_vcn"] or row["booked_vcn"]
+        begins = row["begins_at"] or row["booked_at"]
+    with db.tx() as c:
+        c.execute(
+            """INSERT INTO pass_actions (pass_id, program_guid, airing_id,
+                                         program_title, channel_vcn, begins_at,
+                                         action, reason, dry_run, created_at)
+               VALUES (?,?,?,?,?,?,?,?,0,?)""",
+            (row["pass_id"], row["program_guid"], aid, row["title"],
+             vcn, begins, action, reason, now))
+
+
+def _cancel(plex, row, why, now):
+    """Drop a booking that no longer names a broadcast anyone can record.
+
+    Only ever reached with Plex answering about the subscription and holding
+    no recording against it. Not knowing is never grounds for cancelling, so
+    an unreachable server takes the `unknown` path long before this one.
+    """
+    if row["subscription"]:
+        try:
+            plex.delete_subscription(row["subscription"])
+        except PlexError:
+            pass                      # already gone is the ordinary case here
+    passes.forget(row["airing_id"])
+    _note(row, "cancelled", why, now)
+
+
+def _repoint(plex, row, airing, why, now):
+    """Move a booking onto the broadcast the guide moved it to.
+
+    Cancel first and then book, for the reason `_repair` does: creating first
+    and then failing to delete would record the game twice.
+
+    The old `our_grabs` row is dropped rather than updated, because the new
+    booking carries a new airing id. Left behind, it would be checked again on
+    every sync for ever, against an airing that is never coming back.
+    """
+    old = row["subscription"]
+    if old:
+        try:
+            plex.delete_subscription(old)
+        except PlexError:
+            pass
+    passes.forget(row["airing_id"])
+    try:
+        passes._schedule(plex, airing, None, "pass",
+                         prefs=dict(db.unjs(row["prefs"]) or {}),
+                         pass_id=row["pass_id"])
+    except Exception as e:
+        detail = f"{type(e).__name__}: {e}"
+        _note(row, "failed", detail, now, airing)
+        return False, detail
+    _note(row, "repaired", why, now, airing)
+    return True, why
+
+
+def _airing_left_the_guide(plex, row, key, now, lead, out, drifted):
+    """What to do about a booking whose broadcast is no longer in the guide.
+
+    A guide refresh renumbers airings and re-times them, so the airing a
+    booking names can simply stop existing. Doing nothing was the old answer.
+    It left a subscription pinned to a slot nothing airs in, for ever, while
+    the game itself went unrecorded, and it is what a live DVR was found
+    holding on 2026-09-13.
+
+    Four things can be true here and only one of them is leave it alone.
+    """
+    # 1. Plex is still recording something for this booking. Plex knows more
+    #    about its own schedule than we do, and a guide that has merely shrunk
+    #    must never read as permission to cancel a recording.
+    if _has_grab(key, row["booked_vcn"], row["booked_at"]):
+        out["unchecked"] += 1
+        return
+
+    # 2. Another booking of ours already covers this game. This one is a
+    #    duplicate rather than a gap, so it goes and nothing replaces it.
+    if _covered_elsewhere(row):
+        _cancel(plex, row, "a second booking for a game already recorded", now)
+        out["cancelled"] += 1
+        return
+
+    # 3. The guide still carries the game, at a new time or on a new channel.
+    airing = _would_choose(row)
+    if airing:
+        why = "the guide moved this broadcast"
+        if not verify.can_repair(begins_at=airing["begins_at"], now=now, lead=lead):
+            out["drifted"] += 1
+            drifted.append(f"{row['title'] or 'a recording'}: {why}")
+            return
+        ok, _detail = _repoint(plex, row, airing, why, now)
+        out["repaired" if ok else "failed"] += 1
+        return
+
+    # 4. The guide has dropped the programme and Plex has nothing scheduled.
+    #    Nothing will ever match the pin, so the subscription is rubbish that
+    #    would otherwise outlive every season.
+    _cancel(plex, row, "the guide no longer carries this broadcast", now)
+    out["cancelled"] += 1
+
+
 def _repair(plex, row, diffs, now):
     """Cancel this booking and make it again from what the pass says now.
 
@@ -493,7 +660,8 @@ def check_bookings(plex, now: int | None = None) -> dict:
     """
     now = now or _now()
     lead = verify.repair_lead(int(db.get_setting("sync_minutes") or 60))
-    out = {"checked": 0, "repaired": 0, "drifted": 0, "unchecked": 0, "failed": 0}
+    out = {"checked": 0, "repaired": 0, "drifted": 0, "unchecked": 0,
+           "failed": 0, "cancelled": 0}
     drifted, failed = [], []
 
     for row in db.query(_BOOKING_SQL, (now,)):
@@ -522,9 +690,7 @@ def check_bookings(plex, now: int | None = None) -> dict:
         if state == "gone":
             diffs = verify.no_recording("subscription")
         elif not row["begins_at"]:
-            # The guide no longer carries this airing, so there is nothing to
-            # compare the pin against and nothing to re-book from.
-            out["unchecked"] += 1
+            _airing_left_the_guide(plex, row, key, now, lead, out, drifted)
             continue
         else:
             have = {s.get("id"): s.get("value") for s in (body.get("Setting") or [])}
@@ -553,6 +719,18 @@ def check_bookings(plex, now: int | None = None) -> dict:
             out["failed"] += 1
             failed.append(f"{row['title'] or 'a recording'}: {detail}")
 
+    if out["repaired"] or out["cancelled"]:
+        # Our copy of Plex's schedule was read before these changes were made,
+        # so it is now a version behind. Left stale, the very next check asks
+        # "has Plex scheduled anything for this booking" of a mirror that
+        # cannot know yet, and is told no, and repairs a recording that was
+        # already correct.
+        try:
+            sync_recordings(plex)
+        except Exception:
+            # A mirror that could not be refreshed is stale, which is what it
+            # was a moment ago. Never a reason to fail the sync.
+            pass
     health.record(_booking_notices(drifted, failed), now, owns=health.BOOKING_CODES)
     return out
 
@@ -866,6 +1044,8 @@ def _sync_everything(plex):
               + (f"{promoted} now in the guide, " if promoted else "")
               + (f"{idle} team pass(es) matching nothing, " if idle else "")
               + (f"{book['repaired']} recording(s) repaired, " if book["repaired"] else "")
+              + (f"{book['cancelled']} stale recording(s) cancelled, "
+                 if book["cancelled"] else "")
               + (f"{book['drifted']} recording(s) adrift, " if book["drifted"] else "")
               + f"{nch} channels, logos {cov['with_logo']}/{cov['channels']}"
               + (f" (+{got} fetched)" if got else "")

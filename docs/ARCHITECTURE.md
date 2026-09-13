@@ -192,8 +192,8 @@ is wrong must not start a sync.
 ## Bookings drift
 
 A pass books a game once and then stops looking at it. `passes.already_handled`
-asks "did we book this game" and never "is that booking still right", which is
-correct for booking and wrong for everything after it.
+asks "is this game covered right now" and never "is that booking still right",
+which is correct for booking and wrong for everything after it.
 
 That cost a real recording here. A team pass booked a game, the pass's settings
 were changed two hours later, and the booking kept the settings it was made
@@ -233,6 +233,33 @@ The same rule covers Plex being unreachable. `Plex.subscription_state` answers
 `gone` only for a definite 404; a timeout or a 500 is `unknown`, and nothing is
 touched. Reading a network blip as "the recording is gone" would cancel and
 re-book every booking on the server at once.
+
+### When the guide moves the broadcast
+
+A guide refresh re-times a game and renumbers its airings, so the airing a
+booking names can simply stop existing. Doing nothing was the old answer, and
+it left a subscription pinned to a slot nothing airs in, for ever, while the
+game itself went unrecorded. A live DVR was found holding exactly that on
+2026-09-13, after one NFL game shifted from 7:00 PM to 7:15 PM.
+
+Four things can be true and only one of them is leave it alone:
+
+1. **Plex still has a recording against the booking.** Plex knows more about
+   its own schedule than we do, and a guide that has merely shrunk must never
+   read as permission to cancel. Nothing is touched.
+2. **Another booking of ours already covers the game.** This one is a duplicate
+   rather than a gap, so it is cancelled and nothing replaces it.
+3. **The guide still carries the game, at a new time or on a new channel.** The
+   booking is moved onto the broadcast the pass would choose today, by the
+   pass's own rules, so a pass limited to one network is not re-pointed onto a
+   channel it was told to stay off. The old `our_grabs` row goes with it,
+   because the new booking carries a new airing id and a row naming the old one
+   would be checked for ever against an airing that is never coming back.
+4. **The guide has dropped the programme and Plex has nothing scheduled.** The
+   subscription can never match anything again, so it is cancelled.
+
+Every one of those is written into the pass history, and a re-point obeys the
+same timing guard as any other repair.
 
 ### When it will not repair
 
