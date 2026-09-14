@@ -30,6 +30,26 @@ class PlexError(RuntimeError):
         self.status = status
 
 
+def is_starting(exc: BaseException) -> bool:
+    """Is Plex coming up, rather than broken?
+
+    A restart passes through two shapes in order, and neither is a fault. For
+    the first seconds nothing is listening, which is a transport error. Then
+    the server listens but holds every request at 503 while it runs its startup
+    maintenance tasks, which it says in the body. Measured on 2026-09-14: it
+    was still answering 503 ninety seconds after the host rebooted.
+
+    The word is the evidence, not the status. A 503 from a proxy in front of
+    Plex, or from a server that is genuinely overloaded, is a fault and must
+    still be reported.
+    """
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, PlexError) and exc.status == 503:
+        return "maintenance" in str(exc).lower()
+    return False
+
+
 class Plex:
     def __init__(self, base_url: str, token: str):
         if not base_url:

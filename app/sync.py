@@ -4,9 +4,20 @@ import time
 import traceback
 
 from . import db, expectations, health, notify, passes, teamcat, verify
-from .plex import Plex, PlexError, discover
+from .plex import Plex, PlexError, discover, is_starting
 
 LOGO_DIR = os.environ.get("COUCHELEPHANT_LOGOS", "/data/logos")
+
+# How long a sync waits for a Plex that is coming up, and how often it looks.
+#
+# A restart is ordinary. The watchdog applies a Plex update whenever nothing is
+# streaming, and the host reboots for a kernel. Both leave Plex answering 503
+# for over a minute, and a sync landing in that window used to send two alerts
+# about a server that was never broken. Five minutes covers a cold boot with
+# room to spare, and it is the most an alert for a genuinely dead server can be
+# delayed by, which is the price being paid.
+STARTUP_GRACE = 300
+STARTUP_POLL = 15
 
 
 def _now():
@@ -1095,20 +1106,35 @@ def check_plex_health(plex: Plex) -> int:
     return len(raised)
 
 
-def full_sync() -> tuple[int, str]:
-    """One pass over everything. Returns a short human-readable summary."""
-    started = _now()
-    detail = ""
-    ok = 0
+def _attempt_sync() -> tuple[int, str, bool]:
+    """One try at a sync. Also says whether the failure was Plex starting."""
     try:
         with Plex(db.get_setting("plex_url"), db.get_setting("plex_token")) as plex:
-            ok, detail = _sync_everything(plex)
+            return (*_sync_everything(plex), False)
     except Exception as e:
         # Keep the frame that actually failed. A bare type+message sent me
         # chasing the wrong module once already.
         tb = traceback.extract_tb(e.__traceback__)
         where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(tb[-4:]))
-        detail = f"{type(e).__name__}: {e} [{where}]"
+        return 0, f"{type(e).__name__}: {e} [{where}]", is_starting(e)
+
+
+def full_sync() -> tuple[int, str]:
+    """One pass over everything. Returns a short human-readable summary."""
+    started = _now()
+    deadline = started + STARTUP_GRACE
+    waited = False
+    while True:
+        ok, detail, starting = _attempt_sync()
+        if ok or not starting or _now() >= deadline:
+            break
+        waited = True
+        time.sleep(STARTUP_POLL)
+    if not ok and waited:
+        # The alert has to say what was waited for, or it reads as a server
+        # that answered nothing when it was answering all along.
+        detail = (f"Plex was still starting {STARTUP_GRACE // 60} minutes after "
+                  f"the first try. {detail}")
     if not ok:
         # A sync that never reached Plex has no snapshot to check, so the
         # failure itself is the notice. Raised here rather than in

@@ -26,6 +26,16 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PROVIDER = "tv.plex.providers.epg.cloud:5"
 
+# Verbatim from a live server on 2026-09-14, ninety seconds after the box it
+# runs on had rebooted. A server that is coming up answers EVERY request this
+# way, and the wording is the only thing that tells it apart from a server that
+# is broken, so the fake reproduces it to the character.
+MAINTENANCE = {
+    "code": 503,
+    "title": "Maintenance",
+    "status": "Plex Media Server is currently running startup maintenance tasks.",
+}
+
 # One live game and its repeat, on two channels, plus an ordinary episode and
 # a DRM-locked airing. Enough to exercise every choice the app makes.
 GAME_GUID = "plex://episode/game1"
@@ -251,6 +261,10 @@ class State:
         self.epg_task_enabled = True
         self.epg_task_interval = 1
         self.serve_butler = True        # a server too old to have /butler
+        # How many more requests answer 503 Maintenance, the way a server that
+        # has just started does. Set by `maintenance()`.
+        self.maintenance_calls = 0
+        self.maintenance_served = 0
         self.reset()
 
     def reset(self):
@@ -266,6 +280,8 @@ class State:
         self.epg_task_enabled = True
         self.epg_task_interval = 1
         self.serve_butler = True
+        self.maintenance_calls = 0
+        self.maintenance_served = 0
         # What the guide has since done to its own listings. A refresh re-times
         # a broadcast and renumbers it, and it drops programmes off the end of
         # the window. Both are ordinary, both move the identity the app books
@@ -279,6 +295,11 @@ class State:
 
 
 STATE = State()
+
+
+def maintenance(calls=1):
+    """The next `calls` requests answer as a server that is still starting."""
+    STATE.maintenance_calls = int(calls)
 
 
 def move_broadcast(guid, was, now_at):
@@ -383,8 +404,23 @@ class Handler(BaseHTTPRequestHandler):
     def _container(self, **kw):
         self._send({"MediaContainer": dict(kw)})
 
+    def _still_starting(self):
+        """Answer as a server in startup maintenance, if a test asked for one.
+
+        Every verb, because the real server is not selectively available: it
+        holds the whole API at 503 until its startup tasks finish.
+        """
+        if STATE.maintenance_calls <= 0:
+            return False
+        STATE.maintenance_calls -= 1
+        STATE.maintenance_served += 1
+        self._send(MAINTENANCE, 503)
+        return True
+
     def do_GET(self):
         STATE.seen_urls.append(self.path)
+        if self._still_starting():
+            return
         u = urllib.parse.urlsplit(self.path)
         q = urllib.parse.parse_qs(u.query)
         p = u.path
@@ -539,6 +575,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         STATE.seen_urls.append(self.path)
+        if self._still_starting():
+            return
         u = urllib.parse.urlsplit(self.path)
         if u.path != "/media/subscriptions":
             return self._send({"error": "not found"}, 404)

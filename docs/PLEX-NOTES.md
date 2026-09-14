@@ -104,3 +104,22 @@ no network at all.
 ATSC 3.0 channels can be flagged DRM. Those airings cannot be recorded by
 anyone, so they are excluded from every choice rather than attempted and
 failed.
+
+## A server that has just started answers 503
+
+For well over a minute after it starts, Plex answers every request with
+
+> `{"code":503,"title":"Maintenance","status":"Plex Media Server is currently
+> running startup maintenance tasks."}`
+
+It is listening the whole time: this is the server saying "not yet" rather than
+a server that is down. Measured on 2026-09-14, ninety seconds after a reboot of
+the host, on 1.43.4.
+
+So a restart shows two faces in order. First nothing is listening, which is a
+connection error. Then the 503 above. `plex.is_starting` names both, and
+`sync.full_sync` waits rather than reporting a failure, because a Plex update
+and a host reboot are ordinary events and neither is worth an alert.
+
+The title is the evidence, not the status. A 503 from a reverse proxy in front
+of Plex is a real fault and still has to be reported.

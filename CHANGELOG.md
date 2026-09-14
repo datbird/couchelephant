@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.5.1 - 2026-09-14
+
+### Fixed
+
+- **A Plex restart no longer reports itself as an outage.** Plex holds every
+  request at 503 "running startup maintenance tasks" for well over a minute
+  after it starts, and it is not listening at all for the seconds before that.
+  A sync landing in that window sent two alerts, "Plex could not be reached"
+  and "A sync failed", about a server that was working normally an hour later
+  and had never been broken.
+
+  Seen on 2026-09-14: the host rebooted, CouchElephant and Plex came up
+  together, and CouchElephant asked for `/livetv/dvrs` three seconds later.
+
+  A sync now waits up to five minutes for a server that says it is starting,
+  and reports nothing if it comes up. A restart is ordinary here: it happens on
+  every Plex update and every reboot of the host.
+
+  The wait ends. A server still starting after five minutes raises the same
+  fault it always did, and the alert says what it waited for. Anything that is
+  not Plex saying it is starting, including a 503 from a proxy in front of it,
+  is still reported at once.
+
 ## 1.5.0 - 2026-09-13
 
 ### Added
