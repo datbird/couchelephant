@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.5.2 - 2026-09-16
+
+### Fixed
+
+- **A game on its way into the guide no longer warns that it is missing.**
+  Plex publishes a game before it tags it with its teams, and a team
+  expectation matches on teams, so the first look after the guide extends was
+  always too early. Every game warned once on its way in.
+
+  Seen on 2026-09-15: "Something you are waiting for did not reach the guide"
+  opened at 07:17 over a Chiefs game that was in the guide the whole time, on
+  KCTV 5.1, correctly titled. Plex attached the teams at 04:19 the next
+  morning and the notice cleared itself, 21 hours later.
+
+  A miss now waits for the guide to have had a fair chance. Three things must
+  be true before it says a word: the guide reaches past the date, a full day
+  has passed since it FIRST reached past it, and Plex has refreshed its guide
+  again since then. A match clears that clock, so a game that slips a week
+  starts over rather than inheriting an old one.
+
+- **A booked window with no matchup yet is no longer called a missing game.**
+  A bare "NFL Football", or "Teams TBA", is the broadcaster saying a game goes
+  out in this window without saying who is playing. Plex tags it when the
+  matchup is announced, which can be a week later.
+
+  Telling that apart from a studio show is the whole difficulty, because most
+  of a sports section is untagged and always will be: a shop, a phone-in, a
+  pre-match, a countdown. A slot now counts as a pending matchup when its title
+  says TBA as a word, or when its league has other programmes that do carry
+  teams.
+
+  The second test calibrates itself off the guide in front of it. A league that
+  ever tags anything broadcasts games. A shopping channel never does. There is
+  no hardcoded list of leagues, so a sport nobody thought of behaves the same.
+
+  Measured on a 63 channel guide: this keeps the 5 genuine placeholders and
+  lets the warning through for the other 108 untagged rows.
+
 ## 1.5.1 - 2026-09-14
 
 ### Fixed
