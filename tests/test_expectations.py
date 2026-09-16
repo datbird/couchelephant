@@ -205,10 +205,157 @@ def test_the_series_title_matches_when_the_episode_title_differs():
     assert expectations.promote(now=WHEN) == 1
 
 
+DAY = 86400
+
+
+def _sports_expect(pass_id, source_id, team, expected_at):
+    _ensure_pass(pass_id)
+    with db.tx() as c:
+        c.execute("INSERT INTO expectations (pass_id, source, source_id, title, "
+                  "expected_at, precision, updated_at) VALUES (?,?,?,?,?,'time',1)",
+                  (pass_id, "thesportsdb", source_id, team, expected_at))
+
+
+def _untagged_sports_airing(guid, title, airing_id, begins_at):
+    """A slot the broadcaster has announced without saying who is playing.
+
+    This is what "Teams TBA" and a bare "NFL Football" look like in the guide.
+    """
+    with db.tx() as c:
+        c.execute("INSERT OR REPLACE INTO programs (guid, title, "
+                  "grandparent_title, section, teams) VALUES (?,?,?,'sports',NULL)",
+                  (guid, title, "NFL Football"))
+        c.execute("INSERT OR REPLACE INTO airings (id, program_guid, begins_at, "
+                  "channel_vcn) VALUES (?,?,?,'5.1')",
+                  (airing_id, guid, begins_at))
+
+
+def test_the_first_time_the_guide_covers_a_date_says_nothing():
+    """Plex lists a game before it tags it with its teams, and matching is by
+    team. Warning on the first sweep would fire on every game ever."""
+    _expect(80, "g1", "Bleeding Edge", WHEN)
+    assert expectations.sweep_misses(guide_ends_at=WHEN + DAY,
+                                     epg_refreshed_at=WHEN, now=WHEN) == []
+    row = db.one("SELECT covered_at, missed_at FROM expectations "
+                 "WHERE source_id = 'g1'")
+    assert row["covered_at"] == WHEN, "but the clock has to start"
+    assert row["missed_at"] is None
+
+
+def test_still_silent_inside_the_grace_period():
+    _expect(81, "g2", "Not Yet", WHEN)
+    expectations.sweep_misses(guide_ends_at=WHEN + DAY, epg_refreshed_at=WHEN,
+                              now=WHEN)
+    assert expectations.sweep_misses(guide_ends_at=WHEN + DAY,
+                                     epg_refreshed_at=WHEN + 100,
+                                     now=WHEN + DAY - 60) == []
+
+
+def test_silent_past_the_grace_when_plex_has_not_refreshed_again():
+    """Plex has not had another go, so there is nothing new to conclude."""
+    _expect(82, "g3", "No New Guide", WHEN)
+    expectations.sweep_misses(guide_ends_at=WHEN + DAY, epg_refreshed_at=WHEN,
+                              now=WHEN)
+    assert expectations.sweep_misses(guide_ends_at=WHEN + DAY,
+                                     epg_refreshed_at=WHEN,
+                                     now=WHEN + 3 * DAY) == []
+
+
+def test_reported_once_the_grace_passed_and_plex_refreshed_again():
+    _expect(83, "g4", "Really Missing", WHEN)
+    expectations.sweep_misses(guide_ends_at=WHEN + DAY, epg_refreshed_at=WHEN,
+                              now=WHEN)
+    raised = expectations.sweep_misses(guide_ends_at=WHEN + DAY,
+                                       epg_refreshed_at=WHEN + 2 * DAY,
+                                       now=WHEN + 2 * DAY)
+    assert len(raised) == 1
+    assert "Really Missing" in raised[0]["detail"]
+    assert db.one("SELECT missed_at FROM expectations "
+                  "WHERE source_id = 'g4'")["missed_at"]
+
+
+def test_an_untagged_slot_in_the_same_window_stays_quiet():
+    """A bare "NFL Football" or "Teams TBA" means the broadcast is booked and
+    the matchup is not assigned yet. That is not the same as nothing being
+    there, and it can stay that way for a week."""
+    _sports_expect(84, "g5", "Kansas City Chiefs", WHEN)
+    _untagged_sports_airing("plex://x/tba", "Teams TBA", "a-tba", WHEN)
+    expectations.sweep_misses(guide_ends_at=WHEN + DAY, epg_refreshed_at=WHEN,
+                              now=WHEN)
+    assert expectations.sweep_misses(guide_ends_at=WHEN + DAY,
+                                     epg_refreshed_at=WHEN + 9 * DAY,
+                                     now=WHEN + 9 * DAY) == []
+    assert db.one("SELECT missed_at FROM expectations "
+                  "WHERE source_id = 'g5'")["missed_at"] is None
+
+
+def test_a_studio_show_in_the_slot_does_not_suppress_the_warning():
+    """Most of a sports section is untagged and always will be: a shop, a
+    phone-in, a pre-match. Suppressing on "untagged" alone would silence this
+    notice whenever any of those shared the window, which is almost always."""
+    _sports_expect(86, "g7", "Kansas City Chiefs", WHEN)
+    with db.tx() as c:
+        c.execute("INSERT OR REPLACE INTO programs (guid, title, "
+                  "grandparent_title, section, teams) VALUES "
+                  "('plex://x/shop', 'Football Team Shop', "
+                  "'Football Team Shop', 'sports', NULL)")
+        c.execute("INSERT OR REPLACE INTO airings (id, program_guid, begins_at, "
+                  "channel_vcn) VALUES ('a-shop', 'plex://x/shop', ?, '5.1')",
+                  (WHEN,))
+    expectations.sweep_misses(guide_ends_at=WHEN + DAY, epg_refreshed_at=WHEN,
+                              now=WHEN)
+    raised = expectations.sweep_misses(guide_ends_at=WHEN + DAY,
+                                       epg_refreshed_at=WHEN + 2 * DAY,
+                                       now=WHEN + 2 * DAY)
+    assert len(raised) == 1, (
+        "'Football Team Shop' contains the letters t-b-a inside 'Football'. "
+        "A substring test for TBA matched every shopping listing and silenced "
+        "the notice for good.")
+
+
+def test_a_league_that_tags_other_games_marks_its_slot_as_pending():
+    """The self-calibrating half. A league that ever tags anything broadcasts
+    games, so its untagged row is a matchup not yet assigned. No hardcoded
+    league list, so a sport nobody thought of behaves the same."""
+    _sports_expect(87, "g8", "Kansas City Chiefs", WHEN)
+    with db.tx() as c:
+        # A sibling in the same league that DOES carry teams.
+        c.execute("INSERT OR REPLACE INTO programs (guid, title, "
+                  "grandparent_title, section, teams) VALUES "
+                  "('plex://x/kin', 'Team A at Team B', 'Curling Night', "
+                  "'sports', '[{\"id\":1,\"name\":\"Team A\"}]')")
+        c.execute("INSERT OR REPLACE INTO programs (guid, title, "
+                  "grandparent_title, section, teams) VALUES "
+                  "('plex://x/pend', 'Curling Night', 'Curling Night', "
+                  "'sports', NULL)")
+        c.execute("INSERT OR REPLACE INTO airings (id, program_guid, begins_at, "
+                  "channel_vcn) VALUES ('a-pend', 'plex://x/pend', ?, '5.1')",
+                  (WHEN,))
+    expectations.sweep_misses(guide_ends_at=WHEN + DAY, epg_refreshed_at=WHEN,
+                              now=WHEN)
+    assert expectations.sweep_misses(guide_ends_at=WHEN + DAY,
+                                     epg_refreshed_at=WHEN + 2 * DAY,
+                                     now=WHEN + 2 * DAY) == []
+
+
+def test_a_match_clears_the_grace_clock_so_a_slip_starts_over():
+    """A game that slips a week must not inherit an old clock and warn at once."""
+    _guide_row("plex://x/g6", "Slipped", "a-g6", WHEN + 3600)
+    _expect(85, "g6", "Slipped", WHEN)
+    expectations.sweep_misses(guide_ends_at=WHEN + DAY, epg_refreshed_at=WHEN,
+                              now=WHEN)
+    expectations.promote(now=WHEN)
+    assert db.one("SELECT covered_at FROM expectations "
+                  "WHERE source_id = 'g6'")["covered_at"] is None
+
+
 def test_a_show_the_guide_reached_and_never_carried_is_reported():
     _expect(70, "m1", "Never Aired", WHEN)
+    expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400,
+                              epg_refreshed_at=WHEN, now=WHEN + 5 * 86400)
     raised = expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400,
-                                       now=WHEN + 5 * 86400)
+                                       epg_refreshed_at=WHEN + 7 * 86400,
+                                       now=WHEN + 7 * 86400)
     assert len(raised) == 1
     assert "Never Aired" in raised[0]["detail"]
     assert raised[0]["severity"] == "warn"
@@ -250,8 +397,12 @@ def test_a_promoted_expectation_is_never_called_missing():
 def test_many_misses_are_one_notice_and_not_a_pile():
     for n in range(5):
         _expect(74, f"many-{n}", f"Show {n}", WHEN)
+    # Two sweeps, because the first only starts the grace clock.
+    expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400,
+                              epg_refreshed_at=WHEN, now=WHEN + 5 * 86400)
     raised = expectations.sweep_misses(guide_ends_at=WHEN + 5 * 86400,
-                                       now=WHEN + 5 * 86400)
+                                       epg_refreshed_at=WHEN + 7 * 86400,
+                                       now=WHEN + 7 * 86400)
     assert len(raised) == 1
     assert "and others" in raised[0]["detail"]
 

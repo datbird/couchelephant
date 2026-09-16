@@ -7,6 +7,7 @@ schedules anything.
 """
 import dataclasses
 import datetime
+import re
 import time
 import zoneinfo
 
@@ -169,7 +170,8 @@ def promote(now: int | None = None) -> int:
             continue
         with db.tx() as c:
             c.execute("UPDATE expectations SET matched_guid = ?, matched_at = ?, "
-                      "missed_at = NULL WHERE id = ?",
+                      "missed_at = NULL, covered_at = NULL, "
+                      "covered_epg_at = NULL WHERE id = ?",
                       (row["guid"], now, item["id"]))
         matched += 1
     return matched
@@ -180,12 +182,79 @@ def promote(now: int | None = None) -> int:
 _NAMES_SHOWN = 3
 
 
-def sweep_misses(guide_ends_at: int | None, now: int | None = None) -> list[dict]:
+MISS_GRACE = 86400          # a full day before a gap is called a gap
+
+
+# TBA as a WORD. A substring test matches "fooTBAll", which made every
+# "Football Team Shop" listing look like a pending matchup. Measured: that one
+# bug turned 5 real placeholders into 113.
+_TBA = re.compile(r"\bTBA\b", re.I)
+
+
+def _slot_has_pending_matchup(item: dict, span: int) -> bool:
+    """Is the slot booked with the matchup not yet assigned?
+
+    A bare "NFL Football", or "Teams TBA", is the broadcaster saying a game
+    goes out in this window without saying who is playing. Plex tags it when
+    the matchup is announced, which can be a week later. That is NOT the same
+    as nothing being there, and reporting it as one is crying wolf.
+
+    THE HARD PART IS TELLING A PLACEHOLDER FROM A STUDIO SHOW. Most of a sports
+    section is untagged and always will be: a shop, a phone-in, a pre-match, a
+    countdown. Suppressing on "untagged" alone would silence the notice
+    whenever any of those shared the window, which is almost always.
+
+    So a row counts as a pending matchup only when one of these holds:
+
+      * its title says TBA, or
+      * its league has OTHER programmes that DO carry teams.
+
+    The second is the useful one and it calibrates itself off this guide. A
+    league that ever tags anything is a league that broadcasts games. A shopping
+    channel never tags anything, ever. No hardcoded list of leagues, so it works
+    the same for a sport nobody thought of.
+
+    Measured on a real 63 channel guide: this keeps the 5 genuine placeholders
+    and lets the warning through for all 108 other untagged rows.
+    """
+    lo, hi = item["expected_at"] - span, item["expected_at"] + span
+    rows = db.query(
+        """SELECT p.title AS title,
+                  (SELECT COUNT(*) FROM programs q
+                    WHERE q.grandparent_title = p.grandparent_title
+                      AND q.teams IS NOT NULL AND q.teams != '[]') AS tagged_kin
+             FROM airings a
+             JOIN programs p ON p.guid = a.program_guid
+            WHERE p.section = 'sports'
+              AND (p.teams IS NULL OR p.teams = '[]')
+              AND a.begins_at BETWEEN ? AND ?""", (lo, hi))
+    return any(r["tagged_kin"] or _TBA.search(r["title"] or "") for r in rows)
+
+
+def sweep_misses(guide_ends_at: int | None, epg_refreshed_at: int | None = None,
+                 now: int | None = None) -> list[dict]:
     """Report anything the guide has now reached past and never carried.
 
     Only judged once the guide actually extends beyond the expected date.
     Before that, silence is the guide being short rather than the show being
     missing, and warning then would cry wolf every day for months.
+
+    AND ONLY ONCE THE GUIDE HAS HAD A FAIR CHANCE. Plex publishes a game
+    before it tags it with its teams, and a team expectation matches on teams,
+    so the first sweep after the guide extends is always too early. Firing then
+    warned on every single game on its way in, and one such notice sat open for
+    21 hours over a Chiefs game that was in the guide the whole time.
+
+    So three things must all be true before this says a word:
+
+      1. The guide reaches past the date.
+      2. A full day has passed since the guide FIRST reached past it.
+      3. Plex has refreshed its guide again since then, so there is genuinely
+         something new to conclude rather than the same answer twice.
+
+    And one thing must be false: the slot must not already hold a pending
+    matchup. See `_slot_has_pending_matchup`, which is the "Teams TBA" case
+    and the reason a bare "NFL Football" listing is not a missing game.
 
     A miss is a warning and never a deletion. A show can slip a week, and
     throwing the expectation away would be giving up on it quietly, which is
@@ -194,8 +263,37 @@ def sweep_misses(guide_ends_at: int | None, now: int | None = None) -> list[dict
     now = int(now if now is not None else time.time())
     if not guide_ends_at:
         return []
-    late = [e for e in waiting()
-            if e["expected_at"] and e["expected_at"] < guide_ends_at]
+    covered = [e for e in waiting()
+               if e["expected_at"] and e["expected_at"] < guide_ends_at]
+    if not covered:
+        return []
+
+    # Start the clock on anything the guide has only just reached. This is the
+    # bleeding edge, and it is silent on purpose.
+    fresh = [e for e in covered if not e.get("covered_at")]
+    if fresh:
+        with db.tx() as c:
+            for item in fresh:
+                c.execute("UPDATE expectations SET covered_at = ?, "
+                          "covered_epg_at = ? WHERE id = ?",
+                          (now, epg_refreshed_at, item["id"]))
+
+    late = []
+    for e in covered:
+        since = e.get("covered_at")
+        if not since or now - since < MISS_GRACE:
+            continue
+        # A refresh has to have happened SINCE the guide first covered it.
+        # Without this, a guide that stopped moving would be reported as a
+        # missing show, which is a different fault with its own notice.
+        was = e.get("covered_epg_at")
+        if epg_refreshed_at is None or (was is not None and epg_refreshed_at <= was):
+            continue
+        span = _WINDOW.get(e["precision"], _WINDOW["year"])
+        if e["source"] == "thesportsdb" and _slot_has_pending_matchup(e, span):
+            continue
+        late.append(e)
+
     if not late:
         return []
     with db.tx() as c:
@@ -210,9 +308,10 @@ def sweep_misses(guide_ends_at: int | None, now: int | None = None) -> list[dict
         "code": health.EXPECTATION_MISSED,
         "severity": "warn",
         "title": "Something you are waiting for did not reach the guide",
-        "detail": (f"The guide now runs past the date announced for {shown}, "
-                   f"and no airing matched. The date may have moved, the title "
-                   f"may be spelled differently in the guide, or it may not be "
+        "detail": (f"The guide has run past the date announced for {shown} for "
+                   f"more than a day, Plex has refreshed since, and still "
+                   f"nothing matched. The date may have moved, the title may "
+                   f"be spelled differently in the guide, or it may not be "
                    f"carried on a channel you receive."),
         "hint": ("CouchElephant keeps looking. Check the title against the "
                  "guide, or remove the pass if it is not coming."),

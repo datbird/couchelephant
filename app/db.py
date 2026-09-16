@@ -246,6 +246,13 @@ CREATE TABLE IF NOT EXISTS expectations (
     matched_guid  TEXT,
     matched_at    INTEGER,
     missed_at     INTEGER,
+    -- When a sync FIRST saw the guide reach past this date, and what Plex's
+    -- own guide refresh stamp was at that moment. Plex lists a game before it
+    -- tags it with its teams, and a team expectation matches on teams, so the
+    -- first look is always too early. These two turn "the guide got there"
+    -- into "the guide got there, a day passed, and Plex had another go".
+    covered_at    INTEGER,
+    covered_epg_at INTEGER,
     updated_at    INTEGER,
     UNIQUE (source, source_id, pass_id)
 );
@@ -453,6 +460,11 @@ MIGRATIONS = [
     # A "we asked and Plex had none" note, so an untagged sports programme is
     # not re-fetched every hour for as long as it stays in the guide.
     ("programs", "teams_tried_at", "INTEGER"),
+    # The grace clock on a miss. Without these the notice fires the instant the
+    # guide covers a date, which is before Plex has tagged the programme, so
+    # every game warned once on its way in.
+    ("expectations", "covered_at", "INTEGER"),
+    ("expectations", "covered_epg_at", "INTEGER"),
     # What Plex's own guide looked like at the moment of this sync: when Plex
     # last refreshed it, and how far ahead it reached. Two numbers per sync is
     # all it takes to see a guide stop moving, which is otherwise invisible

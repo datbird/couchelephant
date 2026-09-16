@@ -1199,7 +1199,8 @@ def _sync_everything(plex):
     _now_at = _now()
     health.record(
         expectations.sweep_misses(
-            _int_or_none(db.get_setting("guide_ends_at")), _now_at),
+            _int_or_none(db.get_setting("guide_ends_at")),
+            _int_or_none(db.get_setting("epg_refreshed_at")), _now_at),
         _now_at, owns=health.EXPECT_CODES)
     health.record(
         health.keys_tip(
