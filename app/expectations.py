@@ -231,6 +231,67 @@ def _slot_has_pending_matchup(item: dict, span: int) -> bool:
     return any(r["tagged_kin"] or _TBA.search(r["title"] or "") for r in rows)
 
 
+# How far a generic slot may sit from the published kickoff and still be the
+# game. Much tighter than `_WINDOW`, because a generic slot has nothing else to
+# identify it: no teams, no matchup, only a start time. Measured on a live
+# guide: the NFL slots sat 0 to 5 minutes before the league's kickoff time.
+STAND_IN_SLACK = 15 * 60
+
+
+def stand_in_candidates(item: dict) -> list:
+    """Generic guide slots that could be this game, before the guide names it.
+
+    THE GAP THIS CLOSES. A team pass matches on the teams a programme carries.
+    Gracenote lists a regional game as a bare "NFL Football" until the
+    broadcaster assigns it, and on 2026-09-27 the CBS slots for the next
+    Chiefs game were still bare a week out, when earlier weeks had been named
+    eleven days out. Nothing matched, so nothing was booked, and a game that
+    stayed bare until kickoff would never have recorded at all.
+
+    The league's own schedule already says when the game kicks off. A generic
+    slot of the same league at that exact time is that game.
+
+    Only a kickoff with a TIME qualifies. A day or a month is not a slot, and
+    a generic listing inside one is any game at all. The same placeholder test
+    `_slot_has_pending_matchup` uses decides what counts as generic, so a
+    studio show or a shopping hour sharing the window is never taken for a
+    game.
+
+    Returns airing rows in the shape `passes._AIRING_SQL` gives, so a pass
+    can apply its own source limit and booking path to them unchanged.
+    """
+    if item.get("source") != "thesportsdb" or item.get("precision") != "time" \
+            or not item.get("expected_at"):
+        return []
+    lo = item["expected_at"] - STAND_IN_SLACK
+    hi = item["expected_at"] + STAND_IN_SLACK
+    rows = db.query(
+        """SELECT a.*, p.title, p.grandparent_title, p.rating_key, p.teams,
+                  p.summary, p.section, c.network AS channel_network,
+                  EXISTS (SELECT 1 FROM programs q
+                           WHERE q.grandparent_title = p.grandparent_title
+                             AND q.teams IS NOT NULL AND q.teams != '[]')
+                    AS tagged_kin
+             FROM airings a
+             JOIN programs p ON p.guid = a.program_guid
+             LEFT JOIN channels c ON c.vcn = a.channel_vcn
+            WHERE p.section = 'sports'
+              AND (p.teams IS NULL OR p.teams = '[]')
+              AND COALESCE(a.drm, 0) = 0
+              AND a.begins_at BETWEEN ? AND ?
+            ORDER BY a.begins_at""", (lo, hi))
+    rows = [r for r in rows if r["tagged_kin"] or _TBA.search(r["title"] or "")]
+    # A network the source named narrows the slots to that network. When the
+    # guide has no slot on it, the game is somewhere this guide does not show,
+    # and a slot on another network would be a different game.
+    net = (item.get("network") or "").strip().casefold()
+    if net:
+        rows = [r for r in rows if r["channel_network"] and (
+            net in r["channel_network"].casefold()
+            or r["channel_network"].casefold() in net)]
+    return rows
+
+
 def sweep_misses(guide_ends_at: int | None, epg_refreshed_at: int | None = None,
                  now: int | None = None) -> list[dict]:
     """Report anything the guide has now reached past and never carried.

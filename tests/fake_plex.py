@@ -292,6 +292,10 @@ class State:
         # Plex does this on its own, and it is the half of a refresh that is
         # invisible from the outside: the same broadcast, a different id.
         self.id_suffix = ""
+        # Sports listings a test adds on top of the fixed guide: a generic
+        # "NFL Football" slot, and the named game that later replaces it.
+        self.extra_sports = []
+        self.extra_tags = {}
 
 
 STATE = State()
@@ -322,6 +326,49 @@ def renumber(suffix="r2"):
     STATE.id_suffix = suffix
 
 
+def generic_slot(guid, vcn, begins):
+    """The guide lists a game in this slot without saying who is playing.
+
+    Exactly as Gracenote sends a regional NFL window before the broadcaster
+    assigns it: titled with the league, no Team array, a stock summary.
+    Measured on a live guide on 2026-09-27, a week before kickoff.
+    """
+    STATE.extra_sports.append({
+        "guid": guid, "ratingKey": urllib.parse.quote(guid, safe=""),
+        "title": "NFL Football", "grandparentTitle": "NFL Football",
+        "summary": "Football action from around the National Football League.",
+        "type": "episode", "year": 2026, "duration": 10_800_000,
+        "Genre": [{"tag": "Football"}],
+        "Media": [_media(vcn, begins, premiere=True)],
+    })
+
+
+def name_the_game(generic_guid, guid, title, teams, vcn=None, begins=None):
+    """The guide names the game: the generic listing goes, a named one comes.
+
+    A different guid, not the old one edited. On the live guide the generic
+    slots carry fresh guids minted with the week's paid programming, and the
+    named games carry guids minted months earlier with the season.
+    """
+    old = next(m for m in STATE.extra_sports if m["guid"] == generic_guid)
+    was = old["Media"][0]
+    STATE.extra_sports.remove(old)
+    STATE.extra_sports.append({
+        "guid": guid, "ratingKey": urllib.parse.quote(guid, safe=""),
+        "title": title, "grandparentTitle": "NFL Football",
+        "summary": f"{title}.", "type": "episode", "year": 2026,
+        "duration": 10_800_000, "Genre": [{"tag": "Football"}],
+        "Media": [_media(vcn or was["channelVcn"],
+                         begins if begins is not None else was["beginsAt"],
+                         premiere=True)],
+    })
+    STATE.extra_tags[guid] = [{"id": 900 + i, "tag": t} for i, t in enumerate(teams)]
+
+
+def _tags(guid):
+    return STATE.extra_tags.get(guid) or TEAM_TAGS.get(guid)
+
+
 def _as_the_guide_has_it(item):
     """One item as the guide carries it now, with any re-timing applied.
 
@@ -344,6 +391,8 @@ def _as_the_guide_has_it(item):
 
 def _items(src):
     """Everything in one section, as the guide stands now."""
+    if src is SPORTS_ITEMS:
+        src = list(src) + STATE.extra_sports
     return [_as_the_guide_has_it(m) for m in src if m["guid"] not in STATE.gone]
 
 
@@ -486,7 +535,7 @@ class Handler(BaseHTTPRequestHandler):
                         item = dict(m)
             if not item:
                 return self._send({"error": "no such item"}, 404)
-            tags = TEAM_TAGS.get(item["guid"])
+            tags = _tags(item["guid"])
             if tags:
                 item["Team"] = tags
             return self._container(Metadata=[item])
@@ -504,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
             if not guid.startswith("plex://"):
                 return self._send({"error": "bad guid"}, 400)
             g = urllib.parse.quote(guid, safe='')
-            tags = TEAM_TAGS.get(guid)
+            tags = _tags(guid)
             if tags:
                 # A game, in the real server's order: the single event, then
                 # the whole league, then one rule per team. The league sitting
@@ -622,7 +671,7 @@ class Handler(BaseHTTPRequestHandler):
         if q.get("hints[league]"):
             title = every((meta or {}).get("grandparentTitle"))
         elif q.get("hints[team]"):
-            names = {str(t["id"]): t["tag"] for t in TEAM_TAGS.get(guid, [])}
+            names = {str(t["id"]): t["tag"] for t in (_tags(guid) or [])}
             title = every(names.get(q["hints[team]"][0], "?"))
         elif one_shot:
             sport = meta in SPORTS_ITEMS

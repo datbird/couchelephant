@@ -167,6 +167,10 @@ They are deliberately not rows in `programs` and `airings`. Those are read by
 every query in the app, and invented rows in them would mean auditing all of
 those queries, forever, for a flag they could forget.
 
+A row that a stand-in booking holds (`our_grabs.expectation_id`) is booked,
+not waiting. The schedule shows it with the matchup from this row, and
+`/api/expectations` leaves it out.
+
 A row is tied to its pass. Delete or disable the pass and its plans stop
 showing and stop being reported missing, because they belong to something
 nobody follows any more.

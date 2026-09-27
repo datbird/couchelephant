@@ -479,7 +479,7 @@ MAX_REPAIRS = 10
 # and is what a repair re-books from.
 _BOOKING_SQL = """
     SELECT o.airing_id, o.subscription, o.title, o.program_guid, o.pass_id,
-           o.begins_at AS booked_at, o.channel_vcn AS booked_vcn,
+           o.expectation_id, o.begins_at AS booked_at, o.channel_vcn AS booked_vcn,
            COALESCE(a.id, b.id) AS live_airing_id,
            COALESCE(a.begins_at, b.begins_at) AS begins_at,
            COALESCE(a.channel_identifier, b.channel_identifier) AS channel_identifier,
@@ -613,7 +613,7 @@ def _cancel(plex, row, why, now):
     _note(row, "cancelled", why, now)
 
 
-def _rebook(plex, row, airing, why, now):
+def _rebook(plex, row, airing, why, now, expectation_id=None):
     """Cancel this booking and make it again, on the airing given.
 
     Delete then create, in that order. Creating first would leave two
@@ -643,7 +643,7 @@ def _rebook(plex, row, airing, why, now):
     try:
         passes._schedule(plex, airing, None, "pass",
                          prefs=dict(db.unjs(row["prefs"]) or {}),
-                         pass_id=row["pass_id"])
+                         pass_id=row["pass_id"], expectation_id=expectation_id)
     except Exception as e:
         detail = f"{type(e).__name__}: {e}"
         _note(row, "failed", detail, now, airing)
@@ -695,6 +695,87 @@ def _airing_left_the_guide(plex, row, key, now, lead, passes_by_id=None):
     #    would otherwise outlive every season.
     _cancel(plex, row, "the guide no longer carries this broadcast", now)
     return "cancelled", None
+
+
+def _settle_stand_in(plex, row, key, now, lead, passes_by_id=None):
+    """Move a stand-in booking onto the game, once the guide names it.
+
+    A stand-in books a bare "NFL Football" slot because the league's schedule
+    puts the game there (see `passes.choose_stand_in`). Plex titles that
+    recording with the generic name. The moment the guide names the game,
+    the booking is made again against the named listing, so Plex carries the
+    real title, the real teams and the real summary.
+
+    Returns `(outcome, note)`, or None when this booking is no different from
+    any other and the ordinary checks should run.
+
+    ONE CASE IS LEFT ALONE: the named game sits in the very slot the stand-in
+    holds, Plex is recording it, and kickoff is too close to book again
+    safely. Re-booking is delete then create, and a failure there would lose
+    a recording that is going to work. The booking is re-pointed at the named
+    listing in our own records instead, so the schedule shows the guide's
+    name, and Plex keeps the recording it has.
+
+    Anywhere else the stand-in is booked again whatever the time. If the
+    guide put the game in another slot, the stand-in is recording some other
+    game, and there is nothing to protect.
+    """
+    item = db.one("SELECT * FROM expectations WHERE id = ?", (row["expectation_id"],))
+    if not item:
+        return None
+    booked_vcn = row["booked_vcn"]
+    booked_at = row["booked_at"]
+
+    if item["matched_guid"]:
+        named = _would_choose(dict(row, program_guid=item["matched_guid"]), passes_by_id)
+        if not named:
+            _cancel(plex, row, "the guide named this game on a channel the pass "
+                               "does not take", now)
+            return "cancelled", None
+        if named["id"] in (row["airing_id"], row["live_airing_id"]):
+            # Named in place: the guide gave the generic listing its teams
+            # without replacing it. The booking already names the game, so
+            # it simply stops being a stand-in.
+            with db.tx() as c:
+                c.execute("UPDATE our_grabs SET expectation_id = NULL, title = ? "
+                          "WHERE airing_id = ?", (named["title"], row["airing_id"]))
+            return None
+        same_slot = (named["channel_vcn"] == booked_vcn
+                     and named["begins_at"] == booked_at)
+        recording = _has_grab(key, booked_vcn, booked_at)
+        why = f"the guide named the game: {named['title']}"
+        if same_slot and recording and not verify.can_repair(
+                begins_at=named["begins_at"], now=now, lead=lead):
+            with db.tx() as c:
+                c.execute("""UPDATE OR REPLACE our_grabs
+                                SET airing_id = ?, program_guid = ?, title = ?,
+                                    expectation_id = NULL
+                              WHERE airing_id = ?""",
+                          (named["id"], named["program_guid"], named["title"],
+                           row["airing_id"]))
+            _note(row, "repaired", why + " (kept Plex's recording, too close "
+                                         "to kickoff to book again)", now, named)
+            return "repaired", None
+        ok, detail = _rebook(plex, row, named, why, now)
+        return ("repaired", None) if ok else ("failed", f"{_label(row)}: {detail}")
+
+    if row["begins_at"]:
+        return None                       # still a stand-in, still in the guide
+
+    # The generic slot left the guide and nothing is named yet. A refresh can
+    # re-time a placeholder or mint it a new guid, and the stand-in follows.
+    if _has_grab(key, booked_vcn, booked_at):
+        return "unchecked", None
+    p = (passes_by_id or {}).get(row["pass_id"])
+    if not p:
+        return None
+    networks, channels = passes.allowed_sources(p)
+    pick, _why = passes.choose_stand_in(item, networks, channels)
+    if not pick:
+        return None                       # `_airing_left_the_guide` decides
+    ok, detail = _rebook(plex, row, pick, "the guide moved the generic slot", now,
+                         expectation_id=item["id"])
+    return ("repaired", None) if ok else ("failed", f"{_label(row)}: {detail}")
 
 
 # A difference in any of these can only be fixed by booking again. The pin is
@@ -805,6 +886,18 @@ def check_bookings(plex, now: int | None = None) -> dict:
             # Could not ask. Not knowing is never grounds for cancelling.
             out["unchecked"] += 1
             continue
+
+        # A stand-in first. The guide naming the game is a change to the
+        # booking itself, and it has to land before the checks below compare
+        # the generic booking's settings with nothing it is still about.
+        if row["expectation_id"]:
+            settled = _settle_stand_in(plex, row, key, now, lead, passes_by_id)
+            if settled:
+                outcome, note = settled
+                out[outcome] += 1
+                if note:
+                    (failed if outcome == "failed" else drifted).append(note)
+                continue
 
         # OUR GUIDE FIRST, then Plex's answer. This is a question about our own
         # data, and asking Plex first got it wrong: a booking whose

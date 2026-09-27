@@ -17,7 +17,7 @@ Selection order for a game:
 """
 import time
 
-from . import db, smartfilter, teamcat
+from . import db, expectations, smartfilter, teamcat
 from .plex import Plex, PlexError
 
 # Give a game this much slack before treating it as too late to schedule.
@@ -351,7 +351,7 @@ def offered_prefs(template: dict, prefs: dict) -> dict:
 
 
 def _schedule(plex, row, target_section, source="pass", template=None, prefs=None,
-              pass_id=None):
+              pass_id=None, expectation_id=None):
     """Create a recording for this broadcast.
 
     With no template given this is the pinned one-shot the passes rely on.
@@ -398,37 +398,92 @@ def _schedule(plex, row, target_section, source="pass", template=None, prefs=Non
             key = plex.find_subscription(row["program_guid"], row["begins_at"], tries=3)
         except Exception:
             key = None
-    remember(row, source, key, pass_id)
+    remember(row, source, key, pass_id, expectation_id)
     return chosen.get("targetLibrarySectionID")
 
 
 def remember(row, source: str, subscription: str | None = None,
-             pass_id: int | None = None) -> None:
+             pass_id: int | None = None, expectation_id: int | None = None) -> None:
     """Record that this airing was scheduled by us, and by what.
 
     The pass is recorded by uid as well as by id, because `id` is an
     autoincrement and means nothing on another machine.
+
+    `expectation_id` marks a stand-in booking, and is written as given rather
+    than kept: booking the same airing again for its own sake, once the guide
+    names it, is what ends the stand-in.
     """
     with db.tx() as c:
         c.execute(
             """INSERT INTO our_grabs (airing_id, program_guid, title, channel_vcn,
                                       begins_at, source, subscription, pass_id,
-                                      pass_uid, created_at)
+                                      pass_uid, expectation_id, created_at)
                VALUES (?,?,?,?,?,?,?,?,
-                       (SELECT uid FROM passes WHERE id = ?),?)
+                       (SELECT uid FROM passes WHERE id = ?),?,?)
                ON CONFLICT(airing_id) DO UPDATE SET source=excluded.source,
                  subscription=COALESCE(excluded.subscription, our_grabs.subscription),
                  pass_id=COALESCE(excluded.pass_id, our_grabs.pass_id),
                  pass_uid=COALESCE(excluded.pass_uid, our_grabs.pass_uid),
+                 expectation_id=excluded.expectation_id,
                  created_at=excluded.created_at""",
             (row["id"], row["program_guid"], row["title"], row["channel_vcn"],
-             row["begins_at"], source, subscription, pass_id, pass_id, _now()))
+             row["begins_at"], source, subscription, pass_id, pass_id,
+             expectation_id, _now()))
 
 
 def forget(airing_id) -> None:
     """Drop our record of an airing, after the recording has been cancelled."""
     with db.tx() as c:
         c.execute("DELETE FROM our_grabs WHERE airing_id = ?", (airing_id,))
+
+
+def choose_stand_in(item, networks, channels) -> tuple[dict | None, str]:
+    """The generic slot to book for a game the guide has not named, and why.
+
+    Returns (row, reason), or (None, reason) when no slot can be trusted. Two
+    generic slots at the same kickoff on different channels are two different
+    games, and nothing yet says which is this one, so neither is booked. The
+    live broadcast wins over a repeat, as it does for a named game.
+    """
+    rows = [r for r in expectations.stand_in_candidates(item)
+            if in_sources(r, networks, channels)
+            and r["begins_at"] > _now() - LEAD_SECONDS]
+    if not rows:
+        return None, "no generic slot in the guide at that kickoff"
+    live = [r for r in rows if r["premiere"]] or rows
+    where = sorted({r["channel_vcn"] for r in live})
+    if len(where) > 1:
+        return None, (f"the guide has generic slots on {', '.join(where)} at that "
+                      f"kickoff, and nothing says which one is this game")
+    pick = min(live, key=lambda r: r["begins_at"])
+    return pick, (f"stand-in for {item['subtitle'] or item['title']}: the guide "
+                  f"lists this slot as \"{pick['title']}\" and has not named "
+                  f"the teams yet")
+
+
+def stand_in_held(item, pick, read_at) -> str | None:
+    """Why this stand-in needs no booking, or None.
+
+    Asked of the SLOT, never of the programme. A generic listing is not a
+    name for a game, and a guide that reused one guid for every bare "NFL
+    Football" would otherwise read one booked slot as all of them booked.
+    """
+    mine = db.one(
+        """SELECT 1 FROM our_grabs o
+             LEFT JOIN plex_subscriptions s ON s.key = o.subscription
+            WHERE (o.expectation_id = ? OR o.airing_id = ?)
+              AND (s.key IS NOT NULL OR o.created_at >= ?) LIMIT 1""",
+        (item["id"], pick["id"], read_at))
+    if mine:
+        return "already booked by a pass"
+    hit = db.one(
+        """SELECT status FROM plex_grabs
+            WHERE channel_vcn = ? AND begins_at = ?
+              AND status IN ('scheduled','inprogress','complete') LIMIT 1""",
+        (pick["channel_vcn"], pick["begins_at"]))
+    if hit:
+        return f"Plex already has it ({hit['status']})"
+    return None
 
 
 def rule_label(rule) -> str:
@@ -520,3 +575,53 @@ def _evaluate(rows, plex, dry, results):
                 results.append({"pass": label, "game": pick["title"],
                                 "action": "failed", "reason": msg,
                                 "channel": pick["channel_vcn"], "begins_at": pick["begins_at"]})
+        if p["kind"] == "team":
+            _stand_ins(p, plex, dry, results, read_at, label, networks, channels)
+
+
+def _stand_ins(p, plex, dry, results, read_at, label, networks, channels):
+    """Book the generic slot for each game the guide has not named yet.
+
+    A team pass matches games by their teams, so a game the guide lists as a
+    bare "NFL Football" is invisible to the loop above. The league's schedule
+    says when it kicks off, and `choose_stand_in` finds the slot. Once the
+    guide names the game, `sync.check_bookings` moves the booking onto the
+    named listing, so Plex shows the real title too.
+
+    An ambiguous slot is logged and skipped, never guessed. Only games inside
+    the same thirty days `_future` looks at, so a stand-in is never booked
+    further out than a named game would be.
+    """
+    until = _now() + 30 * 86400
+    for item in expectations.waiting(p["id"]):
+        if not item["expected_at"] or item["expected_at"] > until:
+            continue
+        pick, reason = choose_stand_in(item, networks, channels)
+        if not pick:
+            continue          # the ordinary case: the guide simply is not there yet
+        game = item["subtitle"] or item["title"]
+        blocked = stand_in_held(item, pick, read_at)
+        if blocked:
+            results.append({"pass": label, "game": game, "action": "skipped",
+                            "reason": blocked, "channel": pick["channel_vcn"],
+                            "begins_at": pick["begins_at"]})
+            continue
+        if dry:
+            _log(p["id"], pick, "would schedule", reason, True)
+            results.append({"pass": label, "game": game, "action": "would schedule",
+                            "reason": reason, "channel": pick["channel_vcn"],
+                            "begins_at": pick["begins_at"]})
+            continue
+        try:
+            _schedule(plex, pick, None, "pass", prefs=dict(db.unjs(p["prefs"]) or {}),
+                      pass_id=p["id"], expectation_id=item["id"])
+            _log(p["id"], pick, "scheduled", reason, False)
+            results.append({"pass": label, "game": game, "action": "scheduled",
+                            "reason": reason, "channel": pick["channel_vcn"],
+                            "begins_at": pick["begins_at"]})
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            _log(p["id"], pick, "failed", msg, False)
+            results.append({"pass": label, "game": game, "action": "failed",
+                            "reason": msg, "channel": pick["channel_vcn"],
+                            "begins_at": pick["begins_at"]})

@@ -119,13 +119,29 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
                 : '<span style="width:44px;flex:0 0 44px"></span>';
     h += '<div class="agtitle">';
     if (r.parent) h += '<span class="dim tiny">' + esc(r.parent) + '</span>';
-    h += '<b>' + esc(r.title) + '</b></div>';
+    h += '<b>' + esc(r.title) + '</b>';
+    // A stand-in: the slot the guide still lists under a generic name. The
+    // name Plex shows stays on the row, so "NFL Football" in Plex's own
+    // recordings list can be told apart from any other game.
+    if (r.stand_in_note) {
+      h += '<span class="agalias dim tiny">In the Plex guide as &ldquo;' +
+           esc(r.listed_as) + '&rdquo;' + infoTip(r.stand_in_note) + '</span>';
+    }
+    h += '</div>';
     h += '<div class="agwhy">' + (KIND_ICON[r.kind] || '') +
          '<span>' + esc(r.reason) + '</span>' +
          '<span class="pill ' + (r.status === 'complete' ? 'ok'
            : r.status === 'inprogress' ? 'live' : '') + '">' +
          esc(r.status === 'inprogress' ? 'recording' : r.status) + '</span></div>';
     return h + '</div>';
+  }
+
+  // The note behind a small "i". Hover shows it, and so does focus, which is
+  // what a tap gives it on a phone, where there is no hover at all.
+  function infoTip(text) {
+    return '<span class="infotip" tabindex="0" role="button" aria-label="' +
+           esc(text) + '"><i aria-hidden="true">i</i>' +
+           '<span class="tipbody" role="tooltip">' + esc(text) + '</span></span>';
   }
 
   function failRow(r) {
@@ -187,6 +203,9 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
   // Clicking a scheduled programme opens the same panel the guide opens, which
   // is where the reason and the airings live.
   list.addEventListener('click', function (e) {
+    // The info icon explains the row. Opening the panel under it would hide
+    // the very note it was tapped for.
+    if (e.target.closest('.infotip')) return;
     var r = e.target.closest('.agrow');
     if (!r || !r.dataset.aid) return;
     // A failed booking opens its own panel. The programme panel cannot answer
@@ -298,7 +317,8 @@ var esc = CE.esc, fmtTime = CE.fmtTime, fmtDay = CE.fmtDay, KIND_ICON = CE.KIND_
             }
             h += '<div class="calitem' + (r.who === 'ce' ? ' ce' : '') +
                  '" data-aid="' + esc(r.airing_id || '') + '" title="' +
-                 esc(fmtTime(r.b) + '  ' + r.title + '  (' + r.reason + ')') + '">' +
+                 esc(fmtTime(r.b) + '  ' + r.title + '  (' + r.reason + ')' +
+                     (r.stand_in_note ? '\n\n' + r.stand_in_note : '')) + '">' +
                  '<span>' + esc(r.title) + '</span></div>';
           });
           if (items.length > 3) {

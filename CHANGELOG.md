@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.5.3 - 2026-09-27
+
+### Fixed
+
+- **A game the guide lists as a bare "NFL Football" is now recorded.** A team
+  pass matched games only by the teams a programme carries. Gracenote lists a
+  regional game with no teams until the broadcaster assigns it, so nothing
+  matched and nothing was booked. A game that stayed generic until kickoff
+  would never have recorded.
+
+  Seen on 2026-09-27: both CBS slots for Sunday Oct 4 were still generic a
+  week out, one of them the Chiefs at the Raiders at 3:25 PM. The Dolphins
+  game the week before had carried its teams eleven days out.
+
+  The league's schedule already gives the kickoff. A generic slot of the same
+  league within 15 minutes of it is now booked as a stand-in. Only a kickoff
+  with a time qualifies, the pass's source limit applies, a network the
+  schedule names must match, and two generic slots at one kickoff book
+  neither, because nothing says which is the game.
+
+- **Once the guide names the game, the booking moves onto the named
+  listing.** Plex then shows the real title, teams and summary. If the game is
+  named in the same slot while Plex is recording it and kickoff is too close
+  to book again, Plex's recording is kept and only CouchElephant's record
+  moves.
+
+### Changed
+
+- **The schedule shows the matchup on a stand-in, with the guide's name under
+  it.** An info icon explains why Plex lists it as "NFL Football". Hover
+  shows the note, and a tap shows it on a phone. A booked game no longer also
+  sits under "Waiting for the Plex guide data".
+- **The schedule shows the guide's current name for anything CouchElephant
+  booked,** rather than the name Plex stored when the booking was made.
+
 ## 1.5.2 - 2026-09-16
 
 ### Fixed

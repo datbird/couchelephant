@@ -474,6 +474,11 @@ MIGRATIONS = [
     # Destinations gained a uid for the same reason passes have one: an export
     # taken here has to name the same row when it is restored somewhere else.
     ("destinations", "uid", "TEXT"),
+    # A STAND-IN booking: a generic "NFL Football" slot booked because the
+    # league's schedule puts this game there before the guide names it. The
+    # expectation carries the matchup, which is what the schedule shows in
+    # place of the guide's generic title. See `expectations.stand_in`.
+    ("our_grabs", "expectation_id", "INTEGER"),
 ]
 
 

@@ -121,6 +121,14 @@ draws all of them: a dated fixture in its own day, and anything known only to a
 month in a band under the grid, because a calendar cell is a day and a month is
 not.
 
+A game the guide carries without naming it is booked anyway. Broadcasters
+often list a regional game as a bare "NFL Football" until the week of the
+game. When the league's schedule puts your team's kickoff in exactly that
+slot, CouchElephant books the slot as a stand-in. The schedule shows the
+matchup, the guide's generic name under it, and an info icon that explains the
+difference. When the guide names the game, the recording moves onto the named
+listing, so Plex shows the real title too.
+
 ### Adding a schedule
 
 Follow a team, a programme, or a set of conditions. Leave the source limit

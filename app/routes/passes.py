@@ -61,8 +61,10 @@ def _why_map():
     out = {}
     for r in db.query(
             """SELECT o.channel_vcn, o.begins_at, o.source, o.airing_id, o.pass_id,
-                      p.kind, p.team_name, p.series_title, p.label, p.filter
-               FROM our_grabs o LEFT JOIN passes p ON p.id = o.pass_id"""):
+                      p.kind, p.team_name, p.series_title, p.label, p.filter,
+                      e.subtitle AS stand_in, e.title AS stand_in_team
+               FROM our_grabs o LEFT JOIN passes p ON p.id = o.pass_id
+               LEFT JOIN expectations e ON e.id = o.expectation_id"""):
         name = passes.rule_label(r)
         if r["pass_id"] and name:
             out[(r["channel_vcn"], r["begins_at"])] = {
@@ -71,6 +73,9 @@ def _why_map():
                 "reason": f"the {name} pass",
                 "pass_id": r["pass_id"],
                 "airing_id": r["airing_id"],
+                # The matchup the league's schedule gave, for a slot the guide
+                # still lists under a generic name. See `_stand_in_note`.
+                "stand_in": r["stand_in"] or r["stand_in_team"],
             }
         else:
             out[(r["channel_vcn"], r["begins_at"])] = {
@@ -240,6 +245,7 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
 
     out = []
     for g in db.query(sql, tuple(args)):
+        g = dict(g)
         if g["status"] == "failed":
             name = pass_names.get(g["fail_pass_id"])
             out.append({
@@ -257,9 +263,11 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
             })
             continue
         w = why.get((g["channel_vcn"], g["begins_at"]))
+        stand_in = None
         if w:
             who, kind, reason = w["who"], w["kind"], w["reason"]
             pass_id, airing_id = w["pass_id"], w["airing_id"]
+            stand_in = w.get("stand_in")
         else:
             who, pass_id, airing_id = "plex", None, None
             title = subs.get(g["subscription"] or "")
@@ -270,14 +278,51 @@ def _schedule_rows(limit=None, offset=0, start=None, end=None):
         # the same panel the guide opens.
         if g["begins_at"]:
             airing_id = _live_airing_id(airing_id, g["channel_vcn"], g["begins_at"])
-        out.append({
-            "id": g["id"], "title": g["title"], "parent": g["parent_title"] or "",
+        title, parent = g["title"], g["parent_title"] or ""
+        if who == "ce" and airing_id:
+            # THE GUIDE AS IT STANDS, not the title Plex froze into the grab.
+            # A booking made against a generic "NFL Football" slot keeps that
+            # name in Plex until it is booked again, and one too close to
+            # kickoff to book again keeps it for good. The guide may have
+            # named the game since, and the guide's name is the true one.
+            live = db.one("""SELECT p.title, p.grandparent_title, p.teams
+                               FROM airings a JOIN programs p ON p.guid = a.program_guid
+                              WHERE a.id = ?""", (airing_id,))
+            if live and live["teams"] and live["teams"] != "[]":
+                title, parent = live["title"], live["grandparent_title"] or parent
+                stand_in = None
+        row = {
+            "id": g["id"], "title": title, "parent": parent,
             "vcn": g["channel_vcn"] or "", "logo": bool(logos.get(g["channel_vcn"])),
             "b": g["begins_at"], "e": g["ends_at"], "status": g["status"],
             "who": who, "kind": kind, "reason": reason,
             "pass_id": pass_id, "airing_id": airing_id,
-        })
+        }
+        if stand_in:
+            row.update(_stand_in_note(stand_in, title))
+        out.append(row)
     return out
+
+
+def _stand_in_note(matchup: str, listed_as: str) -> dict:
+    """What a stand-in row says, and the note behind its info icon.
+
+    The matchup is the title, because that is the game being recorded. The
+    guide's generic name stays on the row, because it is what Plex shows in
+    its own recordings list, and a person who finds "NFL Football" there
+    should be able to tell it is this game.
+    """
+    return {
+        "title": matchup,
+        "listed_as": listed_as or "",
+        "stand_in_note": (
+            f"The Plex guide lists this slot as \"{listed_as}\" because the "
+            f"broadcaster has not named the teams yet. The league's schedule "
+            f"puts {matchup} here, so CouchElephant booked the slot. Plex shows "
+            f"the generic name until its guide catches up. When the guide names "
+            f"the game, CouchElephant moves the recording onto it, and Plex "
+            f"shows the real title."),
+    }
 
 
 @router.get("/api/schedule")
@@ -404,9 +449,13 @@ def api_expectations():
     screen that nobody published.
     """
     tz = db.get_setting("timezone") or "UTC"
+    # A game a stand-in booking already holds is not waiting. It is booked,
+    # and the schedule shows it; listing it here too would draw it twice.
+    held = {r["expectation_id"] for r in db.query(
+        "SELECT expectation_id FROM our_grabs WHERE expectation_id IS NOT NULL")}
     return JSONResponse({"ok": True, "rows": [
         dict(e, when=expectations.render_when(e["expected_at"], e["precision"], tz))
-        for e in expectations.waiting()]})
+        for e in expectations.waiting() if e["id"] not in held]})
 
 
 @router.get("/api/announced")

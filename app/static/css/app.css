@@ -556,6 +556,21 @@ dl.kv dd{margin:0}
 .agrow .agwhy{margin-left:auto;text-align:right;font-size:12px;color:var(--dim);
   display:flex;align-items:center;gap:8px;flex:0 0 auto}
 .agend{padding:20px;text-align:center;color:var(--dim);font-size:13px}
+/* A stand-in booking: the guide's generic name under the matchup, and the
+   note that says why they differ. */
+.agrow .agalias{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.infotip{position:relative;display:inline-flex;align-items:center;cursor:help;
+  outline:none}
+.infotip > i{display:inline-flex;align-items:center;justify-content:center;
+  width:15px;height:15px;border-radius:50%;font:italic 600 10px/1 Georgia,serif;
+  color:var(--info-fg);background:var(--info-soft);border:1px solid var(--info-bd)}
+.infotip:focus-visible > i{box-shadow:0 0 0 2px var(--accent-ring)}
+.infotip .tipbody{display:none;position:absolute;left:0;top:calc(100% + 6px);
+  z-index:5;width:min(320px,80vw);padding:10px 12px;border-radius:8px;
+  white-space:normal;font-size:12px;line-height:1.45;color:var(--text);
+  background:var(--panel2);border:1px solid var(--line);
+  box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.infotip:hover .tipbody,.infotip:focus .tipbody{display:block}
 /* A booking Plex refused. Loud on purpose: this row is the only warning that
    something you asked for will not record, and it used to be no row at all.
    The bar and the word both say it, so colour alone never carries it. */

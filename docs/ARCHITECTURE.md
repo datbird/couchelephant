@@ -401,6 +401,16 @@ optional key). They return `Announcement` records and never book anything.
 reports a date the guide reached past without a match, and `render_when` shows
 a date at exactly the precision the source gave it.
 
+`stand_in_candidates` covers the one case `promote` cannot: a game the guide
+carries under a generic name, like a regional "NFL Football" with no teams.
+When a kickoff has a time and a generic slot of the same league sits within 15
+minutes of it, `passes.choose_stand_in` books that slot, marking the booking
+with `our_grabs.expectation_id`. Two such slots at one kickoff are two games,
+so neither is booked. `sync._settle_stand_in` moves the booking onto the named
+listing once `promote` binds the game, so Plex gets the real title. The one
+exception is a slot Plex is already recording too close to kickoff to book
+again: only our record is re-pointed there.
+
 The `expectations` table is deliberately separate from `programs` and
 `airings`. Those are read by every query in the app, and invented rows in them
 would mean auditing all of those queries, forever, for a flag they could forget.
