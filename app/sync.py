@@ -424,6 +424,17 @@ def resolve_team_passes() -> int:
     return done
 
 
+def _next_game_after_guide(pass_id: int, now: int, ends: int) -> bool:
+    """True when the pass's next known game is past the end of the guide.
+
+    False with no season known, so a pass that has nothing to go on still
+    warns exactly as before.
+    """
+    upcoming = [e["expected_at"] for e in expectations.waiting(pass_id)
+                if e["expected_at"] and e["expected_at"] > now]
+    return bool(upcoming) and min(upcoming) >= ends
+
+
 def check_team_passes() -> int:
     """Say so when a team pass can find no game at all.
 
@@ -436,16 +447,25 @@ def check_team_passes() -> int:
     A team genuinely out of season will trip this too, which is the right
     trade: being told your pass is idle is cheap, and finding out in October
     that it has been idle since August is not.
+
+    Except between games. A pass that knows its season and whose next game is
+    past the end of the guide is not idle, it is waiting for a bye week to go
+    by. Warning then fired every bye week, in season, about a pass that was
+    working. A game the season says falls INSIDE the guide still warns.
     """
+    now = _now()
+    ends = _int_or_none(db.get_setting("guide_ends_at"))
     idle = []
     for p in db.query("SELECT * FROM passes WHERE kind = 'team' AND enabled = 1"):
         # One row answers "is there anything at all". Without the limit this
         # hydrates every match in the thirty-day window, running the team
         # lookup over the whole guide, to look at the length of the list.
-        if not passes.candidate_airings(p["team_id"], team_name=p["team_name"],
-                                        limit=1):
-            idle.append(p["team_name"] or f"pass {p['id']}")
-    now = _now()
+        if passes.candidate_airings(p["team_id"], team_name=p["team_name"],
+                                    limit=1):
+            continue
+        if ends and _next_game_after_guide(p["id"], now, ends):
+            continue
+        idle.append(p["team_name"] or f"pass {p['id']}")
     raised = []
     if idle:
         names = ", ".join(sorted(idle))

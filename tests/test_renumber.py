@@ -141,6 +141,47 @@ def test_the_notice_clears_once_the_team_is_back(clean_db):
     assert health.TEAM_PASS_UNMATCHED not in {n["code"] for n in health.open_notices()}
 
 
+def _season_game(pass_id, at, source_id="e1"):
+    with db.tx() as c:
+        c.execute("INSERT INTO expectations (pass_id, source, source_id, title, "
+                  "expected_at, precision, updated_at) "
+                  "VALUES (?, 'thesportsdb', ?, 'Kansas City Chiefs', ?, 'time', ?)",
+                  (pass_id, source_id, at, int(time.time())))
+
+
+def test_a_bye_week_past_the_guide_is_not_a_broken_pass(clean_db):
+    """The live false alarm, 2026-10-05. The Chiefs played on the 4th, had a
+    bye on the 11th, and the guide ended the night before the 18th. The pass
+    was fine and the season said so."""
+    now = int(time.time())
+    p = _team_pass(236)
+    db.set_setting("guide_ends_at", str(now + 12 * 86400))
+    _season_game(p["id"], now + 13 * 86400)
+    sync.check_team_passes()
+    assert health.TEAM_PASS_UNMATCHED not in {n["code"] for n in health.open_notices()}
+
+
+def test_a_game_the_season_puts_inside_the_guide_still_warns(clean_db):
+    """The season says there is a game the guide should already carry. Not
+    finding it is exactly what a broken pass looks like."""
+    now = int(time.time())
+    p = _team_pass(236)
+    db.set_setting("guide_ends_at", str(now + 12 * 86400))
+    _season_game(p["id"], now + 3 * 86400)
+    _season_game(p["id"], now + 13 * 86400, source_id="e2")
+    sync.check_team_passes()
+    assert health.TEAM_PASS_UNMATCHED in {n["code"] for n in health.open_notices()}
+
+
+def test_a_season_already_played_does_not_excuse_an_idle_pass(clean_db):
+    now = int(time.time())
+    p = _team_pass(236)
+    db.set_setting("guide_ends_at", str(now + 12 * 86400))
+    _season_game(p["id"], now - 3 * 86400)
+    sync.check_team_passes()
+    assert health.TEAM_PASS_UNMATCHED in {n["code"] for n in health.open_notices()}
+
+
 def test_the_plex_sweep_does_not_close_the_team_finding(clean_db):
     """Two sweeps run each sync. The Plex one used to resolve every notice it
     was not handed, so it closed the team finding, the team sweep reopened it,

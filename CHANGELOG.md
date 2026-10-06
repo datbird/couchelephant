@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.4 - 2026-10-05
+
+### Fixed
+
+- **A bye week no longer warns that a team pass has stopped working.** The
+  "A team you follow has no games in the guide" notice fired whenever nothing
+  in the guide matched the team. That is true every week the team does not
+  play inside the guide's reach, so it fired in season about a pass that was
+  fine.
+
+  Seen on 2026-10-05: the Chiefs played Oct 4, had a bye Oct 11, and the guide
+  ended the night before their Oct 18 game.
+
+  A team pass that knows its season now stays quiet while its next game is
+  past the end of the guide. A pass with no season known warns as before, and
+  so does one whose season puts a game inside the guide that nothing matches.
+
 ## 1.5.3 - 2026-09-27
 
 ### Fixed
